@@ -412,10 +412,7 @@ impl DocumentStore {
         let key = key.to_string();
         self.snapshot_query(move |db| {
             warm_file_refs_parallel(db, ws);
-            crate::db::refs::symbol_refs(db, ws, key.clone())
-                .0
-                .as_ref()
-                .clone()
+            crate::db::refs::symbol_refs(db, ws, key.clone()).0.to_vec()
         })
     }
 

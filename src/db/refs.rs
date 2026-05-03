@@ -28,7 +28,7 @@ pub struct FileRefRecord {
 }
 
 #[derive(Clone)]
-pub struct FileRefsArc(pub Arc<Vec<FileRefRecord>>);
+pub struct FileRefsArc(pub Arc<[FileRefRecord]>);
 
 impl FileRefsArc {
     pub fn get(&self) -> &[FileRefRecord] {
@@ -50,7 +50,7 @@ unsafe impl Update for FileRefsArc {
     }
 }
 
-type SymbolRefsInner = Arc<Vec<(Arc<str>, u32, u16, u16)>>;
+type SymbolRefsInner = Arc<[(Arc<str>, u32, u16, u16)]>;
 
 #[derive(Clone)]
 pub struct SymbolRefsArc(pub SymbolRefsInner);
@@ -119,7 +119,7 @@ pub fn file_refs(db: &dyn LspDatabase, ws: Workspace, file: SourceFile) -> FileR
             })
         })
         .collect();
-    FileRefsArc(Arc::new(records))
+    FileRefsArc(Arc::from(records))
 }
 
 /// Aggregate every file's `file_refs` filtered by `key` into a flat
@@ -128,7 +128,7 @@ pub fn file_refs(db: &dyn LspDatabase, ws: Workspace, file: SourceFile) -> FileR
 #[salsa::tracked(no_eq)]
 pub fn symbol_refs(db: &dyn LspDatabase, ws: Workspace, key: String) -> SymbolRefsArc {
     let files = ws.files(db);
-    let mut out: Vec<(Arc<str>, u32, u16, u16)> = Vec::new();
+    let mut out: Vec<(Arc<str>, u32, u16, u16)> = Vec::with_capacity(files.len());
     for sf in files.iter() {
         let refs = file_refs(db, ws, *sf);
         let uri = sf.uri(db);
@@ -138,7 +138,7 @@ pub fn symbol_refs(db: &dyn LspDatabase, ws: Workspace, key: String) -> SymbolRe
             }
         }
     }
-    SymbolRefsArc(Arc::new(out))
+    SymbolRefsArc(Arc::from(out))
 }
 
 #[cfg(test)]
