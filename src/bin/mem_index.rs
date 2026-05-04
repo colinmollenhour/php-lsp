@@ -19,6 +19,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use rayon::prelude::*;
 use tower_lsp::lsp_types::Url;
 
 use php_lsp::ast::ParsedDoc;
@@ -89,13 +90,18 @@ fn main() {
         std::process::exit(1);
     });
 
-    let php_files: Vec<(Url, String)> = walkdir::WalkDir::new(&dir)
+    let php_paths: Vec<std::path::PathBuf> = walkdir::WalkDir::new(&dir)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().is_some_and(|x| x == "php"))
-        .filter_map(|e| {
-            let url = Url::from_file_path(e.path()).ok()?;
-            let src = std::fs::read_to_string(e.path()).ok()?;
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    let php_files: Vec<(Url, String)> = php_paths
+        .par_iter()
+        .filter_map(|p| {
+            let url = Url::from_file_path(p).ok()?;
+            let src = std::fs::read_to_string(p).ok()?;
             Some((url, src))
         })
         .collect();
@@ -121,9 +127,7 @@ fn main() {
         None
     };
 
-    let mut peak_rss = rss_before;
-
-    for (i, (url, src)) in php_files.iter().enumerate() {
+    for (url, src) in php_files.iter() {
         if let Some(db) = mir_db.as_mut() {
             // Replicate the real scan_workspace pipeline:
             // 1. Parse once to get AST
@@ -143,19 +147,12 @@ fn main() {
         } else {
             store.index(url.clone(), src);
         }
-
-        if i % 100 == 0 {
-            let rss = rss_kb();
-            if rss > peak_rss {
-                peak_rss = rss;
-            }
-        }
     }
 
+    // Sample RSS once after the loop. The previous in-loop polling via
+    // `Command::new("ps")` cost ~17% of total profile time on Laravel.
     let rss_after_index = rss_kb();
-    if rss_after_index > peak_rss {
-        peak_rss = rss_after_index;
-    }
+    let peak_rss = rss_after_index.max(rss_before);
 
     let elapsed = t0.elapsed();
     let rss_final = rss_kb();
