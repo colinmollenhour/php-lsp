@@ -698,7 +698,6 @@ async fn circular_inheritance_three_class_cycle() {
 /// Currently fails — mir does not index symbols from `stubs/Core/Core.php`
 /// (`function_exists`, `restore_error_handler`, etc.). Tracked upstream.
 #[tokio::test]
-#[ignore = "mir bug: Core/Core.php stub symbols not indexed"]
 async fn builtin_restore_error_handler_is_known() {
     let mut s = TestServer::new().await;
     s.check_diagnostics(
@@ -719,7 +718,6 @@ function _wrap(): void {
 /// polyfill exists in the workspace. Currently fails because `function_exists`
 /// itself is reported undefined (same Core stub not loaded).
 #[tokio::test]
-#[ignore = "mir bug: Core/Core.php stub symbols not indexed"]
 async fn user_polyfill_does_not_break_builtin_restore_error_handler() {
     let mut s = TestServer::new().await;
     s.check_diagnostics(
@@ -744,7 +742,6 @@ function _wrap(): void {
 /// stub-ingest path is last-write-wins, the project's body silently replaces
 /// mir's stub. The call site should still resolve.
 #[tokio::test]
-#[ignore = "mir bug: relies on user-land definition because Core stub is not loaded"]
 async fn user_unconditional_redefinition_does_not_break_call() {
     let mut s = TestServer::new().await;
     s.check_diagnostics(
