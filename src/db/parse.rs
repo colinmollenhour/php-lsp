@@ -16,7 +16,7 @@ use salsa::{Database, Update};
 
 use crate::ast::ParsedDoc;
 use crate::db::input::SourceFile;
-use crate::diagnostics::parse_document;
+use crate::diagnostics::parse_document_no_diags;
 
 /// Opaque handle to a parsed document. Cheap to clone (refcount bump); never
 /// compared structurally. See module docs for the `Update` contract.
@@ -62,7 +62,7 @@ unsafe impl Update for ParsedArc {
 #[salsa::tracked(no_eq, lru = 2048)]
 pub fn parsed_doc(db: &dyn Database, file: SourceFile) -> ParsedArc {
     let text = file.text(db);
-    let (doc, _diags) = parse_document(&text);
+    let doc = parse_document_no_diags(&text);
     ParsedArc(Arc::new(doc))
 }
 
@@ -70,9 +70,7 @@ pub fn parsed_doc(db: &dyn Database, file: SourceFile) -> ParsedArc {
 /// callers that only need the diagnostic count don't clone the parsed AST.
 #[salsa::tracked]
 pub fn parse_error_count(db: &dyn Database, file: SourceFile) -> usize {
-    let text = file.text(db);
-    let (_doc, diags) = parse_document(&text);
-    diags.len()
+    parsed_doc(db, file).get().errors.len()
 }
 
 #[cfg(test)]

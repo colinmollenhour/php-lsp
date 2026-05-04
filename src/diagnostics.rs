@@ -2,12 +2,22 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 use crate::ast::ParsedDoc;
 
-/// Parse `source` and return the (owned) `ParsedDoc` plus any parse diagnostics.
-pub fn parse_document(source: &str) -> (ParsedDoc, Vec<Diagnostic>) {
-    let doc = ParsedDoc::parse(source.to_string());
+/// Parse `source` without converting parse errors into LSP `Diagnostic`s.
+///
+/// Hot-path callers (workspace scan, the salsa `parsed_doc` query) discard
+/// diagnostics — using this variant skips an O(errors) Vec allocation per
+/// file. Callers that actually publish diagnostics call [`parse_document`]
+/// instead.
+pub fn parse_document_no_diags(source: &str) -> ParsedDoc {
+    ParsedDoc::parse(source.to_string())
+}
+
+/// Build LSP diagnostics from an already-parsed document. Separated from
+/// [`parse_document_no_diags`] so the workspace-scan path can skip the
+/// allocation entirely.
+pub fn diagnostics_from_doc(doc: &ParsedDoc) -> Vec<Diagnostic> {
     let sv = doc.view();
-    let diagnostics = doc
-        .errors
+    doc.errors
         .iter()
         .map(|e| {
             let span = e.span();
@@ -36,7 +46,13 @@ pub fn parse_document(source: &str) -> (ParsedDoc, Vec<Diagnostic>) {
                 ..Default::default()
             }
         })
-        .collect();
+        .collect()
+}
+
+/// Parse `source` and return the (owned) `ParsedDoc` plus any parse diagnostics.
+pub fn parse_document(source: &str) -> (ParsedDoc, Vec<Diagnostic>) {
+    let doc = parse_document_no_diags(source);
+    let diagnostics = diagnostics_from_doc(&doc);
     (doc, diagnostics)
 }
 

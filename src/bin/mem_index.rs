@@ -143,7 +143,7 @@ fn main() {
             );
             let (slice, _issues) = collector.collect_slice(doc.program());
             db.ingest_stub_slice(&slice);
-            store.index_from_doc(url.clone(), &doc, vec![]);
+            store.index_from_doc(url.clone(), &doc);
         } else {
             store.index(url.clone(), src);
         }
