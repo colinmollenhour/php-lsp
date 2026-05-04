@@ -30,7 +30,7 @@ use crate::declaration::{goto_declaration, goto_declaration_from_index};
 use crate::definition::{
     find_declaration_range, find_in_indexes, find_method_in_class_hierarchy, goto_definition,
 };
-use crate::diagnostics::parse_document;
+use crate::diagnostics::{parse_document, parse_document_no_diags};
 use crate::document_highlight::document_highlights;
 use crate::document_link::document_links;
 use crate::document_store::DocumentStore;
@@ -508,9 +508,9 @@ impl Backend {
     }
 
     /// Variant of [`index_if_not_open`] that reuses an already-parsed doc.
-    fn index_from_doc_if_not_open(&self, uri: Url, doc: &ParsedDoc, diags: Vec<Diagnostic>) {
+    fn index_from_doc_if_not_open(&self, uri: Url, doc: &ParsedDoc) {
         if !self.open_files.contains(&uri) {
-            self.docs.index_from_doc(uri, doc, diags);
+            self.docs.index_from_doc(uri, doc);
         }
     }
 
@@ -1317,8 +1317,8 @@ impl LanguageServer for Backend {
                         // the SourceFile input. On the next codebase() call,
                         // salsa re-runs file_definitions for this file and the
                         // aggregator re-folds — no manual remove/collect/finalize.
-                        let (doc, diags) = parse_document(&text);
-                        self.index_from_doc_if_not_open(change.uri.clone(), &doc, diags);
+                        let doc = parse_document_no_diags(&text);
+                        self.index_from_doc_if_not_open(change.uri.clone(), &doc);
                     }
                 }
                 FileChangeType::DELETED => {
@@ -3500,8 +3500,8 @@ async fn scan_workspace(
                 }
 
                 // Cache miss: normal parse + mirror.
-                let (doc, diags) = parse_document(&text);
-                docs.index_from_doc(uri.clone(), &doc, diags);
+                let doc = parse_document_no_diags(&text);
+                docs.index_from_doc(uri.clone(), &doc);
                 count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 // K2b write path: force `file_definitions` and persist

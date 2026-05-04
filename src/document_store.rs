@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use dashmap::DashMap;
 use salsa::Setter;
-use tower_lsp::lsp_types::{Diagnostic, SemanticToken, Url};
+use tower_lsp::lsp_types::{SemanticToken, Url};
 
 use crate::ast::ParsedDoc;
 use crate::autoload::Psr4Map;
@@ -260,11 +260,7 @@ impl DocumentStore {
     ///
     /// Prefer this over [`index`] when the caller already has a `ParsedDoc` (e.g.
     /// after running `DefinitionCollector` during workspace scan).
-    ///
-    /// `_diagnostics` is accepted for call-site compatibility; parse
-    /// diagnostics for background-indexed files are never consulted
-    /// (callers gate on `get_doc_salsa` returning `Some`).
-    pub fn index_from_doc(&self, uri: Url, doc: &ParsedDoc, _diagnostics: Vec<Diagnostic>) {
+    pub fn index_from_doc(&self, uri: Url, doc: &ParsedDoc) {
         self.mirror_text(&uri, doc.source());
     }
 
@@ -837,11 +833,11 @@ mod tests {
         store.index(u1.clone(), "<?php\nclass Bg1 {}");
         assert_eq!(salsa_index_names(&store, &u1), vec!["Bg1".to_string()]);
 
-        // `index_from_doc(url, &doc, diags)` path (workspace-scan Phase 2).
+        // `index_from_doc(url, &doc)` path (workspace-scan Phase 2).
         let u2 = uri("/bg2.php");
-        let (doc, diags) =
-            crate::diagnostics::parse_document("<?php\nclass Bg2 {}\nfunction f() {}");
-        store.index_from_doc(u2.clone(), &doc, diags);
+        let doc =
+            crate::diagnostics::parse_document_no_diags("<?php\nclass Bg2 {}\nfunction f() {}");
+        store.index_from_doc(u2.clone(), &doc);
         assert_eq!(
             salsa_index_names(&store, &u2),
             vec!["Bg2".to_string(), "f".to_string()]
