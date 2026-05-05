@@ -13,7 +13,7 @@ use super::render::{
     render_completion, render_document_symbols, render_folding_ranges, render_hover,
     render_inlay_hints, render_inline_value, render_linked_editing_range, render_locations,
     render_moniker, render_prepare_call_hierarchy, render_prepare_rename, render_selection_range,
-    render_signature_help, render_type_hierarchy, render_workspace_symbols,
+    render_semantic_tokens, render_signature_help, render_type_hierarchy, render_workspace_symbols,
 };
 
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
@@ -1513,5 +1513,38 @@ impl TestServer {
         }
         let resp = self.outgoing_calls(item).await;
         render_call_hierarchy(&resp, "to", &self.uri(""))
+    }
+
+    /// Request `textDocument/semanticTokens/full` over the first file in the fixture
+    /// and render the response using the provided legend types. Returns a stable,
+    /// human-readable string suitable for snapshot assertions.
+    /// Pass `legend_types` from `init_response["result"]["capabilities"]["semanticTokensProvider"]["legend"]["tokenTypes"]`.
+    #[track_caller]
+    pub async fn check_semantic_tokens_full(&mut self, src: &str, legend_types: &[&str]) -> String {
+        let opened = self.open_fixture(src).await;
+        let path = opened.fixture.files[0].path.clone();
+        let resp = self.semantic_tokens_full(&path).await;
+        render_semantic_tokens(&resp, legend_types)
+    }
+
+    /// Request `textDocument/semanticTokens/range` over the specified range and render
+    /// the response using the provided legend types. Returns a stable, human-readable
+    /// string suitable for snapshot assertions.
+    #[track_caller]
+    pub async fn check_semantic_tokens_range(
+        &mut self,
+        src: &str,
+        start_line: u32,
+        start_char: u32,
+        end_line: u32,
+        end_char: u32,
+        legend_types: &[&str],
+    ) -> String {
+        let opened = self.open_fixture(src).await;
+        let path = opened.fixture.files[0].path.clone();
+        let resp = self
+            .semantic_tokens_range(&path, start_line, start_char, end_line, end_char)
+            .await;
+        render_semantic_tokens(&resp, legend_types)
     }
 }
