@@ -1,0 +1,30 @@
+#![allow(dead_code, unused_imports)]
+
+#[path = "common/mod.rs"]
+mod common;
+
+pub use common::render::{
+    assert_linked_editing_ranges_share_text, assert_selection_range_invariant,
+};
+pub use common::{
+    TestServer, canonicalize_workspace_edit, lines_of, render_completion, render_document_symbols,
+    render_hover, render_inlay_hints, render_locations, render_semantic_tokens,
+    render_workspace_symbols,
+};
+
+#[path = "workspace/feature_configuration.rs"]
+mod feature_configuration;
+#[path = "workspace/feature_doc_lifecycle.rs"]
+mod feature_doc_lifecycle;
+#[path = "workspace/feature_execute_command.rs"]
+mod feature_execute_command;
+#[path = "workspace/feature_file_ops.rs"]
+mod feature_file_ops;
+#[path = "workspace/feature_incremental.rs"]
+mod feature_incremental;
+#[path = "workspace/feature_server.rs"]
+mod feature_server;
+#[path = "workspace/feature_workspace_folders.rs"]
+mod feature_workspace_folders;
+#[path = "workspace/feature_workspace_scan.rs"]
+mod feature_workspace_scan;

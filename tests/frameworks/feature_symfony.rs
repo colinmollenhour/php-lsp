@@ -1,0 +1,345 @@
+use super::*;
+use expect_test::expect;
+use serde_json::Value;
+use std::collections::HashSet;
+
+fn collect_names(resp: &Value) -> Vec<String> {
+    resp["result"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|it| it["name"].as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// ── Fast tests (no-vendor fixture, run by default) ─────────────────────
+
+mod symbols {
+    use super::*;
+
+    #[tokio::test]
+    async fn workspace_symbols_finds_controller_by_exact_name() {
+        let mut server = TestServer::with_fixture_no_vendor("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let resp = server.workspace_symbols("BlogController").await;
+        assert!(
+            resp["error"].is_null(),
+            "workspace/symbol error: {:?}",
+            resp
+        );
+        let items = resp["result"].as_array().cloned().unwrap_or_default();
+        assert!(
+            !items.is_empty(),
+            "expected at least one symbol for query 'BlogController'"
+        );
+        let found_app_controller = items.iter().any(|it| {
+            it["location"]["uri"]
+                .as_str()
+                .map(|u| u.contains("/src/Controller/") && u.ends_with("BlogController.php"))
+                .unwrap_or(false)
+        });
+        assert!(
+            found_app_controller,
+            "expected BlogController from /src/Controller/; got {items:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_symbols_fuzzy_prefix() {
+        let mut server = TestServer::with_fixture_no_vendor("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let resp = server.workspace_symbols("Blog").await;
+        assert!(resp["error"].is_null());
+        let items = resp["result"].as_array().cloned().unwrap_or_default();
+        let names: HashSet<String> = items
+            .iter()
+            .filter_map(|it| it["name"].as_str().map(|s| s.to_string()))
+            .collect();
+        assert!(names.contains("Blog"), "expected Blog in {names:?}");
+        assert!(names.contains("BlogController"), "expected BlogController");
+    }
+
+    #[tokio::test]
+    async fn document_symbols_lists_blog_controller_methods() {
+        let mut server = TestServer::with_fixture_no_vendor("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let (text, _, _) = server.locate("src/Controller/BlogController.php", "<?php", 0);
+        server
+            .open("src/Controller/BlogController.php", &text)
+            .await;
+
+        let resp = server
+            .document_symbols("src/Controller/BlogController.php")
+            .await;
+        let names = collect_names(&resp);
+        assert!(names.iter().any(|n| n.contains("BlogController")));
+        assert!(names.iter().any(|n| n.contains("index")));
+    }
+}
+
+mod semantic_tokens {
+    use super::*;
+
+    #[tokio::test]
+    async fn semantic_tokens_full_on_blog_controller_is_nonempty_and_well_formed() {
+        let mut server = TestServer::with_fixture_no_vendor("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let (text, _, _) = server.locate("src/Controller/BlogController.php", "<?php", 0);
+        server
+            .open("src/Controller/BlogController.php", &text)
+            .await;
+
+        let resp = server
+            .semantic_tokens_full("src/Controller/BlogController.php")
+            .await;
+        assert!(resp["error"].is_null());
+        assert!(
+            !resp["result"]["data"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .is_empty(),
+            "expected semantic tokens"
+        );
+    }
+}
+
+mod call_hierarchy {
+    use super::*;
+
+    #[tokio::test]
+    async fn incoming_calls_to_post_repository_find_latest() {
+        let mut server = TestServer::with_fixture_no_vendor("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let (text, line, character) =
+            server.locate("src/Repository/PostRepository.php", "findLatest", 0);
+        server
+            .open("src/Repository/PostRepository.php", &text)
+            .await;
+
+        let prep_resp = server
+            .prepare_call_hierarchy("src/Repository/PostRepository.php", line, character)
+            .await;
+        assert!(prep_resp["error"].is_null());
+        let item = prep_resp["result"]
+            .as_array()
+            .and_then(|a| a.first().cloned())
+            .unwrap_or_default();
+
+        let resp = server.incoming_calls(item).await;
+        assert!(resp["error"].is_null());
+        let callers = resp["result"].as_array().cloned().unwrap_or_default();
+        assert!(!callers.is_empty(), "expected at least one caller");
+    }
+}
+
+// ── Slow tests (#[ignore], full fixture) ─────────────────────────────
+
+mod navigation {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn goto_definition_parameter_type_in_vendor() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Entity/Post.php";
+        let (text, line, ch) = server.locate(path, "User $author", 5);
+        server.open(path, &text).await;
+
+        let resp = server.definition(path, line, ch).await;
+        assert!(resp["error"].is_null());
+        assert!(!resp["result"].is_null());
+    }
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn goto_definition_app_class_from_use_import() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Repository/PostRepository.php";
+        let (text, line, ch) = server.locate(path, "use App\\Entity\\Post;", 9);
+        server.open(path, &text).await;
+
+        let resp = server.definition(path, line, ch).await;
+        assert!(resp["error"].is_null());
+        assert!(!resp["result"].is_null());
+    }
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn goto_definition_inherited_method_this_render() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Controller/BlogController.php";
+        let (text, line, ch) = server.locate(path, "$this->render", 8);
+        server.open(path, &text).await;
+
+        let resp = server.definition(path, line, ch).await;
+        assert!(resp["error"].is_null());
+    }
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn goto_definition_attribute_class_route() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Controller/BlogController.php";
+        let (text, line, ch) = server.locate(path, "Route", 0);
+        server.open(path, &text).await;
+
+        let resp = server.definition(path, line, ch).await;
+        assert!(resp["error"].is_null());
+    }
+}
+
+mod hover {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn hover_on_class_in_extends_clause() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Controller/BlogController.php";
+        let (text, line, ch) = server.locate(path, "AbstractController", 0);
+        server.open(path, &text).await;
+
+        let resp = server.hover(path, line, ch).await;
+        assert!(resp["error"].is_null());
+        assert!(!resp["result"].is_null());
+    }
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn hover_on_app_entity_type_in_signature() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Repository/PostRepository.php";
+        let (text, line, ch) = server.locate(path, "Post $post", 1);
+        server.open(path, &text).await;
+
+        let resp = server.hover(path, line, ch).await;
+        assert!(resp["error"].is_null());
+    }
+}
+
+mod implementation {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn implementations_of_user_interface_include_app_user() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Entity/User.php";
+        let (text, line, ch) = server.locate(path, "UserInterface", 0);
+        server.open(path, &text).await;
+
+        let resp = server.implementation(path, line, ch).await;
+        assert!(resp["error"].is_null());
+        let impls = resp["result"].as_array().cloned().unwrap_or_default();
+        assert!(!impls.is_empty());
+    }
+}
+
+mod references {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn references_to_post_entity_span_multiple_files() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Entity/Post.php";
+        let (text, line, character) = server.locate(path, "class Post", 0);
+        let character = character + "class ".len() as u32;
+        server.open(path, &text).await;
+
+        let resp = server.references(path, line, character, false).await;
+        assert!(resp["error"].is_null(), "references error: {:?}", resp);
+        let locs = resp["result"].as_array().cloned().unwrap_or_default();
+
+        let files: HashSet<String> = locs
+            .iter()
+            .filter_map(|l| l["uri"].as_str().map(|s| s.to_string()))
+            .collect();
+
+        assert!(
+            files.len() >= 4,
+            "expected Post references across ≥4 files, got {} ({:?})",
+            files.len(),
+            files,
+        );
+        assert!(
+            files
+                .iter()
+                .any(|u| u.ends_with("/src/Repository/PostRepository.php")),
+            "PostRepository.php should be among references; files: {files:?}"
+        );
+    }
+}
+
+mod type_hierarchy {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn supertypes_of_blog_controller_include_abstract_controller() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Controller/BlogController.php";
+        let (text, line, ch) = server.locate(path, "BlogController", 0);
+        server.open(path, &text).await;
+
+        let resp = server.definition(path, line, ch).await;
+        assert!(resp["error"].is_null());
+    }
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn subtypes_of_abstract_controller_include_app_controller() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Controller/BlogController.php";
+        let (text, line, ch) = server.locate(path, "AbstractController", 0);
+        server.open(path, &text).await;
+
+        let resp = server.definition(path, line, ch).await;
+        assert!(resp["error"].is_null());
+    }
+}
+
+mod smoke {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    async fn smoke_goto_definition_abstract_controller() {
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        server.wait_for_index_ready().await;
+
+        let path = "src/Controller/BlogController.php";
+        let (text, line, ch) = server.locate(path, "AbstractController", 0);
+        server.open(path, &text).await;
+
+        let resp = server.definition(path, line, ch).await;
+        assert!(resp["error"].is_null());
+    }
+}

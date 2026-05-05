@@ -1038,3 +1038,10 @@ pub(crate) fn assert_highlights_match(
         );
     }
 }
+
+pub fn lines_of(items: &[Value]) -> Vec<u32> {
+    items
+        .iter()
+        .map(|l| l["range"]["start"]["line"].as_u64().unwrap() as u32)
+        .collect()
+}
