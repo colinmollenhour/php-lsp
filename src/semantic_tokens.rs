@@ -437,9 +437,13 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
             for member in e.members.iter() {
                 match &member.kind {
                     EnumMemberKind::Case(c) => {
+                        push_attributes(out, sv, &c.attributes);
                         let mmods =
                             MOD_DECLARATION | deprecated_mod(sv.source(), member.span.start);
                         push_name(out, sv, c.name, TT_PROPERTY, mmods);
+                        if let Some(value) = &c.value {
+                            collect_expr(sv, value, out);
+                        }
                     }
                     EnumMemberKind::Method(m) => {
                         push_attributes(out, sv, &m.attributes);
@@ -463,7 +467,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
                         }
                     }
                     EnumMemberKind::ClassConst(_) => {
-                        // Class constants in enums are tokenized by collect_class_member
+                        // TODO: Handle class constants in enums
                     }
                     EnumMemberKind::TraitUse(_) => {
                         // Trait use declarations don't produce tokens
