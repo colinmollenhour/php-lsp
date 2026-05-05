@@ -1138,3 +1138,74 @@ pub fn render_resolved_workspace_symbol(resp: &Value, root_uri: &str) -> String 
         format!("{name} ({kind}) @ {short} [uri-only]")
     }
 }
+
+/// Render a `workspace/diagnostic` response as snapshot-friendly text.
+/// Format: one file per block, sorted by path. Each diagnostic shows:
+/// `L:C message [code] (severity)`. Files with no diagnostics show `<clean>`.
+pub fn render_workspace_diagnostic(resp: &Value, root_uri: &str) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+
+    let result = &resp["result"];
+    let items = result["items"].as_array().cloned().unwrap_or_default();
+
+    if items.is_empty() {
+        return "<no items>".to_owned();
+    }
+
+    let prefix = if root_uri.ends_with('/') {
+        root_uri.to_owned()
+    } else {
+        format!("{root_uri}/")
+    };
+
+    let mut files: Vec<(String, Vec<String>)> = Vec::new();
+
+    for item in items {
+        let uri = item["uri"].as_str().unwrap_or("?");
+        let short = uri.strip_prefix(&prefix).unwrap_or(uri).to_owned();
+
+        // WorkspaceFullDocumentDiagnosticReport has the diagnostics in the "items" field directly
+        // (not nested under full_document_diagnostic_report)
+        let diags = item["items"].as_array().cloned().unwrap_or_default();
+
+        let mut diag_lines = Vec::new();
+        for diag in diags {
+            let line = diag["range"]["start"]["line"].as_u64().unwrap_or(0);
+            let col = diag["range"]["start"]["character"].as_u64().unwrap_or(0);
+            let msg = diag["message"].as_str().unwrap_or("?");
+            let code = diag["code"]
+                .as_str()
+                .or_else(|| diag["code"].as_u64().map(|_| "0"))
+                .unwrap_or("<unset>");
+            let severity = match diag["severity"].as_u64() {
+                Some(1) => "error",
+                Some(2) => "warning",
+                Some(3) => "info",
+                Some(4) => "hint",
+                _ => "?",
+            };
+
+            diag_lines.push(format!("  {line}:{col} {msg} [{code}] ({severity})"));
+        }
+
+        if diag_lines.is_empty() {
+            diag_lines.push("  <clean>".to_owned());
+        }
+
+        files.push((short, diag_lines));
+    }
+
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut out = String::new();
+    for (path, diags) in files {
+        out.push_str(&format!("{path}\n"));
+        for diag in diags {
+            out.push_str(&format!("{diag}\n"));
+        }
+    }
+
+    out.trim_end().to_owned()
+}

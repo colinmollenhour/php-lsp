@@ -564,6 +564,61 @@ impl Backend {
     }
 }
 
+/// Generate a stable result_id for diagnostics. Uses the count and position of diagnostics
+/// to create a stable identifier. Same diagnostics = same result_id.
+fn compute_diagnostic_result_id(diagnostics: &[Diagnostic], uri: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    // Include URI so each file has a unique ID
+    uri.hash(&mut hasher);
+    // Hash diagnostic count (should change if diagnostics are added/removed)
+    diagnostics.len().hash(&mut hasher);
+
+    // Hash all diagnostic fields that affect semantic meaning
+    // This ensures result_id changes when any diagnostic property changes
+    for diag in diagnostics {
+        // Position (both start and end)
+        diag.range.start.line.hash(&mut hasher);
+        diag.range.start.character.hash(&mut hasher);
+        diag.range.end.line.hash(&mut hasher);
+        diag.range.end.character.hash(&mut hasher);
+        // Content and classification
+        diag.message.hash(&mut hasher);
+        // Severity as numeric value (error=1, warning=2, info=3, hint=4, None=0)
+        let severity_val = match diag.severity {
+            Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR) => 1,
+            Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING) => 2,
+            Some(tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION) => 3,
+            Some(tower_lsp::lsp_types::DiagnosticSeverity::HINT) => 4,
+            None => 0,
+            _ => 5, // Unknown variants
+        };
+        severity_val.hash(&mut hasher);
+        // Code (diagnostic code identifier)
+        if let Some(code) = &diag.code {
+            format!("{:?}", code).hash(&mut hasher);
+        }
+        if let Some(source) = &diag.source {
+            source.hash(&mut hasher);
+        }
+        // Tags (Unnecessary=1, Deprecated=2, None=0)
+        if let Some(tags) = &diag.tags {
+            for tag in tags {
+                let tag_val = match *tag {
+                    tower_lsp::lsp_types::DiagnosticTag::UNNECESSARY => 1,
+                    tower_lsp::lsp_types::DiagnosticTag::DEPRECATED => 2,
+                    _ => 3,
+                };
+                tag_val.hash(&mut hasher);
+            }
+        }
+    }
+
+    format!("v1:{:x}", hasher.finish())
+}
+
 #[async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -2492,11 +2547,20 @@ impl LanguageServer for Backend {
         let doc = match self.get_doc(uri) {
             Some(d) => d,
             None => {
+                // Even if document not fully indexed, compute result_id for parse diagnostics
+                let _version = self
+                    .open_files
+                    .all_with_diagnostics()
+                    .iter()
+                    .find(|(u, _, _)| u == uri)
+                    .and_then(|(_, _, v)| *v)
+                    .unwrap_or(1);
+                let result_id = compute_diagnostic_result_id(&parse_diags, uri.as_str());
                 return Ok(DocumentDiagnosticReportResult::Report(
                     DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
                         related_documents: None,
                         full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                            result_id: None,
+                            result_id: Some(result_id),
                             items: parse_diags,
                         },
                     }),
@@ -2507,7 +2571,9 @@ impl LanguageServer for Backend {
             let cfg = self.config.read().unwrap();
             (cfg.diagnostics.clone(), cfg.php_version.clone())
         };
-        let _ = php_version.as_deref();
+        // Note: php_version could be used for version-specific diagnostics in the future
+        let _ = php_version;
+
         // Phase I: salsa Pass-2 is CPU-bound; run off the async executor.
         let docs = Arc::clone(&self.docs);
         let uri_owned = uri.clone();
@@ -2524,16 +2590,34 @@ impl LanguageServer for Backend {
                 .unwrap_or_default()
         })
         .await
-        .unwrap_or_default();
+        .map_err(|e| {
+            use std::borrow::Cow;
+            tower_lsp::jsonrpc::Error {
+                code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+                message: Cow::Owned(format!("diagnostic analysis failed: {}", e)),
+                data: None,
+            }
+        })?;
+
         let mut items = parse_diags;
         items.extend(sem_diags);
         items.extend(duplicate_declaration_diagnostics(&source, &doc, &diag_cfg));
+
+        // Generate stable result_id for caching
+        let _version = self
+            .open_files
+            .all_with_diagnostics()
+            .iter()
+            .find(|(u, _, _)| u == uri)
+            .and_then(|(_, _, v)| *v)
+            .unwrap_or(1);
+        let result_id = compute_diagnostic_result_id(&items, uri.as_str());
 
         Ok(DocumentDiagnosticReportResult::Report(
             DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
                 related_documents: None,
                 full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                    result_id: None,
+                    result_id: Some(result_id),
                     items,
                 },
             }),
@@ -2542,13 +2626,17 @@ impl LanguageServer for Backend {
 
     async fn workspace_diagnostic(
         &self,
-        _params: WorkspaceDiagnosticParams,
+        params: WorkspaceDiagnosticParams,
     ) -> Result<WorkspaceDiagnosticReportResult> {
         let all_parse_diags = self.all_open_files_with_diagnostics();
         let (diag_cfg, php_version) = {
             let cfg = self.config.read().unwrap();
             (cfg.diagnostics.clone(), cfg.php_version.clone())
         };
+
+        // Accept previousResultIds parameter for future optimization to return Unchanged
+        // when diagnostics haven't changed (reduces bandwidth)
+        let _ = params.previous_result_ids;
 
         // Phase I: each file's semantic issues flow through the salsa
         // `semantic_issues` query. The memo is shared with `did_open` /
@@ -2557,7 +2645,9 @@ impl LanguageServer for Backend {
         // a cold workspace still walks every file's `StatementsAnalyzer` —
         // run the whole sweep on the blocking pool so the async runtime
         // stays responsive.
-        let _ = php_version.as_deref();
+        // Note: php_version could be used for version-specific diagnostics in the future
+        let _ = php_version;
+
         let docs = Arc::clone(&self.docs);
         let diag_cfg_sweep = diag_cfg.clone();
         let items = tokio::task::spawn_blocking(move || {
@@ -2585,12 +2675,16 @@ impl LanguageServer for Backend {
                         &diag_cfg_sweep,
                     ));
 
+                    // Generate stable result_id for caching
+                    let _version_num = version.unwrap_or(1);
+                    let result_id = compute_diagnostic_result_id(&all_diags, uri.as_str());
+
                     Some(WorkspaceDocumentDiagnosticReport::Full(
                         WorkspaceFullDocumentDiagnosticReport {
                             uri,
                             version,
                             full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                                result_id: None,
+                                result_id: Some(result_id),
                                 items: all_diags,
                             },
                         },
@@ -2599,7 +2693,14 @@ impl LanguageServer for Backend {
                 .collect::<Vec<_>>()
         })
         .await
-        .unwrap_or_default();
+        .map_err(|e| {
+            use std::borrow::Cow;
+            tower_lsp::jsonrpc::Error {
+                code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+                message: Cow::Owned(format!("workspace_diagnostic analysis failed: {}", e)),
+                data: None,
+            }
+        })?;
 
         Ok(WorkspaceDiagnosticReportResult::Report(
             WorkspaceDiagnosticReport { items },
