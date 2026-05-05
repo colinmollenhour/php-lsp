@@ -12,6 +12,10 @@ fn has_code(notif: &serde_json::Value, code: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn render_def_location(resp: &serde_json::Value, root_uri: &str) -> String {
+    common::render_locations(resp, root_uri)
+}
+
 #[tokio::test]
 async fn hover_reflects_didchange_new_symbol() {
     let mut server = TestServer::new().await;
@@ -37,6 +41,7 @@ async fn hover_reflects_didchange_new_symbol() {
 #[tokio::test]
 async fn definition_cache_is_invalidated_after_didchange() {
     let mut server = TestServer::new().await;
+    let root_uri = server.uri("");
     server
         .open(
             "ren.php",
@@ -44,17 +49,9 @@ async fn definition_cache_is_invalidated_after_didchange() {
         )
         .await;
 
-    let resp = server.definition("ren.php", 2, 1).await;
-    let loc_v1 = if resp["result"].is_array() {
-        resp["result"][0].clone()
-    } else {
-        resp["result"].clone()
-    };
-    assert_eq!(
-        loc_v1["range"]["start"]["line"].as_u64().unwrap(),
-        1,
-        "V1 cache warmup failed"
-    );
+    let resp_v1 = server.definition("ren.php", 2, 1).await;
+    let out_v1 = render_def_location(&resp_v1, &root_uri);
+    expect!["ren.php:1:9-1:16"].assert_eq(&out_v1);
 
     server
         .change(
@@ -64,19 +61,10 @@ async fn definition_cache_is_invalidated_after_didchange() {
         )
         .await;
 
-    let resp = server.definition("ren.php", 3, 1).await;
-    let result = &resp["result"];
-    assert!(!result.is_null(), "newName() must resolve after didChange");
-    let loc = if result.is_array() {
-        &result[0]
-    } else {
-        result
-    };
-    assert_eq!(
-        loc["range"]["start"]["line"].as_u64().unwrap(),
-        2,
-        "expected V2 line (2), stale V1 result would be line 1"
-    );
+    let resp_v2 = server.definition("ren.php", 3, 1).await;
+    let out_v2 = render_def_location(&resp_v2, &root_uri);
+    // Cache must be invalidated: location moves to line 2 (added blank line)
+    expect!["ren.php:2:9-2:16"].assert_eq(&out_v2);
 }
 
 #[tokio::test]
@@ -96,11 +84,8 @@ async fn references_reflect_didchange_additions_and_removals() {
 
     let resp = server.references("refs.php", 1, 9, false).await;
     let refs = resp["result"].as_array().expect("references array");
-    assert_eq!(
-        refs.len(),
-        2,
-        "expected both call sites after edit: {refs:?}"
-    );
+    let ref_count = refs.len();
+    expect!["2"].assert_eq(&ref_count.to_string());
 
     server
         .change(
@@ -112,11 +97,8 @@ async fn references_reflect_didchange_additions_and_removals() {
 
     let resp = server.references("refs.php", 1, 9, false).await;
     let refs = resp["result"].as_array().expect("references array");
-    assert_eq!(
-        refs.len(),
-        1,
-        "expected 1 call site after removal: {refs:?}"
-    );
+    let ref_count = refs.len();
+    expect!["1"].assert_eq(&ref_count.to_string());
 }
 
 #[tokio::test]
@@ -238,11 +220,8 @@ async fn reopen_does_not_duplicate_symbols() {
 
     let resp = server.references("reopen.php", 1, 9, true).await;
     let refs = resp["result"].as_array().expect("references array");
-    assert_eq!(
-        refs.len(),
-        2,
-        "expected declaration + 1 call, not duplicates after reopen: {refs:?}"
-    );
+    let ref_count = refs.len();
+    expect!["2"].assert_eq(&ref_count.to_string());
 }
 
 #[tokio::test]
@@ -299,14 +278,17 @@ async fn cross_file_republish_fans_out_to_multiple_dependents() {
         .wait_for_diagnostics_multi(&[&u1, &u2])
         .await;
 
+    // Both files must receive diagnostics
+    expect!["true"].assert_eq(&notifs.contains_key(&u1).to_string());
+    expect!["true"].assert_eq(&notifs.contains_key(&u2).to_string());
+
     for (label, uri) in [("u1", &u1), ("u2", &u2)] {
         let notif = notifs
             .get(uri)
             .unwrap_or_else(|| panic!("missing publish for {label} ({uri})"));
         assert!(
             has_code(notif, "UndefinedClass"),
-            "{label}: expected UndefinedClass after FanWidget rename, got: {:?}",
-            notif["params"]["diagnostics"]
+            "{label}: expected UndefinedClass after FanWidget rename"
         );
     }
 }
@@ -377,10 +359,7 @@ async fn cross_file_republish_preserves_dependent_parse_errors() {
         .as_array()
         .map(|a| a.len())
         .unwrap_or(0);
-    assert!(
-        original_count > 0,
-        "expected parse error in broken.php on open"
-    );
+    expect!["true"].assert_eq(&(original_count > 0).to_string());
 
     server
         .open("trigger.php", "<?php\nclass Triggered {}\n")
@@ -392,9 +371,6 @@ async fn cross_file_republish_preserves_dependent_parse_errors() {
         .as_array()
         .map(|a| a.len())
         .unwrap_or(0);
-    assert!(
-        count >= original_count,
-        "cross-file republish dropped parse diagnostics: had {original_count}, now {count}: {:?}",
-        notif["params"]["diagnostics"]
-    );
+    // Parse errors must be preserved during cross-file republish
+    expect!["true"].assert_eq(&(count >= original_count).to_string());
 }

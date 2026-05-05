@@ -435,25 +435,38 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
             let mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
             push_name(out, sv, e.name, TT_CLASS, mods);
             for member in e.members.iter() {
-                if let EnumMemberKind::Method(m) = &member.kind {
-                    push_attributes(out, sv, &m.attributes);
-                    let mut mmods =
-                        MOD_DECLARATION | deprecated_mod(sv.source(), member.span.start);
-                    if m.is_static {
-                        mmods |= MOD_STATIC;
+                match &member.kind {
+                    EnumMemberKind::Case(c) => {
+                        let mmods =
+                            MOD_DECLARATION | deprecated_mod(sv.source(), member.span.start);
+                        push_name(out, sv, c.name, TT_PROPERTY, mmods);
                     }
-                    push_name(out, sv, m.name, TT_METHOD, mmods);
-                    for p in m.params.iter() {
-                        if let Some(th) = &p.type_hint {
-                            push_type_hint(out, sv, th);
+                    EnumMemberKind::Method(m) => {
+                        push_attributes(out, sv, &m.attributes);
+                        let mut mmods =
+                            MOD_DECLARATION | deprecated_mod(sv.source(), member.span.start);
+                        if m.is_static {
+                            mmods |= MOD_STATIC;
                         }
-                        push_param(out, sv, p.name, TT_PARAMETER, MOD_DECLARATION);
+                        push_name(out, sv, m.name, TT_METHOD, mmods);
+                        for p in m.params.iter() {
+                            if let Some(th) = &p.type_hint {
+                                push_type_hint(out, sv, th);
+                            }
+                            push_param(out, sv, p.name, TT_PARAMETER, MOD_DECLARATION);
+                        }
+                        if let Some(rt) = &m.return_type {
+                            push_type_hint(out, sv, rt);
+                        }
+                        if let Some(body) = &m.body {
+                            collect_stmts(sv, body, out);
+                        }
                     }
-                    if let Some(rt) = &m.return_type {
-                        push_type_hint(out, sv, rt);
+                    EnumMemberKind::ClassConst(_) => {
+                        // Class constants in enums are tokenized by collect_class_member
                     }
-                    if let Some(body) = &m.body {
-                        collect_stmts(sv, body, out);
+                    EnumMemberKind::TraitUse(_) => {
+                        // Trait use declarations don't produce tokens
                     }
                 }
             }
