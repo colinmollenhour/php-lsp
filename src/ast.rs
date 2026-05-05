@@ -1,7 +1,7 @@
 /// Core AST infrastructure: arena-backed `ParsedDoc`, span utilities, and TypeHint formatting.
 use std::collections::HashMap;
 use std::mem::ManuallyDrop;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use php_ast::{Program, Span, TypeHint, TypeHintKind};
 use tower_lsp::lsp_types::{Position, Range};
@@ -65,8 +65,10 @@ impl Drop for ArenaGuard {
 /// - `program` uses `ManuallyDrop` and is explicitly dropped in `Drop::drop()`
 ///   before any field auto-drop runs. This guarantees arena-allocated nodes are
 ///   gone before `ArenaGuard` recycles the arena — regardless of field order.
-/// - Both `_arena` and `_source` are `Box`-allocated; their heap addresses are
-///   stable and never move.
+/// - `_source: Arc<str>` keeps the source text alive at a stable heap address.
+///   The transmuted `&'static str` in the parser arena remains valid for the
+///   lifetime of `ParsedDoc` because `_source` is dropped last (after `program`
+///   is manually dropped and after `_arena` is recycled).
 /// - The `'static` lifetimes in `ManuallyDrop<Box<Program<'static, 'static>>>`
 ///   are erased versions of the true lifetimes `'_arena` and `'_source`. The
 ///   public `program()` accessor re-attaches them to `&self`, preventing any
@@ -74,8 +76,7 @@ impl Drop for ArenaGuard {
 pub struct ParsedDoc {
     program: ManuallyDrop<Box<Program<'static, 'static>>>,
     pub errors: Vec<php_rs_parser::diagnostics::ParseError>,
-    #[allow(clippy::box_collection)]
-    _source: Box<String>,
+    _source: Arc<str>,
     line_starts: Vec<u32>,
     _arena: ArenaGuard,
 }
@@ -94,16 +95,20 @@ unsafe impl Send for ParsedDoc {}
 unsafe impl Sync for ParsedDoc {}
 
 impl ParsedDoc {
-    pub fn parse(source: String) -> Self {
-        let source_box = Box::new(source);
+    /// Parse PHP source text. Accepts `String`, `&str`, or `Arc<str>` — when
+    /// the caller already holds an `Arc<str>` (e.g. the salsa `parsed_doc`
+    /// query), no heap allocation occurs (refcount bump only).
+    pub fn parse(source: impl Into<Arc<str>>) -> Self {
+        let source: Arc<str> = source.into();
         // Take a pre-warmed arena from the pool (or allocate a fresh one).
         let arena_box = BUMP_POOL.take();
 
-        // SAFETY: Both boxes are on the heap; moving a Box<T> moves the pointer,
-        // not the heap data. These references therefore remain valid for as long
-        // as the boxes (and hence `self`) are alive.
-        let src_ref: &'static str =
-            unsafe { std::mem::transmute::<&str, &'static str>(source_box.as_str()) };
+        // SAFETY: `Arc<str>` data lives at a stable heap address for as long as
+        // the Arc is alive. `_source` keeps the Arc alive for `ParsedDoc`'s
+        // lifetime, so the transmuted `&'static str` remains valid. The arena
+        // box is similarly stable — moving a `Box` moves the pointer, not the
+        // heap data.
+        let src_ref: &'static str = unsafe { std::mem::transmute::<&str, &'static str>(&*source) };
         let arena_ref: &'static bumpalo::Bump = unsafe {
             std::mem::transmute::<&bumpalo::Bump, &'static bumpalo::Bump>(arena_box.as_ref())
         };
@@ -115,7 +120,7 @@ impl ParsedDoc {
         ParsedDoc {
             program: ManuallyDrop::new(Box::new(result.program)),
             errors: result.errors,
-            _source: source_box,
+            _source: source,
             line_starts,
             _arena: ArenaGuard(Some(arena_box)),
         }
@@ -136,6 +141,16 @@ impl ParsedDoc {
         &self._source
     }
 
+    /// Clone the `Arc<str>` backing the source text (refcount bump only).
+    ///
+    /// Callers that need to store the same source text in a salsa input
+    /// should use this to get the identical pointer — enabling cheap
+    /// `Arc::ptr_eq` validation in the `parsed_cache`.
+    #[inline]
+    pub fn source_arc(&self) -> Arc<str> {
+        self._source.clone()
+    }
+
     /// Borrow the precomputed line-start byte offsets.
     /// `line_starts[i]` is the byte offset of the first character on line `i`.
     pub fn line_starts(&self) -> &[u32] {
@@ -153,7 +168,7 @@ impl ParsedDoc {
 
 impl Default for ParsedDoc {
     fn default() -> Self {
-        ParsedDoc::parse(String::new())
+        ParsedDoc::parse("")
     }
 }
 
