@@ -264,6 +264,42 @@ impl TestServer {
         self
     }
 
+    pub async fn wait_until_symbol_present(&mut self, query: &str, timeout: std::time::Duration) {
+        let start = std::time::Instant::now();
+        loop {
+            let resp = self.workspace_symbols(query).await;
+            if !resp["result"]
+                .as_array()
+                .map(|a| a.is_empty())
+                .unwrap_or(true)
+            {
+                return;
+            }
+            if start.elapsed() > timeout {
+                panic!("wait_until_symbol_present timed out looking for '{query}'");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
+    pub async fn wait_until_symbol_absent(&mut self, query: &str, timeout: std::time::Duration) {
+        let start = std::time::Instant::now();
+        loop {
+            let resp = self.workspace_symbols(query).await;
+            if resp["result"]
+                .as_array()
+                .map(|a| a.is_empty())
+                .unwrap_or(false)
+            {
+                return;
+            }
+            if start.elapsed() > timeout {
+                panic!("wait_until_symbol_absent timed out; '{query}' still present");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
     // ---------- feature shortcuts ----------
 
     pub async fn hover(&mut self, path: &str, line: u32, character: u32) -> Value {
