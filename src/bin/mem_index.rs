@@ -133,7 +133,8 @@ fn main() {
             // 1. Parse once to get AST
             // 2. Run DefinitionCollector into a StubSlice and ingest into MirDb
             // 3. Store FileIndex reusing the same ParsedDoc (no second parse)
-            let doc = ParsedDoc::parse(src.clone());
+            let src_arc: Arc<str> = Arc::from(src.as_str());
+            let doc = ParsedDoc::parse(src_arc);
             let file: Arc<str> = Arc::from(url.as_str());
             let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
             let collector = mir_analyzer::collector::DefinitionCollector::new_for_slice(

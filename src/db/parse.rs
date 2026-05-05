@@ -16,7 +16,6 @@ use salsa::{Database, Update};
 
 use crate::ast::ParsedDoc;
 use crate::db::input::SourceFile;
-use crate::diagnostics::parse_document_no_diags;
 
 /// Opaque handle to a parsed document. Cheap to clone (refcount bump); never
 /// compared structurally. See module docs for the `Update` contract.
@@ -61,8 +60,8 @@ unsafe impl Update for ParsedArc {
 /// `DocumentStore::indexed_order` LRU that used to bound `Document` entries.
 #[salsa::tracked(no_eq, lru = 2048)]
 pub fn parsed_doc(db: &dyn Database, file: SourceFile) -> ParsedArc {
-    let text = file.text(db);
-    let doc = parse_document_no_diags(&text);
+    // Pass Arc<str> directly — refcount bump, no heap allocation on the hot path.
+    let doc = ParsedDoc::parse(file.text(db));
     ParsedArc(Arc::new(doc))
 }
 

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 use crate::ast::ParsedDoc;
@@ -9,7 +11,7 @@ use crate::ast::ParsedDoc;
 /// file. Callers that actually publish diagnostics call [`parse_document`]
 /// instead.
 pub fn parse_document_no_diags(source: &str) -> ParsedDoc {
-    ParsedDoc::parse(source.to_string())
+    ParsedDoc::parse(Arc::from(source))
 }
 
 /// Build LSP diagnostics from an already-parsed document. Separated from
