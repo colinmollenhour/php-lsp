@@ -486,6 +486,159 @@ async fn semantic_tokens_enum_cases() {
     .assert_eq(&out);
 }
 
+/// Verify that backed enums (with string values) tokenize both cases and values.
+#[tokio::test]
+async fn semantic_tokens_backed_enum_string() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "backed.php",
+            "<?php\nenum Status: string { case Pending = 'pending'; case Active = 'active'; }\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("backed.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // Backed enum: cases and their string values should both be tokenized
+    expect![[r#"
+        1:5 len=6 type=class mods=0b1
+        1:27 len=7 type=property mods=0b1
+        1:37 len=9 type=string mods=0b0
+        1:53 len=6 type=property mods=0b1
+        1:62 len=8 type=string mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that backed enums with int values tokenize both cases and numbers.
+#[tokio::test]
+async fn semantic_tokens_backed_enum_int() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "backed_int.php",
+            "<?php\nenum Count: int { case One = 1; case Two = 2; }\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("backed_int.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // Backed enum with int values: cases and numbers should be tokenized
+    expect![[r#"
+        1:5 len=5 type=class mods=0b1
+        1:23 len=3 type=property mods=0b1
+        1:29 len=1 type=number mods=0b0
+        1:37 len=3 type=property mods=0b1
+        1:43 len=1 type=number mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that enum cases with attributes are tokenized correctly.
+#[tokio::test]
+async fn semantic_tokens_enum_case_attributes() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "enum_attr.php",
+            "<?php\nenum Status { #[Deprecated] case Old; case New; }\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("enum_attr.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // Attributes should be tokenized as class tokens
+    expect![[r#"
+        1:5 len=6 type=class mods=0b1
+        1:16 len=10 type=class mods=0b0
+        1:33 len=3 type=property mods=0b1
+        1:43 len=3 type=property mods=0b1"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that mixed enums (cases + methods) are tokenized correctly.
+#[tokio::test]
+async fn semantic_tokens_enum_mixed() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "enum_mixed.php",
+            "<?php\nenum Status { case Pending; public function label(): string { return 'x'; } }\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("enum_mixed.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // Mixed enum: both cases and methods should be tokenized
+    expect![[r#"
+        1:5 len=6 type=class mods=0b1
+        1:19 len=7 type=property mods=0b1
+        1:44 len=5 type=method mods=0b1
+        1:53 len=6 type=type mods=0b0
+        1:69 len=3 type=string mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that deprecated enum cases (via @deprecated PHPDoc) get the deprecated modifier.
+#[tokio::test]
+async fn semantic_tokens_deprecated_enum_case() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "deprecated_case.php",
+            "<?php\nenum Status { /** @deprecated */ case Old; case New; }\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("deprecated_case.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // Deprecated case should have both declaration (0b1) and deprecated (0b10000) = 0b10001
+    expect![[r#"
+        1:5 len=6 type=class mods=0b1
+        1:14 len=18 type=comment mods=0b0
+        1:38 len=3 type=property mods=0b10001
+        1:48 len=3 type=property mods=0b1"#]]
+    .assert_eq(&out);
+}
+
 /// Verify that traits are tokenized as class type.
 #[tokio::test]
 async fn semantic_tokens_traits() {
