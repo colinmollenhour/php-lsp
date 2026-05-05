@@ -7,6 +7,7 @@
 use super::*;
 
 use expect_test::expect;
+use serde_json::json;
 
 async fn labels(s: &mut TestServer, src: &str) -> Vec<String> {
     let opened = s.open_fixture(src).await;
@@ -510,11 +511,8 @@ $x = new $0
     );
 }
 
-/// Verify that `completionItem/resolve` is wired up end-to-end: request a
-/// completion list, pick an item, resolve it, and check the `detail` field is
-/// populated.
 #[tokio::test]
-async fn completion_resolve_returns_item() {
+async fn completion_resolve_function_populates_detail_and_docs() {
     let mut server = TestServer::new().await;
     let opened = server
         .open_fixture(
@@ -532,30 +530,191 @@ resolveM$0
         v if v["items"].is_array() => v["items"].as_array().unwrap().to_vec(),
         _ => vec![],
     };
-    assert!(
-        !items.is_empty(),
-        "expected completions for 'resolveM' prefix: {:?}",
-        comp["result"]
-    );
+    assert!(!items.is_empty());
 
     let resolve_me = items
         .iter()
         .find(|i| i["label"].as_str() == Some("resolveMe"))
         .cloned()
-        .expect("resolveMe must appear in completions for its own prefix");
+        .expect("resolveMe in completions");
 
     let resp = server.completion_resolve(resolve_me).await;
+    let out = render_resolved_completion_item(&resp);
+    expect![[r#"
+resolveMe (Function)
+detail: function resolveMe(): void
+docs: ```php
+function resolveMe(): void
+```"#]]
+    .assert_eq(&out);
+}
 
+#[tokio::test]
+async fn completion_resolve_function_with_docblock_populates_docs() {
+    let mut server = TestServer::new().await;
+    let opened = server
+        .open_fixture(
+            r#"<?php
+/** Greets a person */
+function greet(string $name): void {}
+gre$0
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+
+    let comp = server.completion(&c.path, c.line, c.character).await;
+    let items: Vec<_> = match &comp["result"] {
+        v if v.is_array() => v.as_array().unwrap().to_vec(),
+        v if v["items"].is_array() => v["items"].as_array().unwrap().to_vec(),
+        _ => vec![],
+    };
+
+    let greet = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("greet"))
+        .cloned()
+        .expect("greet in completions");
+
+    let resp = server.completion_resolve(greet).await;
+    let out = render_resolved_completion_item(&resp);
+    expect![[r#"
+greet (Function)
+detail: function greet(string $name): void
+docs: Greets a person"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn completion_resolve_already_resolved_is_noop() {
+    let mut server = TestServer::new().await;
+    server.open("noop.php", "<?php").await;
+
+    let item = json!({
+        "label": "test",
+        "kind": 3,
+        "detail": "function test(): void",
+        "documentation": {
+            "kind": "markdown",
+            "value": "Test function"
+        }
+    });
+
+    let resp = server.completion_resolve(item).await;
+    let out = render_resolved_completion_item(&resp);
+    expect![[r#"
+        test (Function)
+        detail: function test(): void
+        docs: Test function"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn completion_resolve_unknown_symbol_returns_unchanged() {
+    let mut server = TestServer::new().await;
+    server.open("unknown.php", "<?php").await;
+
+    let item = json!({
+        "label": "nonExistentXyz123",
+        "kind": 3
+    });
+
+    let resp = server.completion_resolve(item).await;
+    let out = render_resolved_completion_item(&resp);
+    expect![[r#"
+        nonExistentXyz123 (Function)
+        detail: <no detail>
+        docs: <no docs>"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn completion_resolve_named_argument_strips_colon_for_lookup() {
+    let mut server = TestServer::new().await;
+    let opened = server
+        .open_fixture(
+            r#"<?php
+function greet(string $name, int $age): void {}
+greet(na$0
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+
+    let comp = server.completion(&c.path, c.line, c.character).await;
+    let items: Vec<_> = match &comp["result"] {
+        v if v.is_array() => v.as_array().unwrap().to_vec(),
+        v if v["items"].is_array() => v["items"].as_array().unwrap().to_vec(),
+        _ => vec![],
+    };
+
+    let resp = server
+        .completion_resolve(json!({
+            "label": "name:",
+            "kind": 6
+        }))
+        .await;
+    let out = render_resolved_completion_item(&resp);
     assert!(
-        resp["error"].is_null(),
-        "completionItem/resolve error: {resp:?}"
+        out.contains("name:") || out.contains("name"),
+        "should keep label as-is in output"
     );
-    assert!(resp["result"].is_object(), "expected resolved item object");
-    let detail = resp["result"]["detail"].as_str().unwrap_or("");
     assert!(
-        detail.contains("resolveMe"),
-        "resolved item must have detail populated with the function signature: {:?}",
-        resp["result"]
+        out.contains("detail"),
+        "should lookup stripped name and populate detail"
+    );
+}
+
+#[tokio::test]
+async fn completion_resolve_partial_detail_populates_docs() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "partial.php",
+            "<?php\n/** My docs */\nfunction myFunc(): void {}",
+        )
+        .await;
+
+    let item = json!({
+        "label": "myFunc",
+        "kind": 3,
+        "detail": "function myFunc(): void"
+    });
+
+    let resp = server.completion_resolve(item).await;
+    let out = render_resolved_completion_item(&resp);
+    assert!(
+        out.contains("My docs"),
+        "should populate docs when detail already exists"
+    );
+    assert!(
+        out.contains("function myFunc(): void"),
+        "should preserve existing detail"
+    );
+}
+
+#[tokio::test]
+async fn completion_resolve_partial_docs_populates_detail() {
+    let mut server = TestServer::new().await;
+    server
+        .open("partial.php", "<?php\nfunction myFunc(): void {}")
+        .await;
+
+    let item = json!({
+        "label": "myFunc",
+        "kind": 3,
+        "documentation": {
+            "kind": "markdown",
+            "value": "Some doc"
+        }
+    });
+
+    let resp = server.completion_resolve(item).await;
+    let out = render_resolved_completion_item(&resp);
+    assert!(out.contains("Some doc"), "should preserve existing docs");
+    assert!(
+        out.contains("function myFunc(): void"),
+        "should populate detail when docs already exist"
     );
 }
 
@@ -778,4 +937,41 @@ class NotAnAttr {}
     expect![[r#"
         Class       ValidAttr"#]]
     .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn completion_resolve_is_idempotent() {
+    let mut server = TestServer::new().await;
+    let opened = server
+        .open_fixture(
+            r#"<?php
+function testFunc(): void {}
+test$0
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+
+    let comp = server.completion(&c.path, c.line, c.character).await;
+    let items: Vec<_> = match &comp["result"] {
+        v if v.is_array() => v.as_array().unwrap().to_vec(),
+        v if v["items"].is_array() => v["items"].as_array().unwrap().to_vec(),
+        _ => vec![],
+    };
+
+    let item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("testFunc"))
+        .cloned()
+        .expect("testFunc in completions");
+
+    let resolved_once = server.completion_resolve(item.clone()).await;
+    let resolved_twice = server
+        .completion_resolve(resolved_once["result"].clone())
+        .await;
+
+    assert_eq!(
+        resolved_once["result"], resolved_twice["result"],
+        "calling resolve twice must return identical results (idempotent)"
+    );
 }

@@ -1,6 +1,7 @@
 use super::*;
 
 use expect_test::expect;
+use serde_json::json;
 
 /// The definition file is never opened — it exists only in the workspace index
 /// from the background scan. This is the typical production scenario.
@@ -110,7 +111,7 @@ greet('world', 3);
 }
 
 #[tokio::test]
-async fn inlay_hint_resolve_returns_same_hint() {
+async fn inlay_hint_resolve_populates_tooltip() {
     let mut s = TestServer::new().await;
     s.open(
         "resolve.php",
@@ -121,10 +122,141 @@ async fn inlay_hint_resolve_returns_same_hint() {
     let hints = hints_resp["result"].as_array().cloned().unwrap_or_default();
     assert!(!hints.is_empty(), "expected inlay hints");
     let resp = s.inlay_hint_resolve(hints[0].clone()).await;
-    assert!(resp["error"].is_null(), "inlayHint/resolve error: {resp:?}");
+    let out = render_resolved_inlay_hint(&resp);
+    expect![[r#"
+2:4 a:
+tooltip: ```php
+function add(int $a, int $b): int
+```"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hint_resolve_with_docblock_includes_docs() {
+    let mut s = TestServer::new().await;
+    s.open(
+        "resolve.php",
+        "<?php\n/** Adds two integers */\nfunction add(int $a, int $b): int { return $a + $b; }\nadd(1, 2);\n",
+    )
+    .await;
+    let hints_resp = s.inlay_hints("resolve.php", 0, 0, 5, 0).await;
+    let hints = hints_resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(!hints.is_empty(), "expected inlay hints");
+    let resp = s.inlay_hint_resolve(hints[0].clone()).await;
+    let out = render_resolved_inlay_hint(&resp);
+    expect![[r#"
+3:4 a:
+tooltip: ```php
+function add(int $a, int $b): int
+```
+
+---
+
+Adds two integers"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hint_resolve_no_data_field_returns_unchanged() {
+    let mut s = TestServer::new().await;
+    s.open("nohint.php", "<?php").await;
+
+    let hint = json!({
+        "position": { "line": 0, "character": 5 },
+        "label": "$test:",
+    });
+
+    let resp = s.inlay_hint_resolve(hint).await;
+    let out = render_resolved_inlay_hint(&resp);
+    expect![[r#"
+        0:5 $test:
+        tooltip: <no tooltip>"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hint_resolve_existing_tooltip_is_noop() {
+    let mut s = TestServer::new().await;
+    s.open("existing.php", "<?php").await;
+
+    let hint = json!({
+        "position": { "line": 1, "character": 10 },
+        "label": "param:",
+        "tooltip": {
+            "kind": "markdown",
+            "value": "custom tooltip"
+        }
+    });
+
+    let resp = s.inlay_hint_resolve(hint).await;
+    let out = render_resolved_inlay_hint(&resp);
+    expect![[r#"
+        1:10 param:
+        tooltip: custom tooltip"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hint_resolve_data_without_php_lsp_fn_returns_unchanged() {
+    let mut s = TestServer::new().await;
+    s.open("nokey.php", "<?php").await;
+
+    let hint = json!({
+        "position": { "line": 0, "character": 5 },
+        "label": "param:",
+        "data": {
+            "some_other_key": "value"
+        }
+    });
+
+    let resp = s.inlay_hint_resolve(hint).await;
+    let out = render_resolved_inlay_hint(&resp);
+    expect![[r#"
+0:5 param:
+tooltip: <no tooltip>"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hint_resolve_php_lsp_fn_nonexistent_function_returns_unchanged() {
+    let mut s = TestServer::new().await;
+    s.open("nofunc.php", "<?php").await;
+
+    let hint = json!({
+        "position": { "line": 2, "character": 8 },
+        "label": "$x:",
+        "data": {
+            "php_lsp_fn": "nonExistentFunctionXyz"
+        }
+    });
+
+    let resp = s.inlay_hint_resolve(hint).await;
+    let out = render_resolved_inlay_hint(&resp);
+    expect![[r#"
+2:8 $x:
+tooltip: <no tooltip>"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hint_resolve_is_idempotent() {
+    let mut s = TestServer::new().await;
+    s.open(
+        "idempotent.php",
+        "<?php\nfunction add(int $a, int $b): int { return $a + $b; }\nadd(1, 2);\n",
+    )
+    .await;
+
+    let hints_resp = s.inlay_hints("idempotent.php", 0, 0, 4, 0).await;
+    let hints = hints_resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(!hints.is_empty());
+
+    let resolved_once = s.inlay_hint_resolve(hints[0].clone()).await;
+    let resolved_twice = s.inlay_hint_resolve(resolved_once["result"].clone()).await;
+
     assert_eq!(
-        resp["result"]["label"], hints[0]["label"],
-        "resolved label must match original"
+        resolved_once["result"], resolved_twice["result"],
+        "calling resolve twice must return identical results (idempotent)"
     );
 }
 

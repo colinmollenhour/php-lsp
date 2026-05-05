@@ -18,7 +18,8 @@ pub fn document_symbols(_source: &str, doc: &ParsedDoc) -> Vec<DocumentSymbol> {
 
 /// Fill in the sv.source() range for a `WorkspaceSymbol` whose `location` carries only a URI
 /// (i.e. `OneOf::Right(WorkspaceLocation)`).  If the range is already present, or if the
-/// document cannot be found, the symbol is returned unchanged.
+/// document cannot be found, the symbol is returned unchanged. If the symbol name is not found
+/// in the source, the URI-only location is preserved.
 pub fn resolve_workspace_symbol(
     mut symbol: WorkspaceSymbol,
     docs: &[(Url, Arc<ParsedDoc>)],
@@ -30,8 +31,9 @@ pub fn resolve_workspace_symbol(
     };
     for (doc_uri, doc) in docs {
         if doc_uri == &uri {
-            let range = name_range(doc.source(), doc.line_starts(), &symbol.name);
-            symbol.location = OneOf::Left(Location { uri, range });
+            if let Some(range) = name_range(doc.source(), doc.line_starts(), &symbol.name) {
+                symbol.location = OneOf::Left(Location { uri, range });
+            }
             break;
         }
     }

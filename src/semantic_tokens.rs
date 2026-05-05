@@ -179,7 +179,7 @@ fn push_name(
     token_type: u32,
     modifiers: u32,
 ) {
-    let offset = str_offset(sv.source(), name);
+    let offset = str_offset(sv.source(), name).unwrap_or(0);
     push_at(
         out,
         sv,
@@ -201,7 +201,7 @@ fn push_param(
     token_type: u32,
     modifiers: u32,
 ) {
-    let name_offset = str_offset(sv.source(), name);
+    let name_offset = str_offset(sv.source(), name).unwrap_or(0);
     let (offset, extra_len) =
         if name_offset > 0 && sv.source().as_bytes().get(name_offset as usize - 1) == Some(&b'$') {
             (name_offset - 1, 1u32)

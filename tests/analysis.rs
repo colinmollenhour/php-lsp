@@ -8,7 +8,8 @@ pub use common::render::{
 };
 pub use common::{
     TestServer, lines_of, render_completion, render_document_symbols, render_hover,
-    render_inlay_hints, render_locations, render_semantic_tokens, render_workspace_symbols,
+    render_inlay_hints, render_locations, render_resolved_inlay_hint, render_semantic_tokens,
+    render_workspace_symbols,
 };
 
 #[path = "analysis/feature_code_lens.rs"]

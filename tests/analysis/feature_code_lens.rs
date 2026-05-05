@@ -1,7 +1,7 @@
 use super::*;
 
 use expect_test::expect;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 fn render_resolved_lens(resp: &Value) -> String {
     if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
@@ -358,4 +358,149 @@ async fn code_lens_resolve_roundtrips_run_test_lens() {
         .request("codeLens/resolve", run_test_lens)
         .await;
     expect!["L1: ▶ Run test [php-lsp.runTest]"].assert_eq(&render_resolved_lens(&resp));
+}
+
+#[tokio::test]
+async fn code_lens_resolve_bare_lens_roundtrips() {
+    let mut server = TestServer::new().await;
+    server.open("bare.php", "<?php\nfunction test() {}\n").await;
+
+    let bare_lens = json!({
+        "range": {
+            "start": { "line": 1, "character": 0 },
+            "end":   { "line": 1, "character": 8 }
+        }
+    });
+
+    let resp = server
+        .client()
+        .request("codeLens/resolve", bare_lens.clone())
+        .await;
+
+    assert!(resp["error"].is_null(), "error: {resp:?}");
+    assert_eq!(
+        resp["result"]["range"], bare_lens["range"],
+        "range must roundtrip"
+    );
+    assert!(
+        resp["result"]["command"].is_null(),
+        "no command should be added"
+    );
+}
+
+#[tokio::test]
+async fn code_lens_resolve_all_lenses_preserve_structure() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "test.php",
+            "<?php\nclass TestClass { \n  public function test1(): void {} \n  public function test2(): void {} \n}\n",
+        )
+        .await;
+
+    let lenses = server.code_lens("test.php").await["result"]
+        .as_array()
+        .cloned()
+        .expect("expected code lens array");
+    assert!(!lenses.is_empty(), "expected code lenses");
+
+    for lens in &lenses {
+        let resp = server
+            .client()
+            .request("codeLens/resolve", lens.clone())
+            .await;
+        assert!(resp["error"].is_null(), "resolve error for lens: {lens:?}");
+
+        let result = &resp["result"];
+        assert!(result["range"].is_object(), "range must be preserved");
+        assert_eq!(
+            result["command"], lens["command"],
+            "command must match original"
+        );
+    }
+}
+
+#[tokio::test]
+async fn code_lens_resolve_with_null_command() {
+    let mut server = TestServer::new().await;
+    server.open("null_cmd.php", "<?php").await;
+
+    let lens = json!({
+        "range": {
+            "start": { "line": 0, "character": 0 },
+            "end": { "line": 0, "character": 5 }
+        },
+        "command": null
+    });
+
+    let resp = server
+        .client()
+        .request("codeLens/resolve", lens.clone())
+        .await;
+    assert!(resp["error"].is_null());
+    let result = &resp["result"];
+    assert!(
+        result["command"].is_null(),
+        "null command must be preserved"
+    );
+}
+
+#[tokio::test]
+async fn code_lens_resolve_preserves_data_field() {
+    let mut server = TestServer::new().await;
+    server.open("data.php", "<?php").await;
+
+    let lens = json!({
+        "range": {
+            "start": { "line": 0, "character": 0 },
+            "end": { "line": 0, "character": 5 }
+        },
+        "command": {
+            "title": "Test",
+            "command": "test.run"
+        },
+        "data": { "testId": "123", "nested": { "value": "data" } }
+    });
+
+    let resp = server
+        .client()
+        .request("codeLens/resolve", lens.clone())
+        .await;
+    assert!(resp["error"].is_null());
+    let result = &resp["result"];
+    assert_eq!(
+        result["data"], lens["data"],
+        "data field must be preserved exactly"
+    );
+}
+
+#[tokio::test]
+async fn code_lens_resolve_is_idempotent() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "test.php",
+            "<?php\nclass FooTest { public function testIt(): void {} }\n",
+        )
+        .await;
+
+    let lenses = server.code_lens("test.php").await["result"]
+        .as_array()
+        .cloned()
+        .expect("expected lenses");
+    let first_lens = lenses[0].clone();
+
+    let resolved_once = server
+        .client()
+        .request("codeLens/resolve", first_lens.clone())
+        .await;
+    let resolved_twice = server
+        .client()
+        .request("codeLens/resolve", resolved_once["result"].clone())
+        .await;
+
+    assert_eq!(
+        resolved_once["result"], resolved_twice["result"],
+        "calling resolve twice must return identical results (idempotent)"
+    );
 }

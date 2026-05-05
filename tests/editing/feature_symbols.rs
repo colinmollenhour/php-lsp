@@ -100,7 +100,7 @@ async fn workspace_symbol_finds_class_by_short_name() {
 // --- workspaceSymbol/resolve ---
 
 #[tokio::test]
-async fn symbol_resolve_fills_range_for_open_file() {
+async fn symbol_resolve_fills_range_for_open_class() {
     let mut server = TestServer::new().await;
     server
         .open("resolve.php", "<?php\nclass Resolvable {}\n")
@@ -113,24 +113,26 @@ async fn symbol_resolve_fills_range_for_open_file() {
         "location": { "uri": uri },
     });
     let resp = server.workspace_symbol_resolve(symbol).await;
+    let out = render_resolved_workspace_symbol(&resp, &server.uri(""));
+    expect!["Resolvable (Class) @ resolve.php:1:6-1:16"].assert_eq(&out);
+}
 
-    assert!(resp["error"].is_null(), "error: {resp:?}");
-    let loc = &resp["result"]["location"];
-    assert!(
-        loc["range"].is_object(),
-        "expected range to be filled in for open file: {loc:?}"
-    );
-    // `class Resolvable` is on line 1; the name starts at char 6 (after "class ").
-    assert_eq!(
-        loc["range"]["start"]["line"],
-        json!(1),
-        "wrong line: {loc:?}"
-    );
-    assert_eq!(
-        loc["range"]["start"]["character"],
-        json!(6),
-        "wrong char: {loc:?}"
-    );
+#[tokio::test]
+async fn symbol_resolve_fills_range_for_open_function() {
+    let mut server = TestServer::new().await;
+    server
+        .open("resolve.php", "<?php\nfunction myFunc() {}\n")
+        .await;
+    let uri = server.uri("resolve.php");
+
+    let symbol = json!({
+        "name": "myFunc",
+        "kind": 12,
+        "location": { "uri": uri },
+    });
+    let resp = server.workspace_symbol_resolve(symbol).await;
+    let out = render_resolved_workspace_symbol(&resp, &server.uri(""));
+    expect!["myFunc (Function) @ resolve.php:1:9-1:15"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -143,15 +145,8 @@ async fn symbol_resolve_unchanged_for_closed_file() {
         "location": { "uri": "file:///nonexistent_closed.php" },
     });
     let resp = server.workspace_symbol_resolve(symbol).await;
-
-    assert!(resp["error"].is_null(), "error: {resp:?}");
-    let loc = &resp["result"]["location"];
-    assert!(
-        !loc.as_object()
-            .map(|o| o.contains_key("range"))
-            .unwrap_or(false),
-        "expected URI-only location for closed file (no range key): {loc:?}"
-    );
+    let out = render_resolved_workspace_symbol(&resp, "file:///");
+    expect!["ClosedClass (Class) @ nonexistent_closed.php [uri-only]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -174,11 +169,86 @@ async fn symbol_resolve_passthrough_for_already_resolved_location() {
         },
     });
     let resp = server.workspace_symbol_resolve(symbol).await;
+    let out = render_resolved_workspace_symbol(&resp, &server.uri(""));
+    expect!["alreadyResolved (Function) @ passthrough.php:1:9-1:24"].assert_eq(&out);
+}
 
-    assert!(resp["error"].is_null(), "error: {resp:?}");
-    let range = &resp["result"]["location"]["range"];
-    assert_eq!(range["start"]["line"], json!(1));
-    assert_eq!(range["start"]["character"], json!(9));
-    assert_eq!(range["end"]["line"], json!(1));
-    assert_eq!(range["end"]["character"], json!(24));
+#[tokio::test]
+async fn symbol_resolve_finds_first_occurrence_when_name_appears_multiple_times() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "multi.php",
+            "<?php\nclass Duplicate {}\nfunction test() { $x = new Duplicate(); }\n",
+        )
+        .await;
+    let uri = server.uri("multi.php");
+
+    let symbol = json!({
+        "name": "Duplicate",
+        "kind": 5,
+        "location": { "uri": uri },
+    });
+    let resp = server.workspace_symbol_resolve(symbol).await;
+    let out = render_resolved_workspace_symbol(&resp, &server.uri(""));
+    expect!["Duplicate (Class) @ multi.php:1:6-1:15"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn symbol_resolve_symbol_at_line_zero() {
+    let mut server = TestServer::new().await;
+    server.open("line0.php", "<?php class AtStart {}\n").await;
+    let uri = server.uri("line0.php");
+
+    let symbol = json!({
+        "name": "AtStart",
+        "kind": 5,
+        "location": { "uri": uri },
+    });
+    let resp = server.workspace_symbol_resolve(symbol).await;
+    let out = render_resolved_workspace_symbol(&resp, &server.uri(""));
+    expect!["AtStart (Class) @ line0.php:0:12-0:19"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn symbol_resolve_nonexistent_symbol_in_source() {
+    let mut server = TestServer::new().await;
+    server
+        .open("noexist.php", "<?php\nclass RealClass {}\n")
+        .await;
+    let uri = server.uri("noexist.php");
+
+    let symbol = json!({
+        "name": "NonExistentClass",
+        "kind": 5,
+        "location": { "uri": uri },
+    });
+    let resp = server.workspace_symbol_resolve(symbol).await;
+    let out = render_resolved_workspace_symbol(&resp, &server.uri(""));
+    expect!["NonExistentClass (Class) @ noexist.php [uri-only]"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn symbol_resolve_is_idempotent() {
+    let mut server = TestServer::new().await;
+    server
+        .open("idempotent.php", "<?php\nclass TestClass {}\n")
+        .await;
+    let uri = server.uri("idempotent.php");
+
+    let symbol = json!({
+        "name": "TestClass",
+        "kind": 5,
+        "location": { "uri": uri },
+    });
+
+    let resolved_once = server.workspace_symbol_resolve(symbol.clone()).await;
+    let resolved_twice = server
+        .workspace_symbol_resolve(resolved_once["result"].clone())
+        .await;
+
+    assert_eq!(
+        resolved_once["result"], resolved_twice["result"],
+        "calling resolve twice must return identical results (idempotent)"
+    );
 }

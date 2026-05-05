@@ -163,3 +163,110 @@ async fn document_link_resolve_preserves_target_tooltip_and_data() {
     ]]
     .assert_eq(&render_resolved_link(&resp, "ignored://"));
 }
+
+#[tokio::test]
+async fn document_link_resolve_external_url_roundtrips() {
+    let mut server = TestServer::new().await;
+    let link = json!({
+        "range": {
+            "start": { "line": 5, "character": 10 },
+            "end": { "line": 5, "character": 30 }
+        },
+        "target": "https://docs.example.com/api"
+    });
+
+    let resp = server.client().request("documentLink/resolve", link).await;
+    expect!["5:10-30 target=https://docs.example.com/api"]
+        .assert_eq(&render_resolved_link(&resp, "file://"));
+}
+
+#[tokio::test]
+async fn document_link_resolve_link_without_target_field() {
+    let mut server = TestServer::new().await;
+    let link = json!({
+        "range": {
+            "start": { "line": 0, "character": 5 },
+            "end": { "line": 0, "character": 15 }
+        }
+    });
+
+    let resp = server.client().request("documentLink/resolve", link).await;
+    assert!(resp["error"].is_null(), "no error for link without target");
+    let result = &resp["result"];
+    assert!(
+        result["range"].is_object(),
+        "range should be preserved: {result:?}"
+    );
+    // target may be null or absent — document_link_resolve is a passthrough
+    assert!(result["target"].is_null() || result.get("target").is_none());
+}
+
+#[tokio::test]
+async fn document_link_resolve_with_null_target() {
+    let mut server = TestServer::new().await;
+    let link = json!({
+        "range": {
+            "start": { "line": 2, "character": 5 },
+            "end": { "line": 2, "character": 15 }
+        },
+        "target": null
+    });
+
+    let resp = server.client().request("documentLink/resolve", link).await;
+    assert!(resp["error"].is_null());
+    let result = &resp["result"];
+    assert!(result["target"].is_null(), "null target must be preserved");
+}
+
+#[tokio::test]
+async fn document_link_resolve_preserves_data_field() {
+    let mut server = TestServer::new().await;
+    let link = json!({
+        "range": {
+            "start": { "line": 0, "character": 5 },
+            "end": { "line": 0, "character": 15 }
+        },
+        "target": "file://example.php",
+        "tooltip": "A file link",
+        "data": { "linkId": "456", "metadata": { "resolved": false } }
+    });
+
+    let resp = server
+        .client()
+        .request("documentLink/resolve", link.clone())
+        .await;
+    assert!(resp["error"].is_null(), "error: {:?}", resp.get("error"));
+    let result = &resp["result"];
+    assert_eq!(
+        result["data"], link["data"],
+        "data field must be preserved exactly"
+    );
+}
+
+#[tokio::test]
+async fn document_link_resolve_is_idempotent() {
+    let mut server = TestServer::new().await;
+    server
+        .open("require.php", "<?php\nrequire 'helpers.php';\n")
+        .await;
+
+    let links = server.document_link("require.php").await["result"]
+        .as_array()
+        .cloned()
+        .expect("expected links");
+    let first_link = links[0].clone();
+
+    let resolved_once = server
+        .client()
+        .request("documentLink/resolve", first_link.clone())
+        .await;
+    let resolved_twice = server
+        .client()
+        .request("documentLink/resolve", resolved_once["result"].clone())
+        .await;
+
+    assert_eq!(
+        resolved_once["result"], resolved_twice["result"],
+        "calling resolve twice must return identical results (idempotent)"
+    );
+}

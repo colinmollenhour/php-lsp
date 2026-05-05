@@ -1045,3 +1045,96 @@ pub fn lines_of(items: &[Value]) -> Vec<u32> {
         .map(|l| l["range"]["start"]["line"].as_u64().unwrap() as u32)
         .collect()
 }
+
+// ---------- resolve roundtrip rendering ----------
+
+/// Render a resolved `completionItem/resolve` response as a snapshot-friendly string.
+/// Shows label, kind, detail (signature), and documentation content.
+pub fn render_resolved_completion_item(resp: &Value) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let result = &resp["result"];
+    if result.is_null() {
+        return "<unresolved>".to_owned();
+    }
+
+    let label = result["label"].as_str().unwrap_or("?");
+    let kind = completion_kind_name(result["kind"].as_u64().unwrap_or(0));
+    let detail = result["detail"]
+        .as_str()
+        .map(|s| s.trim_end())
+        .unwrap_or("<no detail>");
+    let docs = result["documentation"]["value"]
+        .as_str()
+        .or_else(|| result["documentation"].as_str())
+        .map(|s| s.trim_end())
+        .unwrap_or("<no docs>");
+
+    format!("{label} ({kind})\ndetail: {detail}\ndocs: {docs}")
+}
+
+/// Render a resolved `inlayHint/resolve` response as a snapshot-friendly string.
+/// Shows position, label, and tooltip content.
+pub fn render_resolved_inlay_hint(resp: &Value) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let result = &resp["result"];
+    if result.is_null() {
+        return "<unresolved>".to_owned();
+    }
+
+    let line = result["position"]["line"].as_u64().unwrap_or(0);
+    let col = result["position"]["character"].as_u64().unwrap_or(0);
+    let label = match &result["label"] {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| p["value"].as_str())
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    };
+
+    let tooltip = result["tooltip"]["value"]
+        .as_str()
+        .or_else(|| result["tooltip"].as_str())
+        .map(|s| s.trim_end())
+        .unwrap_or("<no tooltip>");
+
+    format!("{line}:{col} {label}\ntooltip: {tooltip}")
+}
+
+/// Render a resolved `workspaceSymbol/resolve` response as a snapshot-friendly string.
+/// Shows symbol name, kind, and location with range (or [uri-only] if unresolved).
+pub fn render_resolved_workspace_symbol(resp: &Value, root_uri: &str) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let result = &resp["result"];
+    if result.is_null() {
+        return "<unresolved>".to_owned();
+    }
+
+    let name = result["name"].as_str().unwrap_or("?");
+    let kind = symbol_kind_name(result["kind"].as_u64().unwrap_or(0));
+    let location = &result["location"];
+    let uri = location["uri"].as_str().unwrap_or("?");
+    let prefix = if root_uri.ends_with('/') {
+        root_uri.to_owned()
+    } else {
+        format!("{root_uri}/")
+    };
+    let short = uri.strip_prefix(&prefix).unwrap_or(uri);
+
+    if let Some(range) = location["range"].as_object() {
+        let sl = range["start"]["line"].as_u64().unwrap_or(0);
+        let sc = range["start"]["character"].as_u64().unwrap_or(0);
+        let el = range["end"]["line"].as_u64().unwrap_or(0);
+        let ec = range["end"]["character"].as_u64().unwrap_or(0);
+        format!("{name} ({kind}) @ {short}:{sl}:{sc}-{el}:{ec}")
+    } else {
+        format!("{name} ({kind}) @ {short} [uri-only]")
+    }
+}

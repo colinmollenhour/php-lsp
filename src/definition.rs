@@ -329,7 +329,7 @@ pub fn find_method_in_class_hierarchy(
 }
 
 fn _name_range_from_offset(sv: SourceView<'_>, name: &str) -> Range {
-    let start_offset = str_offset(sv.source(), name);
+    let start_offset = str_offset(sv.source(), name).unwrap_or(0);
     let start = sv.position_of(start_offset);
     Range {
         start,
