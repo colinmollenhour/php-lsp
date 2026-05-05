@@ -4,6 +4,7 @@
 mod common;
 
 use common::TestServer;
+use expect_test::expect;
 
 fn has_code(notif: &serde_json::Value, code: &str) -> bool {
     notif["params"]["diagnostics"]
@@ -25,12 +26,13 @@ async fn hover_reflects_didchange_new_symbol() {
         )
         .await;
 
-    let resp = server.hover("edit.php", 1, 10).await;
-    let contents = resp["result"]["contents"].to_string();
-    assert!(
-        contents.contains("greeter") && contents.contains("string"),
-        "hover after didChange must see the new function signature, got: {contents}"
-    );
+    let out = server.hover("edit.php", 1, 10).await;
+    let rendered = common::render_hover(&out);
+    expect![[r#"
+        ```php
+        function greeter(string $name): string
+        ```"#]]
+    .assert_eq(&rendered);
 }
 
 #[tokio::test]

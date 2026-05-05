@@ -96,27 +96,11 @@ async fn document_link_require_target_is_file_uri() {
 
 #[tokio::test]
 async fn document_link_range_is_inside_quotes() {
-    // Source line 1: `require 'abc.php';`
-    // "require " = 8 chars, opening quote `'` at col 8, content starts at col 9.
-    // "abc.php" = 7 chars, so end character = 9 + 7 = 16.
     let mut server = TestServer::new().await;
     server.open("rng.php", "<?php\nrequire 'abc.php';\n").await;
-    let resp = server.document_link("rng.php").await;
-    assert!(resp["error"].is_null());
-    let links = resp["result"].as_array().expect("array");
-    assert_eq!(links.len(), 1);
-    let range = &links[0]["range"];
-    assert_eq!(range["start"]["line"], json!(1), "link is on line 1");
-    assert_eq!(
-        range["start"]["character"],
-        json!(9),
-        "path starts at char 9 (after \"require '\")"
-    );
-    assert_eq!(
-        range["end"]["character"],
-        json!(16),
-        "path ends at char 16 (9 + len('abc.php') = 16)"
-    );
+    let link = server.document_link("rng.php").await["result"][0].clone();
+    let resp = server.client().request("documentLink/resolve", link).await;
+    expect!["1:9-16 target=abc.php"].assert_eq(&render_resolved_link(&resp, &server.uri("")));
 }
 
 fn render_resolved_link(resp: &Value, root_uri: &str) -> String {

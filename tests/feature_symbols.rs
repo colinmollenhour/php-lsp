@@ -82,25 +82,20 @@ function abracadabra(): void {}
 }
 
 /// Workspace symbol search must find `User` by short name even though the FQN
-/// is `App\Model\User`. Matches on exact name + class kind + correct file URI.
+/// is `App\Model\User`.
 #[tokio::test]
 async fn workspace_symbol_finds_class_by_short_name() {
     let mut server = TestServer::with_fixture("psr4-mini").await;
     server.wait_for_index_ready().await;
-    let resp = server.workspace_symbols("User").await;
-    let symbols = resp["result"].as_array().expect("symbols array");
-    let matched = symbols.iter().find(|s| {
-        s["name"].as_str() == Some("User")
-            && s["kind"].as_u64() == Some(5)
-            && s["location"]["uri"]
-                .as_str()
-                .map(|u| u.ends_with("src/Model/User.php"))
-                .unwrap_or(false)
-    });
-    assert!(
-        matched.is_some(),
-        "expected exact class `User` in src/Model/User.php, got: {symbols:?}"
-    );
+    let out = server
+        .check_workspace_symbols(
+            r#"<?php
+        // This file won't be used; we're searching the fixture
+        "#,
+            "User",
+        )
+        .await;
+    expect!["Class       User @ src/Model/User.php:4"].assert_eq(&out);
 }
 
 // --- workspaceSymbol/resolve ---
