@@ -253,7 +253,7 @@ impl<'a> SourceView<'a> {
     }
 
     pub fn name_range(self, name: &str) -> Range {
-        let start = str_offset(self.source, name);
+        let start = str_offset(self.source, name).unwrap_or(0);
         Range {
             start: self.position_of(start),
             end: self.position_of(start + name.len() as u32),
@@ -290,29 +290,29 @@ pub fn span_to_range(source: &str, line_starts: &[u32], span: Span) -> Range {
     }
 }
 
-/// Return the byte offset of `substr` within `source`.
+/// Return the byte offset of `substr` within `source`, or None if not found.
 ///
 /// Uses pointer arithmetic when `substr` is a true sub-slice of `source`
 /// (i.e. arena-allocated names pointing into the same backing string).
 /// Falls back to a content search when the pointers differ — this handles
 /// tests and callers that pass a differently-allocated copy of the source.
-pub fn str_offset(source: &str, substr: &str) -> u32 {
+pub fn str_offset(source: &str, substr: &str) -> Option<u32> {
     let src_ptr = source.as_ptr() as usize;
     let sub_ptr = substr.as_ptr() as usize;
     if sub_ptr >= src_ptr && sub_ptr + substr.len() <= src_ptr + source.len() {
-        return (sub_ptr - src_ptr) as u32;
+        return Some((sub_ptr - src_ptr) as u32);
     }
     // Fallback: locate by content (same text, different allocation).
-    source.find(substr).unwrap_or(0) as u32
+    source.find(substr).map(|off| off as u32)
 }
 
-/// Build an LSP `Range` for a name that is a sub-slice of `source`.
-pub fn name_range(source: &str, line_starts: &[u32], name: &str) -> Range {
-    let start = str_offset(source, name);
-    Range {
+/// Build an LSP `Range` for a name that is a sub-slice of `source`, or None if not found.
+pub fn name_range(source: &str, line_starts: &[u32], name: &str) -> Option<Range> {
+    let start = str_offset(source, name)?;
+    Some(Range {
         start: offset_to_position(source, line_starts, start),
         end: offset_to_position(source, line_starts, start + name.len() as u32),
-    }
+    })
 }
 
 // ── TypeHint formatting ────────────────────────────────────────────────────────
@@ -457,7 +457,7 @@ mod tests {
     fn str_offset_finds_substr() {
         let src = "<?php\nfunction foo() {}";
         let name = &src[15..18]; // "foo"
-        assert_eq!(str_offset(src, name), 15);
+        assert_eq!(str_offset(src, name), Some(15));
     }
 
     #[test]
@@ -465,12 +465,12 @@ mod tests {
         // "foo" is a separately owned String (not a sub-slice of the source),
         // so pointer arithmetic fails. The fallback finds it by content.
         let owned = "foo".to_string();
-        assert_eq!(str_offset("<?php foo", &owned), 6);
+        assert_eq!(str_offset("<?php foo", &owned), Some(6));
     }
 
     #[test]
-    fn str_offset_unrelated_content_returns_zero() {
+    fn str_offset_unrelated_content_returns_none() {
         let owned = "bar".to_string();
-        assert_eq!(str_offset("<?php foo", &owned), 0);
+        assert_eq!(str_offset("<?php foo", &owned), None);
     }
 }

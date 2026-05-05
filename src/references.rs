@@ -386,7 +386,7 @@ fn scan_doc(
 
 /// Build a span covering exactly the declared name (not the keyword before it).
 fn declaration_name_span(source: &str, name: &str) -> Span {
-    let start = str_offset(source, name);
+    let start = str_offset(source, name).unwrap_or(0);
     Span {
         start,
         end: start + name.len() as u32,

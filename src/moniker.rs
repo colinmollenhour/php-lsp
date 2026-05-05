@@ -222,7 +222,7 @@ fn match_class_member(
 
 #[inline]
 fn cursor_on_name(source: &str, cursor_byte: u32, name: &str) -> bool {
-    let start = str_offset(source, name);
+    let start = str_offset(source, name).unwrap_or(0);
     let end = start + name.len() as u32;
     // Inclusive on the right boundary so that a cursor positioned right
     // after the name (e.g. between `bar` and `(`) — a common "just typed

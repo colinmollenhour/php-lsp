@@ -61,7 +61,7 @@ struct AllRefsVisitor<'a> {
 impl AllRefsVisitor<'_> {
     fn push_name_str(&mut self, name: &str) {
         if name == self.word {
-            let start = str_offset(self.source, name);
+            let start = str_offset(self.source, name).unwrap_or(0);
             self.out.push(Span {
                 start,
                 end: start + name.len() as u32,
@@ -386,7 +386,7 @@ impl<'arena, 'src> Visitor<'arena, 'src> for PropertyRefsVisitor<'_> {
     fn visit_class_member(&mut self, member: &ClassMember<'arena, 'src>) -> ControlFlow<()> {
         match &member.kind {
             ClassMemberKind::Property(p) if p.name == self.prop_name => {
-                let offset = str_offset(self.source, p.name);
+                let offset = str_offset(self.source, p.name).unwrap_or(0);
                 self.out.push(Span {
                     start: offset,
                     end: offset + p.name.len() as u32,
@@ -396,7 +396,7 @@ impl<'arena, 'src> Visitor<'arena, 'src> for PropertyRefsVisitor<'_> {
             ClassMemberKind::Method(m) if m.name == "__construct" => {
                 for p in m.params.iter() {
                     if p.visibility.is_some() && p.name == self.prop_name {
-                        let offset = str_offset(self.source, p.name);
+                        let offset = str_offset(self.source, p.name).unwrap_or(0);
                         self.out.push(Span {
                             start: offset,
                             end: offset + p.name.len() as u32,
