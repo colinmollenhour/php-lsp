@@ -467,7 +467,8 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
                         }
                     }
                     EnumMemberKind::ClassConst(_) => {
-                        // TODO: Handle class constants in enums
+                        // TODO: Handle class constants in enums once php-ast exposes the
+                        // initialization value for EnumMemberKind::ClassConst.
                     }
                     EnumMemberKind::TraitUse(_) => {
                         // Trait use declarations don't produce tokens
