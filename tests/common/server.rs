@@ -698,6 +698,16 @@ impl TestServer {
             .await
     }
 
+    pub async fn workspace_diagnostic_with_prev(&mut self, prev: Vec<(String, String)>) -> Value {
+        let ids: Vec<Value> = prev
+            .into_iter()
+            .map(|(uri, value)| json!({ "uri": uri, "value": value }))
+            .collect();
+        self.client
+            .request("workspace/diagnostic", json!({ "previousResultIds": ids }))
+            .await
+    }
+
     pub async fn moniker(&mut self, path: &str, line: u32, character: u32) -> Value {
         let uri = self.uri(path);
         self.client

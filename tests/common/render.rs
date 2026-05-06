@@ -1166,33 +1166,39 @@ pub fn render_workspace_diagnostic(resp: &Value, root_uri: &str) -> String {
         let uri = item["uri"].as_str().unwrap_or("?");
         let short = uri.strip_prefix(&prefix).unwrap_or(uri).to_owned();
 
-        // WorkspaceFullDocumentDiagnosticReport has the diagnostics in the "items" field directly
-        // (not nested under full_document_diagnostic_report)
-        let diags = item["items"].as_array().cloned().unwrap_or_default();
+        let diag_lines = if item["kind"].as_str() == Some("unchanged") {
+            vec!["  <unchanged>".to_owned()]
+        } else {
+            // WorkspaceFullDocumentDiagnosticReport has the diagnostics in the "items" field
+            // directly (not nested under full_document_diagnostic_report)
+            let diags = item["items"].as_array().cloned().unwrap_or_default();
 
-        let mut diag_lines = Vec::new();
-        for diag in diags {
-            let line = diag["range"]["start"]["line"].as_u64().unwrap_or(0);
-            let col = diag["range"]["start"]["character"].as_u64().unwrap_or(0);
-            let msg = diag["message"].as_str().unwrap_or("?");
-            let code = diag["code"]
-                .as_str()
-                .or_else(|| diag["code"].as_u64().map(|_| "0"))
-                .unwrap_or("<unset>");
-            let severity = match diag["severity"].as_u64() {
-                Some(1) => "error",
-                Some(2) => "warning",
-                Some(3) => "info",
-                Some(4) => "hint",
-                _ => "?",
-            };
+            let mut lines: Vec<String> = diags
+                .iter()
+                .map(|diag| {
+                    let line = diag["range"]["start"]["line"].as_u64().unwrap_or(0);
+                    let col = diag["range"]["start"]["character"].as_u64().unwrap_or(0);
+                    let msg = diag["message"].as_str().unwrap_or("?");
+                    let code = diag["code"]
+                        .as_str()
+                        .or_else(|| diag["code"].as_u64().map(|_| "0"))
+                        .unwrap_or("<unset>");
+                    let severity = match diag["severity"].as_u64() {
+                        Some(1) => "error",
+                        Some(2) => "warning",
+                        Some(3) => "info",
+                        Some(4) => "hint",
+                        _ => "?",
+                    };
+                    format!("  {line}:{col} {msg} [{code}] ({severity})")
+                })
+                .collect();
 
-            diag_lines.push(format!("  {line}:{col} {msg} [{code}] ({severity})"));
-        }
-
-        if diag_lines.is_empty() {
-            diag_lines.push("  <clean>".to_owned());
-        }
+            if lines.is_empty() {
+                lines.push("  <clean>".to_owned());
+            }
+            lines
+        };
 
         files.push((short, diag_lines));
     }
