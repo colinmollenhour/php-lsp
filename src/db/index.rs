@@ -79,7 +79,7 @@ mod tests {
         );
         let idx = file_index(host.db(), file);
         assert_eq!(idx.get().classes.len(), 1);
-        assert_eq!(idx.get().classes[0].name, "Foo");
+        assert_eq!(idx.get().classes[0].name, "Foo".into());
     }
 
     #[test]

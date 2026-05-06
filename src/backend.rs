@@ -3544,10 +3544,16 @@ async fn scan_workspace(
             // Normalize to forward slashes so patterns like "src/Service/*"
             // match on Windows where paths use backslashes.
             let path_str = path.to_string_lossy().replace('\\', "/");
-            // Check user-configured exclude patterns (simple substring/prefix match).
+            // Check user-configured exclude patterns. Match as path components
+            // to avoid false positives: "src/" should match "src/file" but not
+            // "test_src/file" (where "src/" appears as a substring within a dir name).
             if exclude_paths.iter().any(|pat| {
                 let p = pat.trim_end_matches('*').trim_end_matches('/');
-                path_str.contains(p)
+                // Split path into components and check each against the pattern.
+                // This ensures "src" matches "src/file" but not "test_src/file".
+                path_str.split('/').any(|component| component == p)
+                    || path_str.starts_with(&format!("{}/", p))
+                    || path_str.contains(&format!("/{}/", p))
             }) {
                 continue;
             }

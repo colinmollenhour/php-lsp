@@ -484,15 +484,15 @@ mod tests {
         let idx = FileIndex::extract(&doc);
         assert_eq!(idx.classes.len(), 1);
         let cls = &idx.classes[0];
-        assert_eq!(cls.name, "Greeter");
+        assert_eq!(cls.name, "Greeter".into());
         assert_eq!(cls.kind, ClassKind::Class);
         assert_eq!(cls.start_line, 1);
         assert_eq!(cls.methods.len(), 1);
         let method = &cls.methods[0];
-        assert_eq!(method.name, "greet");
+        assert_eq!(method.name, "greet".into());
         assert_eq!(method.return_type.as_deref(), Some("string"));
         assert_eq!(method.params.len(), 1);
-        assert_eq!(method.params[0].name, "name");
+        assert_eq!(method.params[0].name, "name".into());
         assert_eq!(method.params[0].type_hint.as_deref(), Some("string"));
     }
 
@@ -503,7 +503,7 @@ mod tests {
         let idx = FileIndex::extract(&doc);
         assert_eq!(idx.functions.len(), 1);
         let f = &idx.functions[0];
-        assert_eq!(f.name, "add");
+        assert_eq!(f.name, "add".into());
         assert_eq!(f.return_type.as_deref(), Some("int"));
         assert_eq!(f.params.len(), 2);
     }
@@ -514,7 +514,7 @@ mod tests {
         let doc = ParsedDoc::parse(src.to_string());
         let idx = FileIndex::extract(&doc);
         assert_eq!(idx.namespace.as_deref(), Some("App\\Services"));
-        assert_eq!(idx.classes[0].fqn, "App\\Services\\Mailer");
+        assert_eq!(idx.classes[0].fqn, "App\\Services\\Mailer".into());
     }
 
     #[test]
@@ -523,7 +523,7 @@ mod tests {
         let doc = ParsedDoc::parse(src.to_string());
         let idx = FileIndex::extract(&doc);
         assert_eq!(idx.namespace.as_deref(), Some("App\\Models"));
-        assert_eq!(idx.classes[0].fqn, "App\\Models\\User");
+        assert_eq!(idx.classes[0].fqn, "App\\Models\\User".into());
     }
 
     #[test]
@@ -533,7 +533,7 @@ mod tests {
         let idx = FileIndex::extract(&doc);
         assert_eq!(idx.classes.len(), 1);
         assert_eq!(idx.classes[0].kind, ClassKind::Interface);
-        assert_eq!(idx.classes[0].methods[0].name, "count");
+        assert_eq!(idx.classes[0].methods[0].name, "count".into());
         assert!(idx.classes[0].methods[0].is_abstract);
     }
 
@@ -543,7 +543,7 @@ mod tests {
         let doc = ParsedDoc::parse(src.to_string());
         let idx = FileIndex::extract(&doc);
         assert_eq!(idx.classes[0].kind, ClassKind::Trait);
-        assert_eq!(idx.classes[0].methods[0].name, "log");
+        assert_eq!(idx.classes[0].methods[0].name, "log".into());
     }
 
     #[test]
@@ -552,8 +552,13 @@ mod tests {
         let doc = ParsedDoc::parse(src.to_string());
         let idx = FileIndex::extract(&doc);
         assert_eq!(idx.classes[0].kind, ClassKind::Enum);
-        assert!(idx.classes[0].cases.contains(&"Active".to_string()));
-        assert!(idx.classes[0].cases.contains(&"Inactive".to_string()));
+        assert!(idx.classes[0].cases.iter().any(|c| c.as_ref() == "Active"));
+        assert!(
+            idx.classes[0]
+                .cases
+                .iter()
+                .any(|c| c.as_ref() == "Inactive")
+        );
     }
 
     #[test]
@@ -563,8 +568,8 @@ mod tests {
         let idx = FileIndex::extract(&doc);
         let cls = &idx.classes[0];
         assert_eq!(cls.properties.len(), 1);
-        assert_eq!(cls.properties[0].name, "host");
-        assert_eq!(cls.constants, vec!["VERSION"]);
+        assert_eq!(cls.properties[0].name, "host".into());
+        assert!(cls.constants.iter().any(|c| c.as_ref() == "VERSION"));
     }
 
     #[test]
@@ -572,7 +577,11 @@ mod tests {
         let src = "<?php\ntrait T {}\nclass MyClass { use T; }";
         let doc = ParsedDoc::parse(src.to_string());
         let idx = FileIndex::extract(&doc);
-        let cls = idx.classes.iter().find(|c| c.name == "MyClass").unwrap();
+        let cls = idx
+            .classes
+            .iter()
+            .find(|c| c.name.as_ref() == "MyClass")
+            .unwrap();
         assert!(cls.traits.iter().any(|t| t.as_ref() == "T"));
     }
 
@@ -595,7 +604,7 @@ mod tests {
         let cls = &idx.classes[0];
         // Should have a property from the promoted param.
         assert!(
-            cls.properties.iter().any(|p| p.name == "name"),
+            cls.properties.iter().any(|p| p.name.as_ref() == "name"),
             "expected promoted property 'name', got: {:?}",
             cls.properties.iter().map(|p| &p.name).collect::<Vec<_>>()
         );

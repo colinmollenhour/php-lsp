@@ -232,8 +232,8 @@ mod tests {
             .iter()
             .filter_map(|r| data.at(*r).map(|(_, c)| c.name.clone()))
             .collect();
-        assert!(names.contains(&"Dog".to_string()));
-        assert!(names.contains(&"Cat".to_string()));
+        assert!(names.iter().any(|n| n.as_ref() == "Dog"));
+        assert!(names.iter().any(|n| n.as_ref() == "Cat"));
     }
 
     #[test]
