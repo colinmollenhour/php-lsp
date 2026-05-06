@@ -13,6 +13,8 @@ pub use common::{
     render_workspace_symbols,
 };
 
+#[path = "navigation/feature_declaration.rs"]
+mod feature_declaration;
 #[path = "navigation/feature_definition.rs"]
 mod feature_definition;
 #[path = "navigation/feature_hierarchy.rs"]

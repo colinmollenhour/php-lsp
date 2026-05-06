@@ -78,6 +78,16 @@ fn find_abstract_declaration(
                     }
                 }
             }
+            StmtKind::Trait(t) => {
+                for member in t.members.iter() {
+                    if let ClassMemberKind::Method(m) = &member.kind
+                        && m.is_abstract
+                        && m.name == word
+                    {
+                        return Some(sv.name_range(m.name));
+                    }
+                }
+            }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
                     && let Some(r) = find_abstract_declaration(sv, inner, word)
@@ -107,10 +117,17 @@ fn find_any_declaration(
             }
             StmtKind::Class(c) => {
                 for member in c.members.iter() {
-                    if let ClassMemberKind::Method(m) = &member.kind
-                        && m.name == word
-                    {
-                        return Some(sv.name_range(m.name));
+                    match &member.kind {
+                        ClassMemberKind::Method(m) if m.name == word => {
+                            return Some(sv.name_range(m.name));
+                        }
+                        ClassMemberKind::ClassConst(cc) if cc.name == word => {
+                            return Some(sv.name_range(cc.name));
+                        }
+                        ClassMemberKind::Property(p) if p.name == bare => {
+                            return Some(sv.name_range(p.name));
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -154,10 +171,17 @@ fn find_any_declaration(
             }
             StmtKind::Enum(e) => {
                 for member in e.members.iter() {
-                    if let EnumMemberKind::Method(m) = &member.kind
-                        && m.name == word
-                    {
-                        return Some(sv.name_range(m.name));
+                    match &member.kind {
+                        EnumMemberKind::Case(c) if c.name == word => {
+                            return Some(sv.name_range(c.name));
+                        }
+                        EnumMemberKind::Method(m) if m.name == word => {
+                            return Some(sv.name_range(m.name));
+                        }
+                        EnumMemberKind::ClassConst(cc) if cc.name == word => {
+                            return Some(sv.name_range(cc.name));
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -253,149 +277,4 @@ pub fn goto_declaration_from_index(
         }
     }
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn uri(path: &str) -> Url {
-        Url::parse(&format!("file://{path}")).unwrap()
-    }
-
-    fn doc(path: &str, src: &str) -> (Url, Arc<ParsedDoc>) {
-        (uri(path), Arc::new(ParsedDoc::parse(src.to_string())))
-    }
-
-    fn pos(line: u32, character: u32) -> Position {
-        Position { line, character }
-    }
-
-    #[test]
-    fn finds_interface_method_declaration() {
-        let src = "<?php\ninterface Logger { public function log(string $msg): void; }\nclass FileLogger implements Logger { public function log(string $msg): void {} }";
-        let docs = vec![doc("/a.php", src)];
-        let loc = goto_declaration(src, &docs, pos(2, 53));
-        assert!(loc.is_some(), "expected a declaration location");
-        assert_eq!(loc.unwrap().range.start.line, 1);
-    }
-
-    #[test]
-    fn finds_abstract_method_declaration() {
-        let src = "<?php\nabstract class Base { abstract public function build(): void; }\nclass Impl extends Base { public function build(): void {} }";
-        let docs = vec![doc("/a.php", src)];
-        let loc = goto_declaration(src, &docs, pos(2, 42));
-        assert!(loc.is_some());
-        assert_eq!(loc.unwrap().range.start.line, 1);
-    }
-
-    #[test]
-    fn falls_back_to_definition_for_concrete_function() {
-        let src = "<?php\nfunction greet() {}\ngreet();";
-        let docs = vec![doc("/a.php", src)];
-        let loc = goto_declaration(src, &docs, pos(2, 2));
-        assert!(loc.is_some());
-        assert_eq!(loc.unwrap().range.start.line, 1);
-    }
-
-    #[test]
-    fn finds_interface_name_declaration() {
-        let src = "<?php\ninterface Countable {}";
-        let docs = vec![doc("/a.php", src)];
-        let loc = goto_declaration(src, &docs, pos(1, 12));
-        assert!(loc.is_some());
-        assert_eq!(loc.unwrap().range.start.line, 1);
-    }
-
-    #[test]
-    fn cross_file_interface_declaration() {
-        let impl_src =
-            "<?php\nclass Repo implements Countable { public function count(): int { return 0; } }";
-        let iface_src = "<?php\ninterface Countable { public function count(): int; }";
-        let iface_uri = uri("/iface.php");
-        let docs = vec![
-            doc("/impl.php", impl_src),
-            (
-                iface_uri.clone(),
-                Arc::new(ParsedDoc::parse(iface_src.to_string())),
-            ),
-        ];
-        let loc = goto_declaration(impl_src, &docs, pos(1, 51));
-        assert!(loc.is_some());
-        assert_eq!(loc.unwrap().uri, iface_uri);
-    }
-
-    #[test]
-    fn returns_none_for_unknown_word() {
-        let src = "<?php\n$x = 1;";
-        let docs = vec![doc("/a.php", src)];
-        let loc = goto_declaration(src, &docs, pos(1, 1));
-        assert!(loc.is_none());
-    }
-
-    #[test]
-    fn finds_enum_method_declaration() {
-        let src = "<?php\nenum Suit { public function label(): string; }\nclass Backing implements SomeInterface { public function label(): string { return ''; } }";
-        let docs = vec![doc("/a.php", src)];
-        // Position the cursor on the enum method name "label" (line 1, col ~29)
-        let loc = goto_declaration(src, &docs, pos(1, 29));
-        assert!(
-            loc.is_some(),
-            "expected declaration location for enum method"
-        );
-        assert_eq!(loc.unwrap().range.start.line, 1);
-    }
-
-    // ── goto_declaration_from_index ───────────────────────────────────────────
-
-    fn make_index(path: &str, src: &str) -> (Url, std::sync::Arc<crate::file_index::FileIndex>) {
-        use crate::file_index::FileIndex;
-        let u = uri(path);
-        let d = ParsedDoc::parse(src.to_string());
-        let idx = FileIndex::extract(&d);
-        (u, std::sync::Arc::new(idx))
-    }
-
-    #[test]
-    fn from_index_finds_abstract_method() {
-        let (animal_uri, animal_idx) = make_index(
-            "/animal.php",
-            "<?php\nabstract class Animal {\n    abstract public function speak(): string;\n}",
-        );
-        let cat_src = "<?php\nclass Cat extends Animal {\n    public function speak(): string { return 'meow'; }\n}";
-        let (cat_uri, cat_idx) = make_index("/cat.php", cat_src);
-
-        let indexes = vec![(animal_uri.clone(), animal_idx), (cat_uri, cat_idx)];
-        // "    public function " = 20 chars → 's' of speak is at char 20 on line 2.
-        let loc = goto_declaration_from_index(cat_src, &indexes, pos(2, 20));
-        assert!(loc.is_some(), "expected abstract declaration");
-        let loc = loc.unwrap();
-        assert_eq!(loc.uri, animal_uri, "should point to animal.php");
-        // "    abstract public function " = 28 chars → speak starts at char 28 on line 2.
-        assert_eq!(
-            loc.range.start.line, 2,
-            "abstract speak is on line 2 of animal.php"
-        );
-    }
-
-    #[test]
-    fn from_index_finds_interface_method() {
-        let (iface_uri, iface_idx) = make_index(
-            "/logger.php",
-            "<?php\ninterface Logger {\n    public function log(string $msg): void;\n}",
-        );
-        let impl_src = "<?php\nclass FileLogger implements Logger {\n    public function log(string $msg): void {}\n}";
-        let (impl_uri, impl_idx) = make_index("/file_logger.php", impl_src);
-
-        let indexes = vec![(iface_uri.clone(), iface_idx), (impl_uri, impl_idx)];
-        // "    public function " = 20 chars → 'l' of log at char 20 on line 2.
-        let loc = goto_declaration_from_index(impl_src, &indexes, pos(2, 20));
-        assert!(loc.is_some(), "expected interface method declaration");
-        let loc = loc.unwrap();
-        assert_eq!(loc.uri, iface_uri, "should point to logger.php");
-        assert_eq!(
-            loc.range.start.line, 2,
-            "interface log is on line 2 of logger.php"
-        );
-    }
 }
