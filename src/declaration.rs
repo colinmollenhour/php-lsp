@@ -199,6 +199,9 @@ fn find_any_declaration(
 }
 
 /// Find abstract or interface declaration using `FileIndex` entries.
+/// Returns line-only positions (character 0) for unopened files.
+/// This is a limitation of the compact FileIndex — for opened files,
+/// goto_declaration() provides precise name ranges.
 pub fn goto_declaration_from_index(
     source: &str,
     indexes: &[(
@@ -210,6 +213,7 @@ pub fn goto_declaration_from_index(
     use crate::file_index::ClassKind;
     use crate::util::word_at;
     let word = word_at(source, position)?;
+    let _bare = word.strip_prefix('$').unwrap_or(&word);
 
     let line_range = |line: u32| -> tower_lsp::lsp_types::Range {
         let p = tower_lsp::lsp_types::Position { line, character: 0 };
@@ -219,38 +223,55 @@ pub fn goto_declaration_from_index(
     // First pass: abstract/interface declarations.
     for (uri, idx) in indexes {
         for cls in &idx.classes {
-            if cls.kind == ClassKind::Interface {
-                // Interface itself.
-                if cls.name == word {
-                    return Some(Location {
-                        uri: uri.clone(),
-                        range: line_range(cls.start_line),
-                    });
-                }
-                // Abstract method in interface.
-                for m in &cls.methods {
-                    if m.name == word {
+            match cls.kind {
+                ClassKind::Interface => {
+                    // Interface itself.
+                    if cls.name == word {
                         return Some(Location {
                             uri: uri.clone(),
-                            range: line_range(m.start_line),
+                            range: line_range(cls.start_line),
                         });
                     }
-                }
-            } else if cls.is_abstract {
-                for m in &cls.methods {
-                    if m.is_abstract && m.name == word {
-                        return Some(Location {
-                            uri: uri.clone(),
-                            range: line_range(m.start_line),
-                        });
+                    // Abstract method in interface.
+                    for m in &cls.methods {
+                        if m.name == word {
+                            return Some(Location {
+                                uri: uri.clone(),
+                                range: line_range(m.start_line),
+                            });
+                        }
                     }
                 }
+                ClassKind::Trait => {
+                    // Trait abstract methods.
+                    for m in &cls.methods {
+                        if m.is_abstract && m.name == word {
+                            return Some(Location {
+                                uri: uri.clone(),
+                                range: line_range(m.start_line),
+                            });
+                        }
+                    }
+                }
+                _ if cls.is_abstract => {
+                    // Abstract methods in abstract classes.
+                    for m in &cls.methods {
+                        if m.is_abstract && m.name == word {
+                            return Some(Location {
+                                uri: uri.clone(),
+                                range: line_range(m.start_line),
+                            });
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
 
     // Second pass: any declaration.
     for (uri, idx) in indexes {
+        // Top-level functions.
         for f in &idx.functions {
             if f.name == word {
                 return Some(Location {
@@ -259,19 +280,50 @@ pub fn goto_declaration_from_index(
                 });
             }
         }
+
         for cls in &idx.classes {
+            // Class/Interface/Trait/Enum declarations.
             if cls.name == word {
                 return Some(Location {
                     uri: uri.clone(),
                     range: line_range(cls.start_line),
                 });
             }
+
+            // Methods.
             for m in &cls.methods {
                 if m.name == word {
                     return Some(Location {
                         uri: uri.clone(),
                         range: line_range(m.start_line),
                     });
+                }
+            }
+
+            // TODO: Properties (Phase 2). Currently FileIndex stores properties per-class
+            // but property lookup in unopened files requires finding the correct class context
+            // first. Enable after extending FileIndex to store class-qualified names or adding
+            // property line lookup.
+
+            // Class/Interface/Trait/Enum constants.
+            for c in &cls.constants {
+                if c.as_str() == word {
+                    return Some(Location {
+                        uri: uri.clone(),
+                        range: line_range(cls.start_line),
+                    });
+                }
+            }
+
+            // Enum cases (stored in separate `cases` field).
+            if cls.kind == ClassKind::Enum {
+                for case_name in &cls.cases {
+                    if case_name.as_str() == word {
+                        return Some(Location {
+                            uri: uri.clone(),
+                            range: line_range(cls.start_line),
+                        });
+                    }
                 }
             }
         }

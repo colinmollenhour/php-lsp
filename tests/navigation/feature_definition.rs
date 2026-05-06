@@ -499,6 +499,94 @@ async fn declaration_from_index_falls_back_to_class() {
     expect!["Widget.php:1:0-1:0"].assert_eq(&out);
 }
 
+/// Trait abstract method declaration served from unopened trait file.
+#[tokio::test]
+async fn declaration_from_index_finds_trait_abstract_method() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Renderable.php"),
+        "<?php\ntrait Renderable {\n    abstract public function render(): string;\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction output(): string { $x->render(); return ''; }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "render()", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Renderable.php:2:0-2:0"].assert_eq(&out);
+}
+
+/// Enum case declaration served from unopened enum file.
+#[tokio::test]
+async fn declaration_from_index_finds_enum_case() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Status.php"),
+        "<?php\nenum Status {\n    case Active;\n    case Inactive;\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction check(Status $s): bool { return $s === Status::Active; }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "Active", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Status.php:1:0-1:0"].assert_eq(&out);
+}
+
+/// Enum constant declaration served from unopened enum file.
+#[tokio::test]
+async fn declaration_from_index_finds_enum_constant() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Config.php"),
+        "<?php\nenum Config {\n    const DEBUG = true;\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction debug(): bool { return Config::DEBUG; }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "DEBUG", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Config.php:1:0-1:0"].assert_eq(&out);
+}
+
+/// Class constant declaration served from unopened class file.
+#[tokio::test]
+async fn declaration_from_index_finds_class_constant() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("AppConfig.php"),
+        "<?php\nclass AppConfig {\n    const VERSION = '1.0';\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction version(): string { return AppConfig::VERSION; }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "VERSION", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["AppConfig.php:1:0-1:0"].assert_eq(&out);
+}
+
 /// Word at cursor that doesn't match any open doc *or* any indexed entry
 /// returns no location.
 #[tokio::test]
