@@ -315,6 +315,30 @@ pub fn hover_at(
                         range: hover_range,
                     });
                 }
+                // Fallback: enum case in static access (e.g., `Status::Active`)
+                if let Some(sig) =
+                    scan_enum_case_of_class(&d.program().stmts, &effective_class, &word)
+                {
+                    return Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: wrap_php(&sig),
+                        }),
+                        range: hover_range,
+                    });
+                }
+                // Fallback: class constant in static access (e.g., `Foo::MY_CONST`)
+                if let Some(sig) =
+                    scan_class_const_of_class(&d.program().stmts, &effective_class, &word)
+                {
+                    return Some(Hover {
+                        contents: HoverContents::Markup(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: wrap_php(&sig),
+                        }),
+                        range: hover_range,
+                    });
+                }
             }
         }
     }
@@ -1314,6 +1338,104 @@ fn scan_method_of_class_impl<'a>(
                     if result.is_some() {
                         return result;
                     }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Return `"case ClassName::CaseName = value"` for `case_name` inside enum `class_name`.
+fn scan_enum_case_of_class(
+    stmts: &[Stmt<'_, '_>],
+    class_name: &str,
+    case_name: &str,
+) -> Option<String> {
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Enum(e) if e.name == class_name => {
+                for member in e.members.iter() {
+                    if let EnumMemberKind::Case(c) = &member.kind
+                        && c.name == case_name
+                    {
+                        let value_str = c
+                            .value
+                            .as_ref()
+                            .and_then(format_expr_literal)
+                            .map(|v| format!(" = {v}"))
+                            .unwrap_or_default();
+                        return Some(format!("case {}::{}{}", e.name, c.name, value_str));
+                    }
+                }
+                return None;
+            }
+            StmtKind::Namespace(ns) => {
+                if let NamespaceBody::Braced(inner) = &ns.body
+                    && let Some(s) = scan_enum_case_of_class(inner, class_name, case_name)
+                {
+                    return Some(s);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Return `"const CONST_NAME = value"` for `const_name` in class/interface/enum/trait `class_name`.
+fn scan_class_const_of_class(
+    stmts: &[Stmt<'_, '_>],
+    class_name: &str,
+    const_name: &str,
+) -> Option<String> {
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Class(c) if c.name == Some(class_name) => {
+                for member in c.members.iter() {
+                    if let ClassMemberKind::ClassConst(k) = &member.kind
+                        && k.name == const_name
+                    {
+                        return Some(format_class_const(k));
+                    }
+                }
+                return None;
+            }
+            StmtKind::Interface(i) if i.name == class_name => {
+                for member in i.members.iter() {
+                    if let ClassMemberKind::ClassConst(k) = &member.kind
+                        && k.name == const_name
+                    {
+                        return Some(format_class_const(k));
+                    }
+                }
+                return None;
+            }
+            StmtKind::Enum(e) if e.name == class_name => {
+                for member in e.members.iter() {
+                    if let EnumMemberKind::ClassConst(k) = &member.kind
+                        && k.name == const_name
+                    {
+                        return Some(format_class_const(k));
+                    }
+                }
+                return None;
+            }
+            StmtKind::Trait(t) if t.name == class_name => {
+                for member in t.members.iter() {
+                    if let ClassMemberKind::ClassConst(k) = &member.kind
+                        && k.name == const_name
+                    {
+                        return Some(format_class_const(k));
+                    }
+                }
+                return None;
+            }
+            StmtKind::Namespace(ns) => {
+                if let NamespaceBody::Braced(inner) = &ns.body
+                    && let Some(s) = scan_class_const_of_class(inner, class_name, const_name)
+                {
+                    return Some(s);
                 }
             }
             _ => {}
