@@ -5,7 +5,7 @@
 /// and for function parameters with a declared type hint.
 use std::sync::Arc;
 
-use php_ast::{NamespaceBody, Stmt, StmtKind};
+use php_ast::{ClassMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint};
@@ -49,17 +49,56 @@ fn param_type_for(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
             StmtKind::Function(f) => {
                 for p in f.params.iter() {
                     if p.name == word
-                        && let Some(t) = &p.type_hint
+                        && let Some(type_hint) = &p.type_hint
                     {
-                        return Some(format_type_hint(t));
+                        return Some(format_type_hint(type_hint));
+                    }
+                }
+            }
+            StmtKind::Class(c) => {
+                for member in c.members.iter() {
+                    if let ClassMemberKind::Method(m) = &member.kind {
+                        for p in m.params.iter() {
+                            if p.name == word
+                                && let Some(type_hint) = &p.type_hint
+                            {
+                                return Some(format_type_hint(type_hint));
+                            }
+                        }
+                    }
+                }
+            }
+            StmtKind::Interface(i) => {
+                for member in i.members.iter() {
+                    if let ClassMemberKind::Method(m) = &member.kind {
+                        for p in m.params.iter() {
+                            if p.name == word
+                                && let Some(type_hint) = &p.type_hint
+                            {
+                                return Some(format_type_hint(type_hint));
+                            }
+                        }
+                    }
+                }
+            }
+            StmtKind::Trait(trait_) => {
+                for member in trait_.members.iter() {
+                    if let ClassMemberKind::Method(m) = &member.kind {
+                        for p in m.params.iter() {
+                            if p.name == word
+                                && let Some(type_hint) = &p.type_hint
+                            {
+                                return Some(format_type_hint(type_hint));
+                            }
+                        }
                     }
                 }
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(t) = param_type_for(inner, word)
+                    && let Some(type_hint) = param_type_for(inner, word)
                 {
-                    return Some(t);
+                    return Some(type_hint);
                 }
             }
             _ => {}
