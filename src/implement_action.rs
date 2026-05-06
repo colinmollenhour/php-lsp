@@ -392,6 +392,7 @@ fn last_segment(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tower_lsp::lsp_types::Position;
 
     fn uri(path: &str) -> Url {
         Url::parse(&format!("file://{path}")).unwrap()
