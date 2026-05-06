@@ -533,6 +533,99 @@ $$0u;
 }
 
 #[tokio::test]
+async fn type_definition_on_class_method_param() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Config {}
+class Service {
+    public function setup(Config $c$0fg): void {}
+}
+"#,
+        )
+        .await;
+    expect!["main.php:1:6-1:12"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn type_definition_on_constructor_param() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Logger {}
+class Service {
+    public function __construct(Logger $l$0og) {}
+}
+"#,
+        )
+        .await;
+    expect!["main.php:1:6-1:12"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn type_definition_on_nullable_param() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Database {}
+function connect(?Database $d$0b): void {}
+"#,
+        )
+        .await;
+    expect!["main.php:1:6-1:14"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn type_definition_cross_file() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Model.php
+<?php
+class User {}
+
+//- /src/service.php
+<?php
+function save(User $u$0ser): void {}
+"#,
+        )
+        .await;
+    expect!["src/Model.php:1:6-1:10"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn type_definition_on_interface_typed_var() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+interface Writer { public function write(): void; }
+class FileWriter implements Writer { public function write(): void {} }
+$w = new FileWriter();
+$$0w;
+"#,
+        )
+        .await;
+    expect!["main.php:2:6-2:16"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn type_definition_scalar_returns_empty() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+function greet(string $n$0ame): void {}
+"#,
+        )
+        .await;
+    expect!["<none>"].assert_eq(&out);
+}
+
+#[tokio::test]
 async fn implementation_on_interface() {
     let mut s = TestServer::new().await;
     let out = s
@@ -548,6 +641,82 @@ class B implements Writable { public function write(): void {} }
         main.php:2:6-2:7
         main.php:3:6-3:7"#]]
     .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_on_abstract_class() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+abstract class Base$0 { abstract public function handle(): void; }
+class ConcreteA extends Base { public function handle(): void {} }
+class ConcreteB extends Base { public function handle(): void {} }
+"#,
+        )
+        .await;
+    expect![[r#"
+        main.php:2:6-2:15
+        main.php:3:6-3:15"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_multiple_classes() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Work$0er { public function execute(): void; }
+class JobA implements Worker { public function execute(): void {} }
+class JobB implements Worker { public function execute(): void {} }
+class JobC implements Worker { public function execute(): void {} }
+"#,
+        )
+        .await;
+    expect![[r#"
+        main.php:2:6-2:10
+        main.php:3:6-3:10
+        main.php:4:6-4:10"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_cross_file() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"//- /src/Contract.php
+<?php
+interface Operat$0or { public function run(): void; }
+
+//- /src/impl/Add.php
+<?php
+class Add implements Operator { public function run(): void {} }
+
+//- /src/impl/Sub.php
+<?php
+class Sub implements Operator { public function run(): void {} }
+"#,
+        )
+        .await;
+    expect![[r#"
+        src/impl/Add.php:1:6-1:9
+        src/impl/Sub.php:1:6-1:9"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_concrete_class_returns_empty() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+class Concret$0e { public function action(): void {} }
+"#,
+        )
+        .await;
+    expect!["<none>"].assert_eq(&out);
 }
 
 #[tokio::test]

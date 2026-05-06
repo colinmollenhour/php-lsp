@@ -128,3 +128,144 @@ async fn on_type_formatting_close_brace_deindents() {
         "newText must be empty (de-indent to column 0)"
     );
 }
+
+/// Close brace in nested block must align to the inner `if` indent.
+#[tokio::test]
+async fn on_type_formatting_close_brace_nested_block() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "otfmt_nested.php",
+            "<?php\nif (true) {\n    if (false) {\n        }\n}\n",
+        )
+        .await;
+
+    let resp = server
+        .on_type_formatting("otfmt_nested.php", 3, 8, "}")
+        .await;
+
+    assert!(
+        resp["error"].is_null(),
+        "onTypeFormatting error: {:?}",
+        resp
+    );
+    let edits = resp["result"]
+        .as_array()
+        .expect("} trigger must produce a TextEdit array");
+    assert_eq!(edits.len(), 1, "expected exactly one edit for nested block");
+
+    let edit = &edits[0];
+    assert_eq!(
+        edit["range"]["start"],
+        serde_json::json!({"line": 3, "character": 0}),
+        "edit must start at column 0"
+    );
+    assert_eq!(
+        edit["range"]["end"],
+        serde_json::json!({"line": 3, "character": 8}),
+        "edit must replace 8-space indent"
+    );
+    assert_eq!(
+        edit["newText"].as_str().unwrap(),
+        "    ",
+        "newText must be 4-space indent (matching inner if)"
+    );
+}
+
+/// Close brace already at correct indent produces no edits.
+#[tokio::test]
+async fn on_type_formatting_close_brace_already_aligned() {
+    let mut server = TestServer::new().await;
+    server
+        .open("otfmt_aligned.php", "<?php\nif (true) {\n}\n")
+        .await;
+
+    let resp = server
+        .on_type_formatting("otfmt_aligned.php", 2, 0, "}")
+        .await;
+
+    assert!(
+        resp["error"].is_null(),
+        "onTypeFormatting error: {:?}",
+        resp
+    );
+    let result = &resp["result"];
+    assert!(
+        result.is_null(),
+        "no edit needed when already aligned; expected null, got: {:?}",
+        result
+    );
+}
+
+/// Range formatting with a single-line range.
+#[tokio::test]
+async fn range_formatting_single_line_range() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "rfmt_single.php",
+            "<?php\nfunction ugly( $x ){return $x;}\n",
+        )
+        .await;
+
+    let resp = server
+        .range_formatting("rfmt_single.php", 1, 0, 1, 38)
+        .await;
+
+    assert!(resp["error"].is_null(), "rangeFormatting error: {:?}", resp);
+    match resp["result"].as_array() {
+        None => assert!(
+            resp["result"].is_null(),
+            "expected null (no formatter) or TextEdit array, got: {:?}",
+            resp["result"]
+        ),
+        Some(edits) => {
+            for edit in edits {
+                let start_line = edit["range"]["start"]["line"].as_u64().unwrap_or(0);
+                let end_line = edit["range"]["end"]["line"].as_u64().unwrap_or(0);
+                assert!(
+                    start_line >= 1 && end_line <= 1,
+                    "all edits should be within the specified range (line 1)"
+                );
+            }
+        }
+    }
+}
+
+/// Range formatting covering the entire file.
+#[tokio::test]
+async fn range_formatting_entire_file_range() {
+    let mut server = TestServer::new().await;
+    server
+        .open("rfmt_all.php", "<?php\nfunction ugly( $x ){return $x;}\n\n")
+        .await;
+
+    let resp = server.range_formatting("rfmt_all.php", 0, 0, 3, 0).await;
+
+    assert!(resp["error"].is_null(), "rangeFormatting error: {:?}", resp);
+    match resp["result"].as_array() {
+        None => assert!(
+            resp["result"].is_null(),
+            "expected null (no formatter) or TextEdit array, got: {:?}",
+            resp["result"]
+        ),
+        Some(edits) => {
+            assert!(
+                !edits.is_empty(),
+                "when formatter is available, whole-file range should produce edits"
+            );
+            for edit in edits {
+                assert!(
+                    edit["range"].is_object(),
+                    "TextEdit missing 'range': {:?}",
+                    edit
+                );
+                assert!(
+                    edit["newText"].is_string(),
+                    "TextEdit missing 'newText': {:?}",
+                    edit
+                );
+            }
+        }
+    }
+}
