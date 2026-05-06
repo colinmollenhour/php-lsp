@@ -578,6 +578,10 @@ impl TestServer {
         self.client.request("completionItem/resolve", item).await
     }
 
+    pub async fn code_action_resolve(&mut self, action: Value) -> Value {
+        self.client.request("codeAction/resolve", action).await
+    }
+
     pub async fn rename(&mut self, path: &str, line: u32, character: u32, new_name: &str) -> Value {
         let uri = self.uri(path);
         self.client

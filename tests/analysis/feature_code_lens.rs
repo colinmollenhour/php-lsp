@@ -378,13 +378,12 @@ async fn code_lens_resolve_bare_lens_roundtrips() {
         .await;
 
     assert!(resp["error"].is_null(), "error: {resp:?}");
+    // Snapshot the rendered lens — establishes regression baseline for the resolve path.
+    expect!["L1: <unresolved> []"].assert_eq(&render_resolved_lens(&resp));
+    // Range must survive unchanged (render_resolved_lens only shows line, not full range).
     assert_eq!(
         resp["result"]["range"], bare_lens["range"],
         "range must roundtrip"
-    );
-    assert!(
-        resp["result"]["command"].is_null(),
-        "no command should be added"
     );
 }
 
@@ -404,20 +403,27 @@ async fn code_lens_resolve_all_lenses_preserve_structure() {
         .expect("expected code lens array");
     assert!(!lenses.is_empty(), "expected code lenses");
 
+    let mut rendered = Vec::new();
     for lens in &lenses {
         let resp = server
             .client()
             .request("codeLens/resolve", lens.clone())
             .await;
         assert!(resp["error"].is_null(), "resolve error for lens: {lens:?}");
-
-        let result = &resp["result"];
-        assert!(result["range"].is_object(), "range must be preserved");
-        assert_eq!(
-            result["command"], lens["command"],
-            "command must match original"
+        assert!(
+            resp["result"]["range"].is_object(),
+            "range must be preserved"
         );
+        rendered.push(render_resolved_lens(&resp));
     }
+    let out = rendered.join("\n");
+    expect![[r#"
+        L1: 0 references [editor.action.showReferences]
+        L2: 0 references [editor.action.showReferences]
+        L2: ▶ Run test [php-lsp.runTest]
+        L3: 0 references [editor.action.showReferences]
+        L3: ▶ Run test [php-lsp.runTest]"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -438,11 +444,8 @@ async fn code_lens_resolve_with_null_command() {
         .request("codeLens/resolve", lens.clone())
         .await;
     assert!(resp["error"].is_null());
-    let result = &resp["result"];
-    assert!(
-        result["command"].is_null(),
-        "null command must be preserved"
-    );
+    // Spec requires the server not to inject a command when `null` was sent.
+    expect!["L0: <unresolved> []"].assert_eq(&render_resolved_lens(&resp));
 }
 
 #[tokio::test]
@@ -499,6 +502,9 @@ async fn code_lens_resolve_is_idempotent() {
         .request("codeLens/resolve", resolved_once["result"].clone())
         .await;
 
+    // Snapshot the result after first resolve — establishes regression baseline.
+    expect!["L1: 0 references [editor.action.showReferences]"]
+        .assert_eq(&render_resolved_lens(&resolved_once));
     assert_eq!(
         resolved_once["result"], resolved_twice["result"],
         "calling resolve twice must return identical results (idempotent)"
