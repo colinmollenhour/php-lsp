@@ -76,7 +76,7 @@ impl WorkspaceIndexData {
                     class: cls_idx as u32,
                 };
                 classes_by_name
-                    .entry(cls.name.clone())
+                    .entry(cls.name.as_ref().to_string())
                     .or_default()
                     .push(cr);
                 if let Some(parent) = &cls.parent {
@@ -159,7 +159,7 @@ pub fn workspace_index(db: &dyn Database, ws: Workspace) -> WorkspaceIndexArc {
                 class: cls_idx as u32,
             };
             classes_by_name
-                .entry(cls.name.clone())
+                .entry(cls.name.as_ref().to_string())
                 .or_default()
                 .push(cr);
             if let Some(parent) = &cls.parent {

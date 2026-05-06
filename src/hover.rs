@@ -694,7 +694,7 @@ pub fn signature_for_symbol_from_index(
 ) -> Option<String> {
     for (_, idx) in indexes {
         for f in &idx.functions {
-            if f.name == name {
+            if f.name.as_ref() == name {
                 let params_str = f
                     .params
                     .iter()
@@ -721,7 +721,7 @@ pub fn signature_for_symbol_from_index(
         }
         for cls in &idx.classes {
             for m in &cls.methods {
-                if m.name == name {
+                if m.name.as_ref() == name {
                     let params_str = m
                         .params
                         .iter()
@@ -764,7 +764,7 @@ pub fn docs_for_symbol_from_index(
         // Look for docblock text in the index.
         for (_, idx) in indexes {
             for f in &idx.functions {
-                if f.name == name {
+                if f.name.as_ref() == name {
                     if let Some(raw) = &f.doc {
                         let db = crate::docblock::parse_docblock(raw);
                         let md = db.to_markdown();
@@ -778,7 +778,7 @@ pub fn docs_for_symbol_from_index(
             }
             for cls in &idx.classes {
                 for m in &cls.methods {
-                    if m.name == name {
+                    if m.name.as_ref() == name {
                         if let Some(raw) = &m.doc {
                             let db = crate::docblock::parse_docblock(raw);
                             let md = db.to_markdown();
@@ -824,7 +824,7 @@ pub fn class_hover_from_index(
 
     for (_, idx) in indexes {
         for cls in &idx.classes {
-            if cls.name == word || cls.fqn.trim_start_matches('\\') == word {
+            if cls.name.as_ref() == word || cls.fqn.as_ref().trim_start_matches('\\') == word {
                 let kw = match cls.kind {
                     ClassKind::Interface => "interface",
                     ClassKind::Trait => "trait",

@@ -19,37 +19,37 @@ use crate::docblock::docblock_before;
 
 #[derive(Debug, Clone, Default)]
 pub struct FileIndex {
-    pub namespace: Option<String>,
+    pub namespace: Option<Box<str>>,
     pub functions: Vec<FunctionDef>,
     pub classes: Vec<ClassDef>,
-    pub constants: Vec<String>,
+    pub constants: Vec<Box<str>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionDef {
-    pub name: String,
+    pub name: Box<str>,
     /// Fully-qualified name: `\Namespace\function_name` or just `function_name`.
-    pub fqn: String,
+    pub fqn: Box<str>,
     pub params: Vec<ParamDef>,
-    pub return_type: Option<String>,
+    pub return_type: Option<Box<str>>,
     /// Raw docblock text (the `/** … */` comment before the declaration).
-    pub doc: Option<String>,
+    pub doc: Option<Box<str>>,
     pub start_line: u32,
 }
 
 #[derive(Debug, Clone)]
 pub struct ParamDef {
-    pub name: String,
-    pub type_hint: Option<String>,
+    pub name: Box<str>,
+    pub type_hint: Option<Box<str>>,
     pub has_default: bool,
     pub variadic: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct ClassDef {
-    pub name: String,
+    pub name: Box<str>,
     /// Fully-qualified name.
-    pub fqn: String,
+    pub fqn: Box<str>,
     pub kind: ClassKind,
     pub is_abstract: bool,
     /// `extends` clause as written in source (may be short name or FQN).
@@ -58,9 +58,9 @@ pub struct ClassDef {
     pub traits: Vec<Arc<str>>,
     pub methods: Vec<MethodDef>,
     pub properties: Vec<PropertyDef>,
-    pub constants: Vec<String>,
+    pub constants: Vec<Box<str>>,
     /// Enum case names (only populated for `ClassKind::Enum`).
-    pub cases: Vec<String>,
+    pub cases: Vec<Box<str>>,
     pub start_line: u32,
 }
 
@@ -74,13 +74,13 @@ pub enum ClassKind {
 
 #[derive(Debug, Clone)]
 pub struct MethodDef {
-    pub name: String,
+    pub name: Box<str>,
     pub is_static: bool,
     pub is_abstract: bool,
     pub visibility: Visibility,
     pub params: Vec<ParamDef>,
-    pub return_type: Option<String>,
-    pub doc: Option<String>,
+    pub return_type: Option<Box<str>>,
+    pub doc: Option<Box<str>>,
     pub start_line: u32,
 }
 
@@ -93,9 +93,9 @@ pub enum Visibility {
 
 #[derive(Debug, Clone)]
 pub struct PropertyDef {
-    pub name: String,
+    pub name: Box<str>,
     pub is_static: bool,
-    pub type_hint: Option<String>,
+    pub type_hint: Option<Box<str>>,
     pub visibility: Visibility,
     pub start_line: u32,
 }
@@ -115,10 +115,10 @@ impl FileIndex {
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
-fn fqn(namespace: Option<&str>, name: &str) -> String {
+fn fqn(namespace: Option<&str>, name: &str) -> Box<str> {
     match namespace {
-        Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, name),
-        _ => name.to_string(),
+        Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, name).into(),
+        _ => name.into(),
     }
 }
 
@@ -130,13 +130,13 @@ fn collect_stmts(
     index: &mut FileIndex,
 ) {
     // Track the current namespace for unbraced `namespace Foo;` statements.
-    let mut cur_ns: Option<String> = namespace.map(str::to_string);
+    let mut cur_ns: Option<Box<str>> = namespace.map(|s| s.into());
 
     for stmt in stmts {
         match &stmt.kind {
             // ── Namespace ────────────────────────────────────────────────────
             StmtKind::Namespace(ns) => {
-                let ns_name = ns.name.as_ref().map(|n| n.to_string_repr().to_string());
+                let ns_name = ns.name.as_ref().map(|n| n.to_string_repr().into());
 
                 match &ns.body {
                     NamespaceBody::Braced(inner) => {
@@ -160,14 +160,14 @@ fn collect_stmts(
 
             // ── Top-level function ───────────────────────────────────────────
             StmtKind::Function(f) => {
-                let doc_text = docblock_before(source, stmt.span.start);
+                let doc_text = docblock_before(source, stmt.span.start).map(|s| s.into());
                 let start_line = view.position_of(stmt.span.start).line;
                 let ns = cur_ns.as_deref();
                 index.functions.push(FunctionDef {
-                    name: f.name.to_string(),
+                    name: f.name.into(),
                     fqn: fqn(ns, f.name),
                     params: extract_params(&f.params),
-                    return_type: f.return_type.as_ref().map(format_type_hint),
+                    return_type: f.return_type.as_ref().map(|t| format_type_hint(t).into()),
                     doc: doc_text,
                     start_line,
                 });
@@ -180,7 +180,7 @@ fn collect_stmts(
                 let ns = cur_ns.as_deref();
 
                 let mut class_def = ClassDef {
-                    name: class_name.to_string(),
+                    name: class_name.into(),
                     fqn: fqn(ns, class_name),
                     kind: ClassKind::Class,
                     is_abstract: c.modifiers.is_abstract,
@@ -204,7 +204,7 @@ fn collect_stmts(
                 for member in c.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
-                            let mdoc = docblock_before(source, member.span.start);
+                            let mdoc = docblock_before(source, member.span.start).map(|s| s.into());
                             let mstart = view.position_of(member.span.start).line;
                             let vis = method_visibility(m.visibility);
                             let method_params = extract_params(&m.params);
@@ -214,24 +214,27 @@ fn collect_stmts(
                                     let pvis = method_visibility(ast_param.visibility);
                                     let pstart = view.position_of(ast_param.span.start).line;
                                     class_def.properties.push(PropertyDef {
-                                        name: ast_param.name.to_string(),
+                                        name: ast_param.name.into(),
                                         is_static: false,
                                         type_hint: ast_param
                                             .type_hint
                                             .as_ref()
-                                            .map(format_type_hint),
+                                            .map(|t| format_type_hint(t).into()),
                                         visibility: pvis,
                                         start_line: pstart,
                                     });
                                 }
                             }
                             class_def.methods.push(MethodDef {
-                                name: m.name.to_string(),
+                                name: m.name.into(),
                                 is_static: m.is_static,
                                 is_abstract: m.is_abstract,
                                 visibility: vis,
                                 params: method_params,
-                                return_type: m.return_type.as_ref().map(format_type_hint),
+                                return_type: m
+                                    .return_type
+                                    .as_ref()
+                                    .map(|t| format_type_hint(t).into()),
                                 doc: mdoc,
                                 start_line: mstart,
                             });
@@ -240,15 +243,15 @@ fn collect_stmts(
                             let vis = method_visibility(p.visibility);
                             let pstart = view.position_of(member.span.start).line;
                             class_def.properties.push(PropertyDef {
-                                name: p.name.to_string(),
+                                name: p.name.into(),
                                 is_static: p.is_static,
-                                type_hint: p.type_hint.as_ref().map(format_type_hint),
+                                type_hint: p.type_hint.as_ref().map(|t| format_type_hint(t).into()),
                                 visibility: vis,
                                 start_line: pstart,
                             });
                         }
                         ClassMemberKind::ClassConst(cc) => {
-                            class_def.constants.push(cc.name.to_string());
+                            class_def.constants.push(cc.name.into());
                         }
                         ClassMemberKind::TraitUse(tu) => {
                             for t in tu.traits.iter() {
@@ -268,7 +271,7 @@ fn collect_stmts(
                 let ns = cur_ns.as_deref();
 
                 let mut iface_def = ClassDef {
-                    name: i.name.to_string(),
+                    name: i.name.into(),
                     fqn: fqn(ns, i.name),
                     kind: ClassKind::Interface,
                     is_abstract: true,
@@ -289,21 +292,24 @@ fn collect_stmts(
                 for member in i.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
-                            let mdoc = docblock_before(source, member.span.start);
+                            let mdoc = docblock_before(source, member.span.start).map(|s| s.into());
                             let mstart = view.position_of(member.span.start).line;
                             iface_def.methods.push(MethodDef {
-                                name: m.name.to_string(),
+                                name: m.name.into(),
                                 is_static: m.is_static,
                                 is_abstract: true,
                                 visibility: Visibility::Public,
                                 params: extract_params(&m.params),
-                                return_type: m.return_type.as_ref().map(format_type_hint),
+                                return_type: m
+                                    .return_type
+                                    .as_ref()
+                                    .map(|t| format_type_hint(t).into()),
                                 doc: mdoc,
                                 start_line: mstart,
                             });
                         }
                         ClassMemberKind::ClassConst(cc) => {
-                            iface_def.constants.push(cc.name.to_string());
+                            iface_def.constants.push(cc.name.into());
                         }
                         _ => {}
                     }
@@ -317,7 +323,7 @@ fn collect_stmts(
                 let ns = cur_ns.as_deref();
 
                 let mut trait_def = ClassDef {
-                    name: t.name.to_string(),
+                    name: t.name.into(),
                     fqn: fqn(ns, t.name),
                     kind: ClassKind::Trait,
                     is_abstract: false,
@@ -334,16 +340,19 @@ fn collect_stmts(
                 for member in t.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
-                            let mdoc = docblock_before(source, member.span.start);
+                            let mdoc = docblock_before(source, member.span.start).map(|s| s.into());
                             let mstart = view.position_of(member.span.start).line;
                             let vis = method_visibility(m.visibility);
                             trait_def.methods.push(MethodDef {
-                                name: m.name.to_string(),
+                                name: m.name.into(),
                                 is_static: m.is_static,
                                 is_abstract: m.is_abstract,
                                 visibility: vis,
                                 params: extract_params(&m.params),
-                                return_type: m.return_type.as_ref().map(format_type_hint),
+                                return_type: m
+                                    .return_type
+                                    .as_ref()
+                                    .map(|t| format_type_hint(t).into()),
                                 doc: mdoc,
                                 start_line: mstart,
                             });
@@ -352,15 +361,15 @@ fn collect_stmts(
                             let vis = method_visibility(p.visibility);
                             let pstart = view.position_of(member.span.start).line;
                             trait_def.properties.push(PropertyDef {
-                                name: p.name.to_string(),
+                                name: p.name.into(),
                                 is_static: p.is_static,
-                                type_hint: p.type_hint.as_ref().map(format_type_hint),
+                                type_hint: p.type_hint.as_ref().map(|t| format_type_hint(t).into()),
                                 visibility: vis,
                                 start_line: pstart,
                             });
                         }
                         ClassMemberKind::ClassConst(cc) => {
-                            trait_def.constants.push(cc.name.to_string());
+                            trait_def.constants.push(cc.name.into());
                         }
                         ClassMemberKind::TraitUse(tu) => {
                             for tr in tu.traits.iter() {
@@ -380,7 +389,7 @@ fn collect_stmts(
                 let ns = cur_ns.as_deref();
 
                 let mut enum_def = ClassDef {
-                    name: e.name.to_string(),
+                    name: e.name.into(),
                     fqn: fqn(ns, e.name),
                     kind: ClassKind::Enum,
                     is_abstract: false,
@@ -401,25 +410,28 @@ fn collect_stmts(
                 for member in e.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Case(c) => {
-                            enum_def.cases.push(c.name.to_string());
+                            enum_def.cases.push(c.name.into());
                         }
                         EnumMemberKind::Method(m) => {
-                            let mdoc = docblock_before(source, member.span.start);
+                            let mdoc = docblock_before(source, member.span.start).map(|s| s.into());
                             let mstart = view.position_of(member.span.start).line;
                             let vis = method_visibility(m.visibility);
                             enum_def.methods.push(MethodDef {
-                                name: m.name.to_string(),
+                                name: m.name.into(),
                                 is_static: m.is_static,
                                 is_abstract: m.is_abstract,
                                 visibility: vis,
                                 params: extract_params(&m.params),
-                                return_type: m.return_type.as_ref().map(format_type_hint),
+                                return_type: m
+                                    .return_type
+                                    .as_ref()
+                                    .map(|t| format_type_hint(t).into()),
                                 doc: mdoc,
                                 start_line: mstart,
                             });
                         }
                         EnumMemberKind::ClassConst(cc) => {
-                            enum_def.constants.push(cc.name.to_string());
+                            enum_def.constants.push(cc.name.into());
                         }
                         _ => {}
                     }
@@ -430,7 +442,7 @@ fn collect_stmts(
             // ── Top-level const ──────────────────────────────────────────────
             StmtKind::Const(consts) => {
                 for c in consts.iter() {
-                    index.constants.push(c.name.to_string());
+                    index.constants.push(c.name.into());
                 }
             }
 
@@ -443,8 +455,8 @@ fn extract_params<'a, 'b>(params: &[php_ast::Param<'a, 'b>]) -> Vec<ParamDef> {
     params
         .iter()
         .map(|p| ParamDef {
-            name: p.name.to_string(),
-            type_hint: p.type_hint.as_ref().map(format_type_hint),
+            name: p.name.into(),
+            type_hint: p.type_hint.as_ref().map(|t| format_type_hint(t).into()),
             has_default: p.default.is_some(),
             variadic: p.variadic,
         })

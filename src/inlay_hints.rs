@@ -64,41 +64,45 @@ fn collect_defs_from_workspace(
 ) {
     for (_, idx) in workspace_files {
         for func in &idx.functions {
-            if map.contains_key(&func.name) {
+            let func_name = func.name.to_string();
+            if map.contains_key(&func_name) {
                 continue;
             }
-            let params: Vec<String> = func.params.iter().map(|p| p.name.clone()).collect();
+            let params: Vec<String> = func.params.iter().map(|p| p.name.to_string()).collect();
             let variadic_last = func.params.last().map(|p| p.variadic).unwrap_or(false);
             map.insert(
-                func.name.clone(),
+                func_name,
                 FuncDef {
                     params,
                     variadic_last,
-                    return_type: func.return_type.clone(),
+                    return_type: func.return_type.as_ref().map(|r| r.to_string()),
                 },
             );
         }
         for class in &idx.classes {
             for method in &class.methods {
-                if map.contains_key(&method.name) {
+                let method_name = method.name.to_string();
+                if map.contains_key(&method_name) {
                     continue;
                 }
-                let params: Vec<String> = method.params.iter().map(|p| p.name.clone()).collect();
+                let params: Vec<String> =
+                    method.params.iter().map(|p| p.name.to_string()).collect();
                 let variadic_last = method.params.last().map(|p| p.variadic).unwrap_or(false);
                 // Also register __construct under the class name so `new ClassName(...)` gets hints.
-                if method.name == "__construct" {
-                    map.entry(class.name.clone()).or_insert_with(|| FuncDef {
-                        params: params.clone(),
-                        variadic_last,
-                        return_type: None,
-                    });
+                if method_name == "__construct" {
+                    map.entry(class.name.to_string())
+                        .or_insert_with(|| FuncDef {
+                            params: params.clone(),
+                            variadic_last,
+                            return_type: None,
+                        });
                 }
                 map.insert(
-                    method.name.clone(),
+                    method_name,
                     FuncDef {
                         params,
                         variadic_last,
-                        return_type: method.return_type.clone(),
+                        return_type: method.return_type.as_ref().map(|r| r.to_string()),
                     },
                 );
             }

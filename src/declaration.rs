@@ -226,7 +226,7 @@ pub fn goto_declaration_from_index(
             match cls.kind {
                 ClassKind::Interface => {
                     // Interface itself.
-                    if cls.name == word {
+                    if cls.name.as_ref() == word {
                         return Some(Location {
                             uri: uri.clone(),
                             range: line_range(cls.start_line),
@@ -234,7 +234,7 @@ pub fn goto_declaration_from_index(
                     }
                     // Abstract method in interface.
                     for m in &cls.methods {
-                        if m.name == word {
+                        if m.name.as_ref() == word {
                             return Some(Location {
                                 uri: uri.clone(),
                                 range: line_range(m.start_line),
@@ -245,7 +245,7 @@ pub fn goto_declaration_from_index(
                 ClassKind::Trait => {
                     // Trait abstract methods.
                     for m in &cls.methods {
-                        if m.is_abstract && m.name == word {
+                        if m.is_abstract && m.name.as_ref() == word {
                             return Some(Location {
                                 uri: uri.clone(),
                                 range: line_range(m.start_line),
@@ -256,7 +256,7 @@ pub fn goto_declaration_from_index(
                 _ if cls.is_abstract => {
                     // Abstract methods in abstract classes.
                     for m in &cls.methods {
-                        if m.is_abstract && m.name == word {
+                        if m.is_abstract && m.name.as_ref() == word {
                             return Some(Location {
                                 uri: uri.clone(),
                                 range: line_range(m.start_line),
@@ -273,7 +273,7 @@ pub fn goto_declaration_from_index(
     for (uri, idx) in indexes {
         // Top-level functions.
         for f in &idx.functions {
-            if f.name == word {
+            if f.name.as_ref() == word {
                 return Some(Location {
                     uri: uri.clone(),
                     range: line_range(f.start_line),
@@ -283,7 +283,7 @@ pub fn goto_declaration_from_index(
 
         for cls in &idx.classes {
             // Class/Interface/Trait/Enum declarations.
-            if cls.name == word {
+            if cls.name.as_ref() == word {
                 return Some(Location {
                     uri: uri.clone(),
                     range: line_range(cls.start_line),
@@ -292,7 +292,7 @@ pub fn goto_declaration_from_index(
 
             // Methods.
             for m in &cls.methods {
-                if m.name == word {
+                if m.name.as_ref() == word {
                     return Some(Location {
                         uri: uri.clone(),
                         range: line_range(m.start_line),
@@ -307,7 +307,7 @@ pub fn goto_declaration_from_index(
 
             // Class/Interface/Trait/Enum constants.
             for c in &cls.constants {
-                if c.as_str() == word {
+                if c.as_ref() == word {
                     return Some(Location {
                         uri: uri.clone(),
                         range: line_range(cls.start_line),
@@ -318,7 +318,7 @@ pub fn goto_declaration_from_index(
             // Enum cases (stored in separate `cases` field).
             if cls.kind == ClassKind::Enum {
                 for case_name in &cls.cases {
-                    if case_name.as_str() == word {
+                    if case_name.as_ref() == word {
                         return Some(Location {
                             uri: uri.clone(),
                             range: line_range(cls.start_line),

@@ -487,7 +487,7 @@ pub fn workspace_symbols_from_index(
             for f in &idx.functions {
                 if fuzzy_camel_match(term, &f.name) {
                     results.push(SymbolInformation {
-                        name: f.name.clone(),
+                        name: f.name.to_string(),
                         kind: SymbolKind::FUNCTION,
                         location: Location {
                             uri: uri.clone(),
@@ -508,7 +508,7 @@ pub fn workspace_symbols_from_index(
             };
             if matches_kind(class_kind) && fuzzy_camel_match(term, &cls.name) {
                 results.push(SymbolInformation {
-                    name: cls.name.clone(),
+                    name: cls.name.to_string(),
                     kind: class_kind,
                     location: Location {
                         uri: uri.clone(),
@@ -523,7 +523,7 @@ pub fn workspace_symbols_from_index(
                 for m in &cls.methods {
                     if fuzzy_camel_match(term, &m.name) {
                         results.push(SymbolInformation {
-                            name: m.name.clone(),
+                            name: m.name.to_string(),
                             kind: SymbolKind::METHOD,
                             location: Location {
                                 uri: uri.clone(),
@@ -531,7 +531,7 @@ pub fn workspace_symbols_from_index(
                             },
                             tags: None,
                             deprecated: None,
-                            container_name: Some(cls.name.clone()),
+                            container_name: Some(cls.name.to_string()),
                         });
                     }
                 }
@@ -540,7 +540,7 @@ pub fn workspace_symbols_from_index(
                 for case in &cls.cases {
                     if fuzzy_camel_match(term, case) {
                         results.push(SymbolInformation {
-                            name: case.clone(),
+                            name: case.to_string(),
                             kind: SymbolKind::ENUM_MEMBER,
                             location: Location {
                                 uri: uri.clone(),
@@ -548,7 +548,7 @@ pub fn workspace_symbols_from_index(
                             },
                             tags: None,
                             deprecated: None,
-                            container_name: Some(cls.name.clone()),
+                            container_name: Some(cls.name.to_string()),
                         });
                     }
                 }

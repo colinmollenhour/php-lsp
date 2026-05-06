@@ -176,7 +176,7 @@ pub fn find_in_indexes(
     for (uri, idx) in indexes {
         // Check top-level functions.
         for f in &idx.functions {
-            if f.name == bare || f.name == name {
+            if f.name.as_ref() == bare || f.name.as_ref() == name {
                 let pos = tower_lsp::lsp_types::Position {
                     line: f.start_line,
                     character: 0,
@@ -192,7 +192,7 @@ pub fn find_in_indexes(
         }
         // Check classes / interfaces / traits / enums and their members.
         for cls in &idx.classes {
-            if cls.name == bare || cls.name == name {
+            if cls.name.as_ref() == bare || cls.name.as_ref() == name {
                 let pos = tower_lsp::lsp_types::Position {
                     line: cls.start_line,
                     character: 0,
@@ -207,7 +207,7 @@ pub fn find_in_indexes(
             }
             // Methods.
             for m in &cls.methods {
-                if m.name == name {
+                if m.name.as_ref() == name {
                     let pos = tower_lsp::lsp_types::Position {
                         line: m.start_line,
                         character: 0,
@@ -223,7 +223,7 @@ pub fn find_in_indexes(
             }
             // Properties (stored without `$`).
             for p in &cls.properties {
-                if p.name == bare {
+                if p.name.as_ref() == bare {
                     let pos = tower_lsp::lsp_types::Position {
                         line: p.start_line,
                         character: 0,
@@ -239,7 +239,7 @@ pub fn find_in_indexes(
             }
             // Class constants.
             for cc in &cls.constants {
-                if cc.as_str() == name {
+                if cc.as_ref() == name {
                     let pos = tower_lsp::lsp_types::Position {
                         line: cls.start_line,
                         character: 0,
@@ -255,7 +255,7 @@ pub fn find_in_indexes(
             }
             // Enum cases.
             for case in &cls.cases {
-                if case.as_str() == name {
+                if case.as_ref() == name {
                     let pos = tower_lsp::lsp_types::Position {
                         line: cls.start_line,
                         character: 0,
@@ -297,11 +297,13 @@ pub fn find_method_in_class_hierarchy(
         }
         for (uri, idx) in indexes {
             for cls in &idx.classes {
-                if cls.name != current && cls.fqn.trim_start_matches('\\') != current.as_str() {
+                if cls.name.as_ref() != current.as_str()
+                    && cls.fqn.as_ref().trim_start_matches('\\') != current.as_str()
+                {
                     continue;
                 }
                 for m in &cls.methods {
-                    if m.name == method_name {
+                    if m.name.as_ref() == method_name {
                         let pos = tower_lsp::lsp_types::Position {
                             line: m.start_line,
                             character: 0,
