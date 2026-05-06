@@ -66,6 +66,56 @@ pub fn canonicalize_workspace_edit(edit: &Value, root_uri: &str) -> String {
     out.trim_end_matches('\n').to_owned()
 }
 
+/// Render a TextEdit array (the `result` payload from `textDocument/formatting`,
+/// `textDocument/rangeFormatting`, `textDocument/willSaveWaitUntil`, etc.) into
+/// a stable snapshot form suitable for `expect_test`:
+///
+/// - Each edit rendered as `L:C-L:C → "newText"` with `\n` visible as `\n` and `\r` as `\r`
+/// - Edits sorted by position for deterministic output
+/// - Handles null result (no formatter available) separately
+pub fn render_text_edits(resp: &Value) -> String {
+    let result = &resp["result"];
+    if result.is_null() {
+        return "(no formatter available)".to_owned();
+    }
+
+    let Some(edits) = result.as_array() else {
+        return format!("<invalid TextEdit array: {result:?}>");
+    };
+
+    if edits.is_empty() {
+        return "(no changes needed)".to_owned();
+    }
+
+    let mut sorted: Vec<&Value> = edits.iter().collect();
+    sorted.sort_by_key(|e| {
+        (
+            e["range"]["start"]["line"].as_u64().unwrap_or(0),
+            e["range"]["start"]["character"].as_u64().unwrap_or(0),
+            e["range"]["end"]["line"].as_u64().unwrap_or(0),
+            e["range"]["end"]["character"].as_u64().unwrap_or(0),
+        )
+    });
+
+    let mut out = String::new();
+    for e in sorted {
+        let s = &e["range"]["start"];
+        let en = &e["range"]["end"];
+        let text = e["newText"].as_str().unwrap_or("");
+        // Escape newlines for visibility in snapshots
+        let escaped = text.replace('\n', "\\n").replace('\r', "\\r");
+        out.push_str(&format!(
+            "{}:{}-{}:{} → {}\n",
+            s["line"].as_u64().unwrap_or(0),
+            s["character"].as_u64().unwrap_or(0),
+            en["line"].as_u64().unwrap_or(0),
+            en["character"].as_u64().unwrap_or(0),
+            format!("{:?}", escaped),
+        ));
+    }
+    out.trim_end_matches('\n').to_owned()
+}
+
 // ---------- symbol / kind name tables ----------
 
 fn symbol_kind_name(k: u64) -> &'static str {

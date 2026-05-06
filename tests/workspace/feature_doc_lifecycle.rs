@@ -6,6 +6,8 @@ use super::*;
 use expect_test::expect;
 use serde_json::Value;
 
+use crate::common::render_text_edits;
+
 /// Render a `publishDiagnostics` notification (or a `didSave` /
 /// `didChange` reply that has the same shape) as one line per diagnostic:
 /// `L:C-L:C [severity] code: message`. Severity is the LSP enum
@@ -286,6 +288,10 @@ async fn will_save_does_not_disturb_pending_did_change() {
 }
 
 // --- willSaveWaitUntil ---
+//
+// `willSaveWaitUntil` is a request that returns formatting edits to be applied
+// before save. If no formatter is available, it returns null. Otherwise it returns
+// a TextEdit array with the formatting changes.
 
 #[tokio::test]
 async fn will_save_wait_until_returns_null_or_empty_for_formatted_file() {
@@ -294,6 +300,25 @@ async fn will_save_wait_until_returns_null_or_empty_for_formatted_file() {
 
     let resp = server.will_save_wait_until("wswu_clean.php").await;
     assert!(resp["error"].is_null(), "unexpected error: {resp:?}");
+
+    expect![r#"(no formatter available)"#].assert_eq(&render_text_edits(&resp));
+}
+
+#[tokio::test]
+async fn will_save_wait_until_on_already_formatted_code() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "wswu_formatted.php",
+            "<?php\n\nfunction greet(): void\n{\n}\n",
+        )
+        .await;
+
+    let resp = server.will_save_wait_until("wswu_formatted.php").await;
+    assert!(resp["error"].is_null(), "unexpected error: {resp:?}");
+
+    // If a formatter is available and code is already clean, it returns
+    // null or no changes needed; both are valid per LSP spec
     let result = &resp["result"];
     assert!(
         result.is_null() || result.as_array().map(|a| a.is_empty()).unwrap_or(false),
@@ -302,7 +327,7 @@ async fn will_save_wait_until_returns_null_or_empty_for_formatted_file() {
 }
 
 #[tokio::test]
-async fn will_save_wait_until_returns_null_or_edits_for_unformatted_file() {
+async fn will_save_wait_until_returns_edits_or_null_for_unformatted_file() {
     let mut server = TestServer::new().await;
     server
         .open("wswu_ugly.php", "<?php\nfunction ugly( $x ){return $x;}\n")
@@ -313,6 +338,7 @@ async fn will_save_wait_until_returns_null_or_edits_for_unformatted_file() {
 
     let result = &resp["result"];
     if let Some(edits) = result.as_array() {
+        // Formatter is available; verify the edit structure
         for edit in edits {
             assert!(
                 edit["range"]["start"].is_object() && edit["range"]["end"].is_object(),
@@ -326,6 +352,48 @@ async fn will_save_wait_until_returns_null_or_edits_for_unformatted_file() {
     } else {
         assert!(result.is_null(), "expected null or array, got: {result:?}");
     }
+}
+
+#[tokio::test]
+async fn will_save_wait_until_on_unopened_file_returns_null() {
+    // If the file is not open in the editor, willSaveWaitUntil should still
+    // handle it gracefully (even though LSP spec says it's for open documents).
+    let mut server = TestServer::new().await;
+
+    let resp = server.will_save_wait_until("wswu_never_opened.php").await;
+    assert!(resp["error"].is_null(), "unexpected error: {resp:?}");
+
+    // Result should be null because the file is not in the document store
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
+}
+
+#[tokio::test]
+async fn will_save_wait_until_on_empty_file() {
+    let mut server = TestServer::new().await;
+    server.open("wswu_empty.php", "").await;
+
+    let resp = server.will_save_wait_until("wswu_empty.php").await;
+    assert!(resp["error"].is_null(), "unexpected error: {resp:?}");
+
+    // Empty file should return null or no edits needed
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
+}
+
+#[tokio::test]
+async fn will_save_wait_until_without_php_tag() {
+    // PHP snippets without <?php tag should be handled (formatter adds wrapper)
+    let mut server = TestServer::new().await;
+    server.open("wswu_no_tag.php", "function test( ){}\n").await;
+
+    let resp = server.will_save_wait_until("wswu_no_tag.php").await;
+    assert!(resp["error"].is_null(), "unexpected error: {resp:?}");
+
+    // Should return null or edits depending on formatter availability
+    let result = &resp["result"];
+    assert!(
+        result.is_null() || result.as_array().is_some(),
+        "expected null or TextEdit array, got: {result:?}"
+    );
 }
 
 // --- didChange ---
