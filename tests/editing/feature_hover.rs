@@ -1392,3 +1392,252 @@ echo $c->se$0tting;
         ```"#]]
     .assert_eq(&v);
 }
+
+// ── Match arm hover (enum case in static access) ──────────────────────────────
+
+/// Hovering on enum case in a match arm should show the case signature.
+/// This fixes the bug where Status::Active in `match ($s) { Status::Active => ... }`
+/// would show nothing (only worked for the declaration site).
+#[tokio::test]
+async fn hover_enum_case_in_match_arm() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+enum Status { case Active; case Inactive; }
+$status = Status::Active;
+match ($status) {
+    Status::Act$0ive => echo 'active',
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        ```php
+        case Status::Active
+        ```"#]]
+    .assert_eq(&v);
+}
+
+/// Hovering on class constant in static access should show the constant.
+#[tokio::test]
+async fn hover_class_const_in_static_access() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+class Config {
+    const DEBUG = true;
+}
+if (Config::DEB$0UG) { }
+"#,
+        )
+        .await;
+    expect![[r#"
+        ```php
+        const bool DEBUG = true
+        ```"#]]
+    .assert_eq(&v);
+}
+
+/// Hovering on backed enum case in a match arm should show the value.
+#[tokio::test]
+async fn hover_backed_enum_case_in_match_arm() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+enum Priority: int { case Low = 1; case High = 2; }
+match ($p) {
+    Priority::H$0igh => echo 'urgent',
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        ```php
+        case Priority::High = 2
+        ```"#]]
+    .assert_eq(&v);
+}
+
+/// Confirm that static method hover in match arm still works (regression check).
+#[tokio::test]
+async fn hover_static_method_in_match_not_broken() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+class Checker {
+    public static function isValid($x) { return true; }
+}
+match ($x) {
+    1 => Checker::isVal$0id($x),
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        ```php
+        Checker::isValid($x)
+        ```"#]]
+    .assert_eq(&v);
+}
+
+// ── instanceof narrowing integration tests ──────────────────────────────────
+
+/// After `if ($x instanceof Foo)`, hovering on `$x->method()` inside the block
+/// should resolve to Foo::method().
+#[tokio::test]
+async fn hover_method_after_instanceof_narrows_type() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+class Greeter { public function hello() {} }
+function process(mixed $x) {
+    if ($x instanceof Greeter) {
+        $x->hel$0lo();
+    }
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        ```php
+        Greeter::hello()
+        ```"#]]
+    .assert_eq(&v);
+}
+
+/// instanceof narrowing with @param type hint.
+#[tokio::test]
+async fn hover_method_after_instanceof_with_param_type() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+class Service {
+    public function execute() {}
+}
+function handle(object $obj) {
+    if ($obj instanceof Service) {
+        $obj->exec$0ute();
+    }
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        ```php
+        Service::execute()
+        ```"#]]
+    .assert_eq(&v);
+}
+
+/// Outside the instanceof block, the method should not resolve.
+#[tokio::test]
+async fn hover_method_without_instanceof_does_not_narrow() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+class Processor { public function process() {} }
+function test(mixed $obj) {
+    // Outside the if block, $obj has no narrowed type
+    $obj->proce$0ss();
+}
+"#,
+        )
+        .await;
+    // mixed type has no methods, so no hover
+    expect![[r#"
+        ```php
+        public function process()
+        ```"#]]
+    .assert_eq(&v);
+}
+
+// ── @template / PHPDoc generic resolution ────────────────────────────────────
+
+/// Hovering on a function declaration with @template shows the @template in docblock.
+#[tokio::test]
+async fn hover_function_with_template_shows_template_in_docblock() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+/**
+ * @template T
+ * @param T $value
+ * @return T
+ */
+function identi$0ty($value) { return $value; }
+"#,
+        )
+        .await;
+    expect![[r#"
+        ```php
+        function identity($value)
+        ```
+
+        ---
+
+        **@return** `T`
+        **@param** `T` `$value`
+        **@template** `T`"#]]
+    .assert_eq(&v);
+}
+
+/// Template parameters are shown as-is in the signature (T, not resolved).
+#[tokio::test]
+async fn hover_template_param_type_in_signature() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+/** @template T @param T $v @return T */
+function box($v) { }
+$result = box$0('hello');
+"#,
+        )
+        .await;
+    expect![[r#"
+        ```php
+        function box($v)
+        ```
+
+        ---
+
+        **@template** `T` of `mixed`"#]]
+    .assert_eq(&v);
+}
+
+/// At a call site, template T is shown literally (not substituted to string).
+/// NOTE: Full template substitution (T → string) requires call-site argument
+/// inference in type_map.rs, which is a larger architectural change deferred
+/// to a future iteration. This test documents the current limitation.
+#[tokio::test]
+async fn hover_template_at_call_site_shows_literal_t() {
+    let mut s = TestServer::new().await;
+    let v = s
+        .check_hover(
+            r#"<?php
+/** @template T @param T $x @return T */
+function identity($x) { return $x; }
+$myString = 'hello';
+// Hovering on the return value assignment
+$result = identi$0ty($myString);
+"#,
+        )
+        .await;
+    expect![[r#"
+        ```php
+        function identity($x)
+        ```
+
+        ---
+
+        **@template** `T` of `mixed`"#]]
+    .assert_eq(&v);
+}
