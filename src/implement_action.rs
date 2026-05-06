@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use php_ast::{ClassMemberKind, NamespaceBody, Stmt, StmtKind, Visibility};
 use tower_lsp::lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
+    CodeAction, CodeActionKind, CodeActionOrCommand, Range, TextEdit, Url, WorkspaceEdit,
 };
 
 use crate::ast::{ParsedDoc, SourceView, format_type_hint};
@@ -113,13 +113,16 @@ fn collect_actions(
                     continue;
                 }
 
-                let stub_text = generate_stub_text(&missing);
+                let mut stub_text = generate_stub_text(&missing);
                 // Insert just before the closing `}` of the class.
-                let closing_line = sv.position_of(stmt.span.end.saturating_sub(1)).line;
-                let insert_pos = Position {
-                    line: closing_line,
-                    character: 0,
-                };
+                let closing_pos = sv.position_of(stmt.span.end.saturating_sub(1));
+                let insert_pos = closing_pos;
+                // For single-line classes `class Foo {}` the `}` is not at column 0,
+                // so we need a leading newline to avoid the stub running onto the
+                // opening brace of the class.
+                if closing_pos.character > 0 {
+                    stub_text = format!("\n{stub_text}");
+                }
                 let edit = TextEdit {
                     range: Range {
                         start: insert_pos,
