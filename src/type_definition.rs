@@ -162,9 +162,17 @@ pub fn goto_type_definition_from_index(
     for (uri, idx) in indexes {
         for cls in &idx.classes {
             // Match by short name (last segment after `\`).
-            let short = cls.name.rsplit('\\').next().unwrap_or(&cls.name);
-            let cn_short = class_name.rsplit('\\').next().unwrap_or(&class_name);
-            if cls.name == class_name || short == cn_short {
+            let short = cls
+                .name
+                .as_ref()
+                .rsplit('\\')
+                .next()
+                .unwrap_or(cls.name.as_ref());
+            let cn_short = class_name
+                .rsplit('\\')
+                .next()
+                .unwrap_or(class_name.as_str());
+            if cls.name.as_ref() == class_name || short == cn_short {
                 return Some(Location {
                     uri: uri.clone(),
                     range: line_range(cls.start_line),
