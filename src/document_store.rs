@@ -726,7 +726,7 @@ mod tests {
         store.index(uri("/lib.php"), "<?php\nfunction lib_fn() {}");
         let idx = store.get_index_salsa(&uri("/lib.php")).unwrap();
         assert_eq!(idx.functions.len(), 1);
-        assert_eq!(idx.functions[0].name, "lib_fn");
+        assert_eq!(idx.functions[0].name, "lib_fn".into());
     }
 
     #[test]
@@ -781,7 +781,7 @@ mod tests {
         store.index(uri("/a.php"), "<?php\nfunction hello() {}");
         let idx = store.get_index_salsa(&uri("/a.php")).unwrap();
         assert_eq!(idx.functions.len(), 1);
-        assert_eq!(idx.functions[0].name, "hello");
+        assert_eq!(idx.functions[0].name, "hello".into());
     }
 
     #[test]
@@ -790,7 +790,7 @@ mod tests {
         open(&store, uri("/a.php"), "<?php\nclass Foo {}".to_string());
         let idx = store.get_index_salsa(&uri("/a.php")).unwrap();
         assert_eq!(idx.classes.len(), 1);
-        assert_eq!(idx.classes[0].name, "Foo");
+        assert_eq!(idx.classes[0].name, "Foo".into());
     }
 
     // ── Mirror invariants ────────────────────────────────────────────────
@@ -800,8 +800,8 @@ mod tests {
     // the salsa-derived `FileIndex` reflects the latest text at each step.
 
     fn names_of(idx: &FileIndex) -> Vec<String> {
-        let mut out: Vec<String> = idx.classes.iter().map(|c| c.name.clone()).collect();
-        out.extend(idx.functions.iter().map(|f| f.name.clone()));
+        let mut out: Vec<String> = idx.classes.iter().map(|c| c.name.to_string()).collect();
+        out.extend(idx.functions.iter().map(|f| f.name.to_string()));
         out.sort();
         out
     }

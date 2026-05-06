@@ -193,3 +193,515 @@ async fn php_lsp_json_exclude_paths_honored() {
         "User is not excluded — must still be indexed, got: {symbols:?}"
     );
 }
+
+// ── hidden directories ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn hidden_directories_are_excluded_from_scan() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = manifest_dir.join("tests/fixtures/psr4-mini");
+    let tmp = tempfile::tempdir().expect("create TempDir");
+    fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(dst)?;
+        for e in std::fs::read_dir(src)? {
+            let e = e?;
+            let to = dst.join(e.file_name());
+            if e.file_type()?.is_dir() {
+                copy_dir(&e.path(), &to)?;
+            } else {
+                std::fs::copy(e.path(), to)?;
+            }
+        }
+        Ok(())
+    }
+    copy_dir(&source, tmp.path()).unwrap();
+
+    let mut server = TestServer::with_root(tmp.path()).await;
+    server.wait_for_index_ready().await;
+
+    // Verify a known class from the fixture works
+    let resp = server.workspace_symbols("Greeter").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !symbols.is_empty(),
+        "Greeter should be indexed from fixture"
+    );
+
+    // Create hidden directories with PHP files that should be ignored
+    server.write_file(
+        ".git/objects/ClassInGit.php",
+        "<?php\nclass ClassInGit {}\n",
+    );
+    server.write_file(".vscode/settings.php", "<?php\nclass VscodeSetting {}\n");
+
+    // Give the system a moment
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Hidden directories should NOT appear in workspace symbols
+    let resp = server.workspace_symbols("ClassInGit").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !symbols.iter().any(|s| {
+            s["name"]
+                .as_str()
+                .map(|n| n == "ClassInGit")
+                .unwrap_or(false)
+        }),
+        ".git/ClassInGit.php should not be indexed"
+    );
+
+    let resp = server.workspace_symbols("VscodeSetting").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !symbols.iter().any(|s| {
+            s["name"]
+                .as_str()
+                .map(|n| n == "VscodeSetting")
+                .unwrap_or(false)
+        }),
+        ".vscode/VscodeSetting.php should not be indexed"
+    );
+}
+
+// ── vendor directory ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn vendor_directory_included_by_default() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = manifest_dir.join("tests/fixtures/psr4-mini");
+    let tmp = tempfile::tempdir().expect("create TempDir");
+    fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(dst)?;
+        for e in std::fs::read_dir(src)? {
+            let e = e?;
+            let to = dst.join(e.file_name());
+            if e.file_type()?.is_dir() {
+                copy_dir(&e.path(), &to)?;
+            } else {
+                std::fs::copy(e.path(), to)?;
+            }
+        }
+        Ok(())
+    }
+    copy_dir(&source, tmp.path()).unwrap();
+
+    let mut server = TestServer::with_root(tmp.path()).await;
+    // Add a class in vendor/ without explicitly excluding vendor
+    server.write_file(
+        "vendor/symfony/http-kernel/HttpKernel.php",
+        "<?php\nnamespace Symfony\\Component\\HttpKernel;\n\nclass HttpKernel {}\n",
+    );
+
+    server.wait_for_index_ready().await;
+
+    let resp = server.workspace_symbols("HttpKernel").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        symbols.iter().any(|s| {
+            s["location"]["uri"]
+                .as_str()
+                .map(|u| u.contains("vendor/"))
+                .unwrap_or(false)
+        }),
+        "vendor/HttpKernel.php should be indexed by default, got: {symbols:?}"
+    );
+}
+
+#[tokio::test]
+async fn vendor_directory_excluded_when_configured() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = manifest_dir.join("tests/fixtures/psr4-mini");
+    let tmp = tempfile::tempdir().expect("create TempDir");
+    fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(dst)?;
+        for e in std::fs::read_dir(src)? {
+            let e = e?;
+            let to = dst.join(e.file_name());
+            if e.file_type()?.is_dir() {
+                copy_dir(&e.path(), &to)?;
+            } else {
+                std::fs::copy(e.path(), to)?;
+            }
+        }
+        Ok(())
+    }
+    copy_dir(&source, tmp.path()).unwrap();
+
+    let mut server = TestServer::with_fixture_and_options(
+        "psr4-mini",
+        json!({
+            "diagnostics": { "enabled": true },
+            "excludePaths": ["vendor/"],
+        }),
+    )
+    .await;
+    server.write_file(
+        "vendor/symfony/http-kernel/HttpKernel.php",
+        "<?php\nnamespace Symfony\\Component\\HttpKernel;\n\nclass HttpKernel {}\n",
+    );
+
+    server.wait_for_index_ready().await;
+
+    let resp = server.workspace_symbols("HttpKernel").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        symbols.is_empty(),
+        "vendor/HttpKernel.php should NOT be indexed when excluded, got: {symbols:?}"
+    );
+}
+
+// ── file cap ──────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn max_indexed_files_cap_is_enforced() {
+    let tmp = tempfile::tempdir().expect("create TempDir");
+
+    // Initialize server with custom low maxIndexedFiles limit
+    let mut server = TestServer::with_root_and_options(
+        tmp.path(),
+        json!({
+            "diagnostics": { "enabled": true },
+            "maxIndexedFiles": 5,
+        }),
+    )
+    .await;
+
+    // Create files up to and beyond the limit
+    for i in 0..10 {
+        server.write_file(
+            &format!("Class{}.php", i),
+            &format!("<?php\nclass Class{} {{}}\n", i),
+        );
+    }
+
+    server.wait_for_index_ready().await;
+
+    // Count how many classes were indexed
+    let mut indexed_count = 0;
+    for i in 0..10 {
+        let resp = server.workspace_symbols(&format!("Class{}", i)).await;
+        if !resp["result"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(true)
+        {
+            indexed_count += 1;
+        }
+    }
+
+    // Should not exceed maxIndexedFiles limit
+    assert!(
+        indexed_count <= 5,
+        "Indexed {} files but maxIndexedFiles=5, must index at most 5 files",
+        indexed_count
+    );
+}
+
+#[tokio::test]
+async fn custom_max_indexed_files_via_init_options() {
+    let tmp = tempfile::tempdir().expect("create TempDir");
+
+    let mut server = TestServer::with_root_and_options(
+        tmp.path(),
+        json!({
+            "diagnostics": { "enabled": true },
+            "maxIndexedFiles": 3,
+        }),
+    )
+    .await;
+
+    // Create files beyond the limit
+    for i in 0..5 {
+        server.write_file(
+            &format!("src/Class{}.php", i),
+            &format!("<?php\nclass Class{} {{}}\n", i),
+        );
+    }
+
+    server.wait_for_index_ready().await;
+
+    // Count indexed symbols
+    let mut indexed = Vec::new();
+    for i in 0..5 {
+        let resp = server.workspace_symbols(&format!("Class{}", i)).await;
+        if !resp["result"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(true)
+        {
+            indexed.push(i);
+        }
+    }
+
+    // Should respect the custom limit
+    assert!(
+        indexed.len() <= 3,
+        "Expected at most 3 indexed files but got {} (files: {:?})",
+        indexed.len(),
+        indexed
+    );
+}
+
+// ── project structure variations ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn deeply_nested_directory_structure_is_indexed() {
+    let tmp = tempfile::tempdir().expect("create TempDir");
+    let mut server = TestServer::with_root(tmp.path()).await;
+
+    // Create a deeply nested structure
+    server.write_file(
+        "src/Level1/Level2/Level3/Level4/Level5/DeepClass.php",
+        "<?php\nnamespace App\\Level1\\Level2\\Level3\\Level4\\Level5;\n\nclass DeepClass {}\n",
+    );
+    server.write_file(
+        "src/Shallow/ShallowClass.php",
+        "<?php\nnamespace App\\Shallow;\n\nclass ShallowClass {}\n",
+    );
+
+    server.wait_for_index_ready().await;
+
+    let deep = server.workspace_symbols("DeepClass").await;
+    assert!(
+        !deep["result"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(true),
+        "DeepClass in deeply nested dirs should be indexed, got: {deep:?}"
+    );
+
+    let shallow = server.workspace_symbols("ShallowClass").await;
+    assert!(
+        !shallow["result"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(true),
+        "ShallowClass should be indexed, got: {shallow:?}"
+    );
+}
+
+#[tokio::test]
+async fn multiple_top_level_directories_with_different_patterns() {
+    let tmp = tempfile::tempdir().expect("create TempDir");
+    let mut server = TestServer::with_root(tmp.path()).await;
+
+    // Create a multi-directory structure typical of a monorepo
+    server.write_file(
+        "packages/api/src/ApiService.php",
+        "<?php\nnamespace App\\Api;\n\nclass ApiService {}\n",
+    );
+    server.write_file(
+        "packages/web/src/WebService.php",
+        "<?php\nnamespace App\\Web;\n\nclass WebService {}\n",
+    );
+    server.write_file(
+        "packages/shared/src/SharedUtil.php",
+        "<?php\nnamespace App\\Shared;\n\nclass SharedUtil {}\n",
+    );
+    server.write_file(
+        "packages/api/vendor/external/External.php",
+        "<?php\nclass External {}\n",
+    );
+
+    server.wait_for_index_ready().await;
+
+    // All workspace packages should be indexed
+    let api = server.workspace_symbols("ApiService").await;
+    assert!(
+        !api["result"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(true),
+        "ApiService should be indexed"
+    );
+
+    let web = server.workspace_symbols("WebService").await;
+    assert!(
+        !web["result"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(true),
+        "WebService should be indexed"
+    );
+
+    let shared = server.workspace_symbols("SharedUtil").await;
+    assert!(
+        !shared["result"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(true),
+        "SharedUtil should be indexed"
+    );
+
+    // Vendor in subdirectory should also be indexed by default
+    let external = server.workspace_symbols("External").await;
+    assert!(
+        !external["result"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(true),
+        "External in packages/api/vendor should be indexed by default"
+    );
+}
+
+#[tokio::test]
+async fn exclude_specific_package_in_monorepo_structure() {
+    let mut server = TestServer::with_fixture_and_options(
+        "psr4-mini",
+        json!({
+            "diagnostics": { "enabled": true },
+            "excludePaths": ["vendor/", "src/Service/*"],
+        }),
+    )
+    .await;
+    server.wait_for_index_ready().await;
+
+    // Excluded classes from src/Service/ should NOT be indexed
+    let resp = server.workspace_symbols("Greeter").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !symbols.iter().any(|s| {
+            s["location"]["uri"]
+                .as_str()
+                .map(|u| u.contains("src/Service/Greeter.php"))
+                .unwrap_or(false)
+        }),
+        "Greeter in excluded src/Service/ should NOT be indexed"
+    );
+
+    // But classes in src/Model/ SHOULD be indexed
+    let resp = server.workspace_symbols("User").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        symbols.iter().any(|s| {
+            s["location"]["uri"]
+                .as_str()
+                .map(|u| u.contains("src/Model/User.php"))
+                .unwrap_or(false)
+        }),
+        "User in src/Model/ should still be indexed"
+    );
+}
+
+// ── pattern matching edge cases ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn exclude_paths_substring_match_edge_case() {
+    let tmp = tempfile::tempdir().expect("create TempDir");
+    let mut server = TestServer::with_root_and_options(
+        tmp.path(),
+        json!({
+            "diagnostics": { "enabled": true },
+            "excludePaths": ["src/"],
+        }),
+    )
+    .await;
+
+    // Files in src/ should be excluded
+    server.write_file("src/ClassInSrc.php", "<?php\nclass ClassInSrc {}\n");
+
+    // Files in directories whose name CONTAINS "src" should still be indexed
+    // e.g., "tests/source/" contains "src" as substring, but pattern is "src/"
+    server.write_file(
+        "tests/source/ClassInTestSource.php",
+        "<?php\nclass ClassInTestSource {}\n",
+    );
+
+    server.wait_for_index_ready().await;
+
+    // ClassInSrc should be excluded (path contains "src/")
+    let resp = server.workspace_symbols("ClassInSrc").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !symbols.iter().any(|s| {
+            s["name"]
+                .as_str()
+                .map(|n| n == "ClassInSrc")
+                .unwrap_or(false)
+        }),
+        "ClassInSrc in src/ should be excluded"
+    );
+
+    // ClassInTestSource should be indexed because pattern is "src/" not just "src"
+    let resp = server.workspace_symbols("ClassInTestSource").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        symbols.iter().any(|s| {
+            s["name"]
+                .as_str()
+                .map(|n| n == "ClassInTestSource")
+                .unwrap_or(false)
+        }),
+        "ClassInTestSource in tests/source/ should be indexed (pattern is 'src/', not 'src')"
+    );
+}
+
+#[tokio::test]
+async fn exclude_paths_does_not_substring_match_intermediate_dirs() {
+    let tmp = tempfile::tempdir().expect("create TempDir");
+    let mut server = TestServer::with_root_and_options(
+        tmp.path(),
+        json!({
+            "diagnostics": { "enabled": true },
+            "excludePaths": ["src/"],
+        }),
+    )
+    .await;
+
+    // File in "test_src/" should NOT be excluded even though it contains "src"
+    server.write_file(
+        "test_src/ClassInTestSrc.php",
+        "<?php\nclass ClassInTestSrc {}\n",
+    );
+
+    server.wait_for_index_ready().await;
+
+    // ClassInTestSrc should be indexed because pattern "src/" doesn't match "test_src/"
+    let resp = server.workspace_symbols("ClassInTestSrc").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        symbols.iter().any(|s| {
+            s["name"]
+                .as_str()
+                .map(|n| n == "ClassInTestSrc")
+                .unwrap_or(false)
+        }),
+        "ClassInTestSrc in test_src/ should be indexed (pattern 'src/' should not match 'test_src/')"
+    );
+}
+
+#[tokio::test]
+async fn empty_workspace_returns_zero_files() {
+    let tmp = tempfile::tempdir().expect("create TempDir");
+    let mut server = TestServer::with_root(tmp.path()).await;
+
+    server.wait_for_index_ready().await;
+
+    // Querying an empty workspace should return no symbols
+    let resp = server.workspace_symbols("NonExistent").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(symbols.is_empty(), "Empty workspace should have no symbols");
+}
+
+#[tokio::test]
+async fn exclude_all_paths_leaves_nothing_indexed() {
+    let mut server = TestServer::with_fixture_and_options(
+        "psr4-mini",
+        json!({
+            "diagnostics": { "enabled": true },
+            "excludePaths": ["src/", "vendor/"],
+        }),
+    )
+    .await;
+
+    server.wait_for_index_ready().await;
+
+    // When excluding all real code (src and vendor), even the fixture classes should be missing
+    // (Though psr4-mini fixture has code in src/, so it will all be excluded)
+    let resp = server.workspace_symbols("Greeter").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        symbols.is_empty(),
+        "When src/ is excluded, fixture classes should not be indexed"
+    );
+}
