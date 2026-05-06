@@ -1336,3 +1336,181 @@ class A extends A {}
     )
     .await;
 }
+
+// --- workspace/diagnostic Unchanged variant tests (BUG #1 + BUG #3) ---
+
+#[tokio::test]
+async fn workspace_diagnostic_unchanged_on_repeated_request() {
+    let mut server = TestServer::new().await;
+    server.open("stable.php", "<?php\n$x = 1;\n").await;
+
+    // First request: empty previousResultIds → all files must return Full
+    let resp1 = server.workspace_diagnostic().await;
+    let items1 = resp1["result"]["items"].as_array().unwrap();
+    assert_eq!(items1[0]["kind"].as_str().unwrap(), "full");
+
+    let result_id = items1[0]["resultId"].as_str().unwrap().to_string();
+    let uri = items1[0]["uri"].as_str().unwrap().to_string();
+
+    // Second request with correct previousResultIds → must return Unchanged
+    let resp2 = server
+        .workspace_diagnostic_with_prev(vec![(uri, result_id)])
+        .await;
+    let items2 = resp2["result"]["items"].as_array().unwrap();
+
+    assert_eq!(
+        items2[0]["kind"].as_str().unwrap(),
+        "unchanged",
+        "second request with matching result_id must return Unchanged"
+    );
+
+    let out2 = render_workspace_diagnostic(&resp2, &server.uri(""));
+    expect![[r#"
+        stable.php
+          <unchanged>"#]]
+    .assert_eq(&out2);
+}
+
+#[tokio::test]
+async fn workspace_diagnostic_full_after_file_change() {
+    let mut server = TestServer::new().await;
+    server.open("changing.php", "<?php\n$x = 1;\n").await;
+
+    let resp1 = server.workspace_diagnostic().await;
+    let items1 = resp1["result"]["items"].as_array().unwrap();
+    let old_id = items1[0]["resultId"].as_str().unwrap().to_string();
+    let uri = items1[0]["uri"].as_str().unwrap().to_string();
+
+    // Introduce a semantic error
+    server
+        .change("changing.php", 2, "<?php\nundefined_fn();\n")
+        .await;
+
+    // previousResultIds contains stale result_id → must return Full
+    let resp2 = server
+        .workspace_diagnostic_with_prev(vec![(uri, old_id.clone())])
+        .await;
+    let items2 = resp2["result"]["items"].as_array().unwrap();
+
+    assert_eq!(
+        items2[0]["kind"].as_str().unwrap(),
+        "full",
+        "stale previousResultId must yield Full"
+    );
+
+    let new_id = items2[0]["resultId"].as_str().unwrap();
+    assert_ne!(
+        new_id, old_id,
+        "result_id must change when diagnostics change"
+    );
+
+    let out2 = render_workspace_diagnostic(&resp2, &server.uri(""));
+    expect![[r#"
+        changing.php
+          1:0 Function undefined_fn() is not defined [UndefinedFunction] (error)"#]]
+    .assert_eq(&out2);
+}
+
+#[tokio::test]
+async fn workspace_diagnostic_mixed_unchanged_and_full() {
+    let mut server = TestServer::new().await;
+    server.open("stable.php", "<?php\n$x = 1;\n").await;
+    server.open("breaking.php", "<?php\n$y = 2;\n").await;
+
+    // First request: both Full
+    let resp1 = server.workspace_diagnostic().await;
+    let items1 = resp1["result"]["items"].as_array().unwrap();
+
+    // Only send previousResultId for stable.php
+    let stable = items1
+        .iter()
+        .find(|i| i["uri"].as_str().unwrap_or("").contains("stable.php"))
+        .unwrap();
+    let prev = vec![(
+        stable["uri"].as_str().unwrap().to_string(),
+        stable["resultId"].as_str().unwrap().to_string(),
+    )];
+
+    // Change breaking.php before second request
+    server
+        .change("breaking.php", 2, "<?php\nundefined_fn();\n")
+        .await;
+
+    let resp2 = server.workspace_diagnostic_with_prev(prev).await;
+    let out2 = render_workspace_diagnostic(&resp2, &server.uri(""));
+
+    expect![[r#"
+        breaking.php
+          1:0 Function undefined_fn() is not defined [UndefinedFunction] (error)
+        stable.php
+          <unchanged>"#]]
+    .assert_eq(&out2);
+}
+
+#[tokio::test]
+async fn workspace_diagnostic_new_file_always_full() {
+    let mut server = TestServer::new().await;
+    server.open("existing.php", "<?php\n$x = 1;\n").await;
+
+    let resp1 = server.workspace_diagnostic().await;
+    let items1 = resp1["result"]["items"].as_array().unwrap();
+    let prev = vec![(
+        items1[0]["uri"].as_str().unwrap().to_string(),
+        items1[0]["resultId"].as_str().unwrap().to_string(),
+    )];
+
+    // Open a new file not in previousResultIds
+    server.open("newfile.php", "<?php\n$y = 2;\n").await;
+
+    let resp2 = server.workspace_diagnostic_with_prev(prev).await;
+    let items2 = resp2["result"]["items"].as_array().unwrap();
+
+    let new_item = items2
+        .iter()
+        .find(|i| i["uri"].as_str().unwrap_or("").contains("newfile.php"))
+        .expect("newfile.php must appear in response");
+
+    assert_eq!(
+        new_item["kind"].as_str().unwrap(),
+        "full",
+        "file absent from previousResultIds must return Full"
+    );
+}
+
+#[tokio::test]
+async fn workspace_diagnostic_wrong_result_id_returns_full() {
+    let mut server = TestServer::new().await;
+    server.open("test.php", "<?php\n$x = 1;\n").await;
+    let uri = server.uri("test.php");
+
+    // Send a result_id that doesn't match the real one
+    let resp = server
+        .workspace_diagnostic_with_prev(vec![(uri, "wrong-result-id".to_string())])
+        .await;
+    let items = resp["result"]["items"].as_array().unwrap();
+
+    assert_eq!(
+        items[0]["kind"].as_str().unwrap(),
+        "full",
+        "wrong previousResultId must produce Full, not Unchanged"
+    );
+}
+
+#[tokio::test]
+async fn workspace_diagnostic_empty_prev_ids_all_full() {
+    let mut server = TestServer::new().await;
+    server.open("a.php", "<?php\n$x = 1;\n").await;
+    server.open("b.php", "<?php\n$y = 2;\n").await;
+
+    // workspace_diagnostic() hardcodes empty previousResultIds
+    let resp = server.workspace_diagnostic().await;
+    let items = resp["result"]["items"].as_array().unwrap();
+
+    for item in items {
+        assert_eq!(
+            item["kind"].as_str().unwrap(),
+            "full",
+            "empty previousResultIds must yield Full for all files"
+        );
+    }
+}

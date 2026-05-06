@@ -2634,9 +2634,19 @@ impl LanguageServer for Backend {
             (cfg.diagnostics.clone(), cfg.php_version.clone())
         };
 
-        // Accept previousResultIds parameter for future optimization to return Unchanged
-        // when diagnostics haven't changed (reduces bandwidth)
-        let _ = params.previous_result_ids;
+        // Note: php_version could be used for version-specific diagnostics in the future
+        let _ = php_version;
+
+        // Build a URI→result_id lookup from the client's cached state.
+        // Per LSP §3.17.7: files present in this map with a matching result_id
+        // should return Unchanged; all others return Full.
+        // Duplicate URIs: last-wins (HashMap collect). Clients shouldn't send duplicates,
+        // but if they do the last entry wins — safe and simple.
+        let previous_map: std::collections::HashMap<Url, String> = params
+            .previous_result_ids
+            .into_iter()
+            .map(|p| (p.uri, p.value))
+            .collect();
 
         // Phase I: each file's semantic issues flow through the salsa
         // `semantic_issues` query. The memo is shared with `did_open` /
@@ -2645,9 +2655,6 @@ impl LanguageServer for Backend {
         // a cold workspace still walks every file's `StatementsAnalyzer` —
         // run the whole sweep on the blocking pool so the async runtime
         // stays responsive.
-        // Note: php_version could be used for version-specific diagnostics in the future
-        let _ = php_version;
-
         let docs = Arc::clone(&self.docs);
         let diag_cfg_sweep = diag_cfg.clone();
         let items = tokio::task::spawn_blocking(move || {
@@ -2675,20 +2682,31 @@ impl LanguageServer for Backend {
                         &diag_cfg_sweep,
                     ));
 
-                    // Generate stable result_id for caching
-                    let _version_num = version.unwrap_or(1);
                     let result_id = compute_diagnostic_result_id(&all_diags, uri.as_str());
 
-                    Some(WorkspaceDocumentDiagnosticReport::Full(
-                        WorkspaceFullDocumentDiagnosticReport {
-                            uri,
-                            version,
-                            full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                                result_id: Some(result_id),
-                                items: all_diags,
+                    // Per LSP §3.17.7: return Unchanged only when the client already has
+                    // this exact result_id cached for this URI; otherwise return Full.
+                    if previous_map.get(&uri) == Some(&result_id) {
+                        Some(WorkspaceDocumentDiagnosticReport::Unchanged(
+                            WorkspaceUnchangedDocumentDiagnosticReport {
+                                uri,
+                                version,
+                                unchanged_document_diagnostic_report:
+                                    UnchangedDocumentDiagnosticReport { result_id },
                             },
-                        },
-                    ))
+                        ))
+                    } else {
+                        Some(WorkspaceDocumentDiagnosticReport::Full(
+                            WorkspaceFullDocumentDiagnosticReport {
+                                uri,
+                                version,
+                                full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                                    result_id: Some(result_id),
+                                    items: all_diags,
+                                },
+                            },
+                        ))
+                    }
                 })
                 .collect::<Vec<_>>()
         })
