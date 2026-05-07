@@ -296,14 +296,43 @@ pub fn span_to_range(source: &str, line_starts: &[u32], span: Span) -> Range {
 /// (i.e. arena-allocated names pointing into the same backing string).
 /// Falls back to a content search when the pointers differ — this handles
 /// tests and callers that pass a differently-allocated copy of the source.
+///
+/// When falling back, prefers matches that are preceded and followed by
+/// non-identifier characters (word boundaries), to avoid matching name parts
+/// (e.g., finding "B" in "Base" when searching for a class named "B").
 pub fn str_offset(source: &str, substr: &str) -> Option<u32> {
     let src_ptr = source.as_ptr() as usize;
     let sub_ptr = substr.as_ptr() as usize;
     if sub_ptr >= src_ptr && sub_ptr + substr.len() <= src_ptr + source.len() {
         return Some((sub_ptr - src_ptr) as u32);
     }
-    // Fallback: locate by content (same text, different allocation).
-    source.find(substr).map(|off| off as u32)
+    // Fallback: locate by content with word-boundary preference.
+    // When pointer matching fails, prefer matches where substr is surrounded by
+    // non-identifier characters to avoid matching partial names (e.g., "B" in "Base").
+    let mut search_pos = 0;
+    while let Some(offset) = source[search_pos..].find(substr) {
+        let abs_offset = search_pos + offset;
+        let is_start_boundary = abs_offset == 0
+            || !source[..abs_offset]
+                .chars()
+                .last()
+                .map(|c| c.is_alphanumeric() || c == '_')
+                .unwrap_or(false);
+        let end_pos = abs_offset + substr.len();
+        let is_end_boundary = end_pos >= source.len()
+            || !source[end_pos..]
+                .chars()
+                .next()
+                .map(|c| c.is_alphanumeric() || c == '_')
+                .unwrap_or(false);
+
+        if is_start_boundary && is_end_boundary {
+            return Some(abs_offset as u32);
+        }
+
+        search_pos = abs_offset + 1;
+    }
+    None
 }
 
 /// Build an LSP `Range` for a name that is a sub-slice of `source`, or None if not found.
