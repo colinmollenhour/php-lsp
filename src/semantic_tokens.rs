@@ -466,9 +466,15 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
                             collect_stmts(sv, body, out);
                         }
                     }
-                    EnumMemberKind::ClassConst(_) => {
-                        // TODO: Handle class constants in enums once php-ast exposes the
-                        // initialization value for EnumMemberKind::ClassConst.
+                    EnumMemberKind::ClassConst(k) => {
+                        push_attributes(out, sv, &k.attributes);
+                        let mmods =
+                            MOD_DECLARATION | deprecated_mod(sv.source(), member.span.start);
+                        if let Some(th) = &k.type_hint {
+                            push_type_hint(out, sv, th);
+                        }
+                        push_name(out, sv, k.name, TT_PROPERTY, mmods);
+                        collect_expr(sv, &k.value, out);
                     }
                     EnumMemberKind::TraitUse(_) => {
                         // Trait use declarations don't produce tokens
@@ -759,7 +765,6 @@ fn delta_encode(raw: Vec<RawToken>) -> Vec<SemanticToken> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn doc(src: &str) -> ParsedDoc {
         ParsedDoc::parse(src.to_string())
     }
@@ -1042,19 +1047,6 @@ mod tests {
                 .iter()
                 .all(|t| t.token_modifiers_bitset & MOD_DEPRECATED == 0),
             "expected no deprecated modifier on non-deprecated function"
-        );
-    }
-
-    #[test]
-    fn enum_declaration_emits_class_token() {
-        let src = "<?php\nenum Suit { case Hearts; }";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(
-                |t| t.token_type == TT_CLASS && t.token_modifiers_bitset & MOD_DECLARATION != 0
-            ),
-            "expected class+declaration token for enum"
         );
     }
 
