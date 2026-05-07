@@ -20,5 +20,7 @@ mod feature_diagnostics;
 mod feature_inlay_hints;
 #[path = "analysis/feature_inline_value.rs"]
 mod feature_inline_value;
+#[path = "analysis/feature_php_versions.rs"]
+mod feature_php_versions;
 #[path = "analysis/feature_semantic_tokens.rs"]
 mod feature_semantic_tokens;
