@@ -10,7 +10,9 @@ pub(crate) fn find_fqn_for_class(doc: &ParsedDoc, name: &str) -> Option<String> 
     use php_ast::{NamespaceBody, StmtKind};
     for stmt in doc.program().stmts.iter() {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string()) =>
+            {
                 return Some(name.to_string());
             }
             StmtKind::Namespace(ns) => {
@@ -18,7 +20,7 @@ pub(crate) fn find_fqn_for_class(doc: &ParsedDoc, name: &str) -> Option<String> 
                 if let NamespaceBody::Braced(inner) = &ns.body {
                     for inner_stmt in inner.iter() {
                         if let StmtKind::Class(c) = &inner_stmt.kind
-                            && c.name == Some(name)
+                            && c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string())
                         {
                             return Some(match ns_name {
                                 Some(ref ns) => format!("{ns}\\{name}"),

@@ -111,17 +111,26 @@ fn param_type_for(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
 fn find_class_range(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], name: &str) -> Option<Range> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(name) => {
-                return Some(sv.name_range(c.name.expect("match guard ensures Some")));
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string()) =>
+            {
+                return Some(
+                    sv.name_range(
+                        &c.name
+                            .as_ref()
+                            .map(|n| n.to_string())
+                            .expect("match guard ensures Some"),
+                    ),
+                );
             }
             StmtKind::Interface(i) if i.name == name => {
-                return Some(sv.name_range(i.name));
+                return Some(sv.name_range(&i.name.to_string()));
             }
             StmtKind::Trait(t) if t.name == name => {
-                return Some(sv.name_range(t.name));
+                return Some(sv.name_range(&t.name.to_string()));
             }
             StmtKind::Enum(e) if e.name == name => {
-                return Some(sv.name_range(e.name));
+                return Some(sv.name_range(&e.name.to_string()));
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body

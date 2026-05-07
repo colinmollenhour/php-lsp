@@ -583,7 +583,7 @@ fn collect_types_stmts(
             // static $var = expr — infer type from the default value expression.
             StmtKind::StaticVar(vars) => {
                 for var in vars.iter() {
-                    let var_key = format!("${}", var.name);
+                    let var_key = format!("${}", &var.name.to_string());
                     if let Some(default) = &var.default {
                         if let ExprKind::New(new_expr) = &default.kind
                             && let Some(class_name) = extract_class_name(new_expr.class)
@@ -702,7 +702,7 @@ fn collect_types_expr(
                 .use_vars
                 .iter()
                 .filter_map(|uv| {
-                    let key = format!("${}", uv.name);
+                    let key = format!("${}", &uv.name.to_string());
                     map.get(&key).map(|ty| (key, ty.clone()))
                 })
                 .collect();
@@ -841,7 +841,9 @@ pub fn parent_class_name(doc: &ParsedDoc, class_name: &str) -> Option<String> {
 fn parent_in_stmts(stmts: &[Stmt<'_, '_>], class_name: &str) -> Option<String> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
+            {
                 return c.extends.as_ref().map(|n| n.to_string_repr().to_string());
             }
             StmtKind::Namespace(ns) => {
@@ -893,7 +895,9 @@ fn collect_members_stmts(
 ) -> Option<String> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
+            {
                 out.found = true;
                 // Check docblock for @property and @method tags
                 if let Some(raw) = docblock_before(source, stmt.span.start) {
@@ -1020,7 +1024,9 @@ pub fn mixin_classes_of(doc: &ParsedDoc, class_name: &str) -> Vec<String> {
 fn mixin_classes_in_stmts(source: &str, stmts: &[Stmt<'_, '_>], class_name: &str) -> Vec<String> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
+            {
                 if let Some(raw) = docblock_before(source, stmt.span.start) {
                     return parse_docblock(&raw).mixins;
                 }
@@ -1191,7 +1197,9 @@ fn collect_method_params_stmts(
 ) {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
+            {
                 for member in c.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name

@@ -129,7 +129,11 @@ impl Docblock {
             out.push('\n');
         }
         for p in &self.params {
-            out.push_str(&format!("**@param** `{}` `{}`", p.type_hint, p.name));
+            out.push_str(&format!(
+                "**@param** `{}` `{}`",
+                p.type_hint,
+                &p.name.to_string()
+            ));
             if !p.description.is_empty() {
                 out.push_str(&format!(" — {}", p.description));
             }
@@ -149,7 +153,7 @@ impl Docblock {
             if let Some(bound) = &t.bound {
                 out.push_str(&format!("**@template** `{}` of `{}`\n", t.name, bound));
             } else {
-                out.push_str(&format!("**@template** `{}`\n", t.name));
+                out.push_str(&format!("**@template** `{}`\n", &t.name.to_string()));
             }
         }
         for m in &self.mixins {
@@ -157,7 +161,7 @@ impl Docblock {
         }
         for ta in &self.type_aliases {
             if ta.type_expr.is_empty() {
-                out.push_str(&format!("**@type** `{}`\n", ta.name));
+                out.push_str(&format!("**@type** `{}`\n", &ta.name.to_string()));
             } else {
                 out.push_str(&format!("**@type** `{}` = `{}`\n", ta.name, ta.type_expr));
             }
@@ -342,7 +346,9 @@ pub fn find_docblock(
                 let raw = docblock_before(source, stmt.span.start)?;
                 return Some(parse_docblock(&raw));
             }
-            StmtKind::Class(c) if c.name == Some(word) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(word.to_string()) =>
+            {
                 let raw = docblock_before(source, stmt.span.start)?;
                 return Some(parse_docblock(&raw));
             }

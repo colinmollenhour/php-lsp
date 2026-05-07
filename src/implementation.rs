@@ -137,7 +137,7 @@ fn collect_implementations(
                 {
                     out.push(Location {
                         uri: uri.clone(),
-                        range: sv.name_range(class_name),
+                        range: sv.name_range(&class_name.to_string()),
                     });
                 }
             }
@@ -149,7 +149,7 @@ fn collect_implementations(
                 if implements_match {
                     out.push(Location {
                         uri: uri.clone(),
-                        range: sv.name_range(e.name),
+                        range: sv.name_range(&e.name.to_string()),
                     });
                 }
             }
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn anonymous_class_does_not_cause_panic() {
-        // Anonymous classes have no name (c.name == None) and must be skipped
+        // Anonymous classes have no name (c.name.to_string() == None) and must be skipped
         // silently without panicking.
         let src = "<?php\n$x = new class extends Animal {};";
         let docs = vec![doc("/a.php", src)];

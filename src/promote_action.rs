@@ -94,7 +94,7 @@ fn collect_promote<'a>(
 
                 // Build a map from property name -> (member span start, member span end, visibility, is_readonly)
                 // Only include non-static properties that have a visibility modifier.
-                let mut prop_info: HashMap<&str, (u32, u32, &'static str, bool)> = HashMap::new();
+                let mut prop_info: HashMap<String, (u32, u32, &'static str, bool)> = HashMap::new();
                 for member in c.members.iter() {
                     if let ClassMemberKind::Property(p) = &member.kind
                         && !p.is_static
@@ -106,7 +106,7 @@ fn collect_promote<'a>(
                             _ => "public",
                         };
                         prop_info.insert(
-                            p.name,
+                            p.name.to_string(),
                             (member.span.start, member.span.end, vis, p.is_readonly),
                         );
                     }
@@ -130,13 +130,15 @@ fn collect_promote<'a>(
                     let param_name = param.name;
 
                     // Check if there's a matching property.
-                    let (prop_start, prop_end, vis, is_readonly) = match prop_info.get(param_name) {
-                        Some(info) => *info,
-                        None => continue,
-                    };
+                    let (prop_start, prop_end, vis, is_readonly) =
+                        match prop_info.get(param_name.to_string().as_str()) {
+                            Some(info) => *info,
+                            None => continue,
+                        };
 
                     // Search constructor body for `$this->paramName = $paramName`.
-                    let assign_span = find_this_assign(sv.source(), ctor_body, param_name);
+                    let assign_span =
+                        find_this_assign(sv.source(), ctor_body, &param_name.to_string());
                     let (assign_start, assign_end) = match assign_span {
                         Some(s) => s,
                         None => continue,

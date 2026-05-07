@@ -57,14 +57,19 @@ fn collect_from_statements_with_doc(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) => {
-                let sig = build_function_sig(f.name, &f.params, f.return_type.as_ref());
-                let documentation = doc.and_then(|d| docblock_docs(d, f.name));
-                let mut item =
-                    callable_item(f.name, CompletionItemKind::FUNCTION, !f.params.is_empty());
+                let name_str = f.name.to_string();
+                let sig = build_function_sig(&name_str, &f.params, f.return_type.as_ref());
+                let documentation = doc.and_then(|d| docblock_docs(d, &name_str));
+                let mut item = callable_item(
+                    &name_str,
+                    CompletionItemKind::FUNCTION,
+                    !f.params.is_empty(),
+                );
                 item.detail = Some(sig);
                 item.documentation = documentation;
                 items.push(item);
-                if let Some(named) = named_arg_item(f.name, CompletionItemKind::FUNCTION, &f.params)
+                if let Some(named) =
+                    named_arg_item(&name_str, CompletionItemKind::FUNCTION, &f.params)
                 {
                     items.push(named);
                 }
@@ -77,10 +82,10 @@ fn collect_from_statements_with_doc(
                 }
             }
             StmtKind::Class(c) => {
-                let class_name = c.name.unwrap_or("");
-                if !class_name.is_empty() {
+                if let Some(class_name) = c.name.as_ref() {
+                    let class_name_str = class_name.to_string();
                     items.push(CompletionItem {
-                        label: class_name.to_string(),
+                        label: class_name_str,
                         kind: Some(CompletionItemKind::CLASS),
                         ..Default::default()
                     });
@@ -88,19 +93,27 @@ fn collect_from_statements_with_doc(
                 for member in c.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
-                            let sig = build_function_sig(m.name, &m.params, m.return_type.as_ref());
-                            let documentation = doc.and_then(|d| docblock_docs(d, m.name));
+                            let method_name_str = m.name.to_string();
+                            let sig = build_function_sig(
+                                &method_name_str,
+                                &m.params,
+                                m.return_type.as_ref(),
+                            );
+                            let documentation =
+                                doc.and_then(|d| docblock_docs(d, &method_name_str));
                             let mut item = callable_item(
-                                m.name,
+                                &method_name_str,
                                 CompletionItemKind::METHOD,
                                 !m.params.is_empty(),
                             );
                             item.detail = Some(sig);
                             item.documentation = documentation;
                             items.push(item);
-                            if let Some(named) =
-                                named_arg_item(m.name, CompletionItemKind::METHOD, &m.params)
-                            {
+                            if let Some(named) = named_arg_item(
+                                &method_name_str,
+                                CompletionItemKind::METHOD,
+                                &m.params,
+                            ) {
                                 items.push(named);
                             }
                         }
@@ -145,7 +158,7 @@ fn collect_from_statements_with_doc(
                 for member in e.members.iter() {
                     if let EnumMemberKind::Case(c) = &member.kind {
                         items.push(CompletionItem {
-                            label: format!("{}::{}", e.name, c.name),
+                            label: format!("{}::{}", e.name, &c.name.to_string()),
                             kind: Some(CompletionItemKind::ENUM_MEMBER),
                             ..Default::default()
                         });

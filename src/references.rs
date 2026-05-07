@@ -407,12 +407,14 @@ fn collect_method_decls_in_class(
 ) {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_short) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_short.to_string()) =>
+            {
                 for member in c.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_word
                     {
-                        out.push(declaration_name_span(source, m.name));
+                        out.push(declaration_name_span(source, &m.name.to_string()));
                     }
                 }
             }
@@ -421,7 +423,7 @@ fn collect_method_decls_in_class(
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_word
                     {
-                        out.push(declaration_name_span(source, m.name));
+                        out.push(declaration_name_span(source, &m.name.to_string()));
                     }
                 }
             }
@@ -430,7 +432,7 @@ fn collect_method_decls_in_class(
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_word
                     {
-                        out.push(declaration_name_span(source, m.name));
+                        out.push(declaration_name_span(source, &m.name.to_string()));
                     }
                 }
             }
@@ -439,7 +441,7 @@ fn collect_method_decls_in_class(
                     if let EnumMemberKind::Method(m) = &member.kind
                         && m.name == method_word
                     {
-                        out.push(declaration_name_span(source, m.name));
+                        out.push(declaration_name_span(source, &m.name.to_string()));
                     }
                 }
             }
@@ -477,7 +479,7 @@ fn collect_declaration_spans(
         match &stmt.kind {
             StmtKind::Function(f) => {
                 if want_free && f.name == word {
-                    out.push(declaration_name_span(source, f.name));
+                    out.push(declaration_name_span(source, &f.name.to_string()));
                 }
             }
             StmtKind::Class(c) => {
@@ -485,13 +487,13 @@ fn collect_declaration_spans(
                     && let Some(name) = c.name
                     && name == word
                 {
-                    out.push(declaration_name_span(source, name));
+                    out.push(declaration_name_span(source, &name.to_string()));
                 }
                 if want_method || want_property {
                     for member in c.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) if want_method && m.name == word => {
-                                out.push(declaration_name_span(source, m.name));
+                                out.push(declaration_name_span(source, &m.name.to_string()));
                             }
                             ClassMemberKind::Method(m)
                                 if want_property && m.name == "__construct" =>
@@ -499,12 +501,15 @@ fn collect_declaration_spans(
                                 // Promoted constructor params act as property declarations.
                                 for p in m.params.iter() {
                                     if p.visibility.is_some() && p.name == word {
-                                        out.push(declaration_name_span(source, p.name));
+                                        out.push(declaration_name_span(
+                                            source,
+                                            &p.name.to_string(),
+                                        ));
                                     }
                                 }
                             }
                             ClassMemberKind::Property(p) if want_property && p.name == word => {
-                                out.push(declaration_name_span(source, p.name));
+                                out.push(declaration_name_span(source, &p.name.to_string()));
                             }
                             _ => {}
                         }
@@ -513,30 +518,30 @@ fn collect_declaration_spans(
             }
             StmtKind::Interface(i) => {
                 if want_type && i.name == word {
-                    out.push(declaration_name_span(source, i.name));
+                    out.push(declaration_name_span(source, &i.name.to_string()));
                 }
                 if want_method {
                     for member in i.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind
                             && m.name == word
                         {
-                            out.push(declaration_name_span(source, m.name));
+                            out.push(declaration_name_span(source, &m.name.to_string()));
                         }
                     }
                 }
             }
             StmtKind::Trait(t) => {
                 if want_type && t.name == word {
-                    out.push(declaration_name_span(source, t.name));
+                    out.push(declaration_name_span(source, &t.name.to_string()));
                 }
                 if want_method || want_property {
                     for member in t.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) if want_method && m.name == word => {
-                                out.push(declaration_name_span(source, m.name));
+                                out.push(declaration_name_span(source, &m.name.to_string()));
                             }
                             ClassMemberKind::Property(p) if want_property && p.name == word => {
-                                out.push(declaration_name_span(source, p.name));
+                                out.push(declaration_name_span(source, &p.name.to_string()));
                             }
                             _ => {}
                         }
@@ -545,15 +550,15 @@ fn collect_declaration_spans(
             }
             StmtKind::Enum(e) => {
                 if want_type && e.name == word {
-                    out.push(declaration_name_span(source, e.name));
+                    out.push(declaration_name_span(source, &e.name.to_string()));
                 }
                 for member in e.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Method(m) if want_method && m.name == word => {
-                            out.push(declaration_name_span(source, m.name));
+                            out.push(declaration_name_span(source, &m.name.to_string()));
                         }
                         EnumMemberKind::Case(c) if want_type && c.name == word => {
-                            out.push(declaration_name_span(source, c.name));
+                            out.push(declaration_name_span(source, &c.name.to_string()));
                         }
                         _ => {}
                     }

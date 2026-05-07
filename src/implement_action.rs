@@ -211,7 +211,7 @@ fn collect_abstract_methods_fqn(
                 let declared_fqn = if current_ns.is_empty() {
                     i.name.to_string()
                 } else {
-                    format!("{}\\{}", current_ns, i.name)
+                    format!("{}\\{}", current_ns, &i.name.to_string())
                 };
                 if fqn_eq(fqn, &declared_fqn) {
                     let stubs = i
@@ -237,7 +237,10 @@ fn collect_abstract_methods_fqn(
                     return Some(stubs);
                 }
             }
-            StmtKind::Class(c) if c.name == Some(short) && c.modifiers.is_abstract => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(short.to_string())
+                    && c.modifiers.is_abstract =>
+            {
                 let declared_fqn = if current_ns.is_empty() {
                     short.to_string()
                 } else {
@@ -321,7 +324,10 @@ fn collect_abstract_methods(stmts: &[Stmt<'_, '_>], name: &str) -> Option<Vec<Me
                     .collect();
                 return Some(stubs);
             }
-            StmtKind::Class(c) if c.name == Some(name) && c.modifiers.is_abstract => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string())
+                    && c.modifiers.is_abstract =>
+            {
                 let stubs = c
                     .members
                     .iter()

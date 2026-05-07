@@ -119,6 +119,7 @@ fn walk_for_member(
                     continue;
                 }
                 let Some(class_name) = c.name else { continue };
+                let class_name_str = class_name.to_string();
                 for member in c.members.iter() {
                     if let Some(id) = match_class_member(
                         &member.kind,
@@ -126,7 +127,7 @@ fn walk_for_member(
                         cursor_byte,
                         word,
                         &current_ns,
-                        class_name,
+                        &class_name_str,
                     ) {
                         return Some(id);
                     }
@@ -136,6 +137,7 @@ fn walk_for_member(
                 if !span_contains(stmt.span.start, stmt.span.end, cursor_byte) {
                     continue;
                 }
+                let interface_name = i.name.to_string();
                 for member in i.members.iter() {
                     if let Some(id) = match_class_member(
                         &member.kind,
@@ -143,7 +145,7 @@ fn walk_for_member(
                         cursor_byte,
                         word,
                         &current_ns,
-                        i.name,
+                        &interface_name,
                     ) {
                         return Some(id);
                     }
@@ -153,6 +155,7 @@ fn walk_for_member(
                 if !span_contains(stmt.span.start, stmt.span.end, cursor_byte) {
                     continue;
                 }
+                let trait_name = t.name.to_string();
                 for member in t.members.iter() {
                     if let Some(id) = match_class_member(
                         &member.kind,
@@ -160,7 +163,7 @@ fn walk_for_member(
                         cursor_byte,
                         word,
                         &current_ns,
-                        t.name,
+                        &trait_name,
                     ) {
                         return Some(id);
                     }
@@ -173,16 +176,17 @@ fn walk_for_member(
                 for member in e.members.iter() {
                     let id = match &member.kind {
                         EnumMemberKind::Method(m) if m.name == word => {
-                            cursor_on_name(source, cursor_byte, m.name)
-                                .then(|| format!("{current_ns}{}::{}", e.name, m.name))
+                            cursor_on_name(source, cursor_byte, &m.name.to_string())
+                                .then(|| format!("{current_ns}{}::{}", e.name, &m.name.to_string()))
                         }
                         EnumMemberKind::Case(c) if c.name == word => {
-                            cursor_on_name(source, cursor_byte, c.name)
-                                .then(|| format!("{current_ns}{}::{}", e.name, c.name))
+                            cursor_on_name(source, cursor_byte, &c.name.to_string())
+                                .then(|| format!("{current_ns}{}::{}", e.name, &c.name.to_string()))
                         }
                         EnumMemberKind::ClassConst(cc) if cc.name == word => {
-                            cursor_on_name(source, cursor_byte, cc.name)
-                                .then(|| format!("{current_ns}{}::{}", e.name, cc.name))
+                            cursor_on_name(source, cursor_byte, &cc.name.to_string()).then(|| {
+                                format!("{current_ns}{}::{}", e.name, &cc.name.to_string())
+                            })
                         }
                         _ => None,
                     };
@@ -206,15 +210,17 @@ fn match_class_member(
     class_name: &str,
 ) -> Option<String> {
     match kind {
-        ClassMemberKind::Method(m) if m.name == word => cursor_on_name(source, cursor_byte, m.name)
-            .then(|| format!("{ns_prefix}{class_name}::{}", m.name)),
+        ClassMemberKind::Method(m) if m.name == word => {
+            cursor_on_name(source, cursor_byte, &m.name.to_string())
+                .then(|| format!("{ns_prefix}{class_name}::{}", &m.name.to_string()))
+        }
         ClassMemberKind::Property(p) if p.name == word => {
-            cursor_on_name(source, cursor_byte, p.name)
+            cursor_on_name(source, cursor_byte, &p.name.to_string())
                 .then(|| format!("{ns_prefix}{class_name}::${}", p.name))
         }
         ClassMemberKind::ClassConst(c) if c.name == word => {
-            cursor_on_name(source, cursor_byte, c.name)
-                .then(|| format!("{ns_prefix}{class_name}::{}", c.name))
+            cursor_on_name(source, cursor_byte, &c.name.to_string())
+                .then(|| format!("{ns_prefix}{class_name}::{}", &c.name.to_string()))
         }
         _ => None,
     }
@@ -274,7 +280,7 @@ fn resolve_fqn_for_moniker(
 
     fn matches_top(kind: &StmtKind<'_, '_>, name: &str) -> bool {
         match kind {
-            StmtKind::Class(c) => c.name == Some(name),
+            StmtKind::Class(c) => c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string()),
             StmtKind::Interface(i) => i.name == name,
             StmtKind::Trait(t) => t.name == name,
             StmtKind::Enum(e) => e.name == name,
@@ -342,7 +348,7 @@ pub(crate) fn resolve_fqn(
 
     fn matches_top(kind: &StmtKind<'_, '_>, name: &str) -> bool {
         match kind {
-            StmtKind::Class(c) => c.name == Some(name),
+            StmtKind::Class(c) => c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string()),
             StmtKind::Interface(i) => i.name == name,
             StmtKind::Trait(t) => t.name == name,
             StmtKind::Enum(e) => e.name == name,

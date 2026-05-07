@@ -42,17 +42,29 @@ fn collect_lenses(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) => {
-                let range = sv.name_range(f.name);
-                out.push(ref_count_lens(range, f.name, uri, all_docs, None));
+                let range = sv.name_range(&f.name.to_string());
+                out.push(ref_count_lens(
+                    range,
+                    &f.name.to_string(),
+                    uri,
+                    all_docs,
+                    None,
+                ));
             }
             StmtKind::Class(c) => {
                 if let Some(class_name) = c.name {
-                    let class_range = sv.name_range(class_name);
-                    out.push(ref_count_lens(class_range, class_name, uri, all_docs, None));
+                    let class_range = sv.name_range(&class_name.to_string());
+                    out.push(ref_count_lens(
+                        class_range,
+                        &class_name.to_string(),
+                        uri,
+                        all_docs,
+                        None,
+                    ));
 
                     // Implementations count for abstract classes (classes extending this).
                     if c.modifiers.is_abstract {
-                        let impls = find_implementations(class_name, None, all_docs);
+                        let impls = find_implementations(&class_name.to_string(), None, all_docs);
                         out.push(impl_count_lens(class_range, uri, impls));
                     }
 
@@ -63,24 +75,37 @@ fn collect_lenses(
                     for member in c.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) => {
-                                let method_range = sv.name_range(m.name);
-                                out.push(ref_count_lens(method_range, m.name, uri, all_docs, None));
+                                let method_range = sv.name_range(&m.name.to_string());
+                                out.push(ref_count_lens(
+                                    method_range,
+                                    &m.name.to_string(),
+                                    uri,
+                                    all_docs,
+                                    None,
+                                ));
 
                                 if is_test_method(sv.source(), m, member.span.start) {
-                                    out.push(run_test_lens(method_range, uri, class_name, m.name));
+                                    out.push(run_test_lens(
+                                        method_range,
+                                        uri,
+                                        &class_name.to_string(),
+                                        &m.name.to_string(),
+                                    ));
                                 }
 
                                 // Overrides lens: emit for each direct supertype (parent class
                                 // or used trait) that declares a method with the same name.
                                 for parent_name in &parents {
-                                    if let Some(parent_loc) =
-                                        parent_method_location(parent_name, m.name, all_docs)
-                                    {
+                                    if let Some(parent_loc) = parent_method_location(
+                                        parent_name,
+                                        &m.name.to_string(),
+                                        all_docs,
+                                    ) {
                                         out.push(overrides_lens(
                                             method_range,
                                             uri,
                                             parent_name,
-                                            m.name,
+                                            &m.name.to_string(),
                                             parent_loc,
                                         ));
                                     }
@@ -90,10 +115,10 @@ fn collect_lenses(
                                 if m.name == "__construct" {
                                     for p in m.params.iter() {
                                         if p.visibility.is_some() {
-                                            let prop_range = sv.name_range(p.name);
+                                            let prop_range = sv.name_range(&p.name.to_string());
                                             out.push(ref_count_lens(
                                                 prop_range,
-                                                p.name,
+                                                &p.name.to_string(),
                                                 uri,
                                                 all_docs,
                                                 Some(SymbolKind::Property),
@@ -103,10 +128,10 @@ fn collect_lenses(
                                 }
                             }
                             ClassMemberKind::Property(p) => {
-                                let prop_range = sv.name_range(p.name);
+                                let prop_range = sv.name_range(&p.name.to_string());
                                 out.push(ref_count_lens(
                                     prop_range,
-                                    p.name,
+                                    &p.name.to_string(),
                                     uri,
                                     all_docs,
                                     Some(SymbolKind::Property),
@@ -118,29 +143,47 @@ fn collect_lenses(
                 }
             }
             StmtKind::Interface(i) => {
-                let range = sv.name_range(i.name);
-                out.push(ref_count_lens(range, i.name, uri, all_docs, None));
+                let range = sv.name_range(&i.name.to_string());
+                out.push(ref_count_lens(
+                    range,
+                    &i.name.to_string(),
+                    uri,
+                    all_docs,
+                    None,
+                ));
                 // Implementations count lens.
-                let impls = find_implementations(i.name, None, all_docs);
+                let impls = find_implementations(&i.name.to_string(), None, all_docs);
                 out.push(impl_count_lens(range, uri, impls));
             }
             StmtKind::Trait(t) => {
-                let range = sv.name_range(t.name);
-                out.push(ref_count_lens(range, t.name, uri, all_docs, None));
+                let range = sv.name_range(&t.name.to_string());
+                out.push(ref_count_lens(
+                    range,
+                    &t.name.to_string(),
+                    uri,
+                    all_docs,
+                    None,
+                ));
                 // Usages: classes that `use` this trait.
-                let usages = trait_usage_locations(t.name, all_docs);
+                let usages = trait_usage_locations(&t.name.to_string(), all_docs);
                 out.push(impl_count_lens(range, uri, usages));
                 for member in t.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
-                            let method_range = sv.name_range(m.name);
-                            out.push(ref_count_lens(method_range, m.name, uri, all_docs, None));
+                            let method_range = sv.name_range(&m.name.to_string());
+                            out.push(ref_count_lens(
+                                method_range,
+                                &m.name.to_string(),
+                                uri,
+                                all_docs,
+                                None,
+                            ));
                         }
                         ClassMemberKind::Property(p) => {
-                            let prop_range = sv.name_range(p.name);
+                            let prop_range = sv.name_range(&p.name.to_string());
                             out.push(ref_count_lens(
                                 prop_range,
-                                p.name,
+                                &p.name.to_string(),
                                 uri,
                                 all_docs,
                                 Some(SymbolKind::Property),
@@ -151,17 +194,35 @@ fn collect_lenses(
                 }
             }
             StmtKind::Enum(e) => {
-                let range = sv.name_range(e.name);
-                out.push(ref_count_lens(range, e.name, uri, all_docs, None));
+                let range = sv.name_range(&e.name.to_string());
+                out.push(ref_count_lens(
+                    range,
+                    &e.name.to_string(),
+                    uri,
+                    all_docs,
+                    None,
+                ));
                 for member in e.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Method(m) => {
-                            let method_range = sv.name_range(m.name);
-                            out.push(ref_count_lens(method_range, m.name, uri, all_docs, None));
+                            let method_range = sv.name_range(&m.name.to_string());
+                            out.push(ref_count_lens(
+                                method_range,
+                                &m.name.to_string(),
+                                uri,
+                                all_docs,
+                                None,
+                            ));
                         }
                         EnumMemberKind::Case(c) => {
-                            let case_range = sv.name_range(c.name);
-                            out.push(ref_count_lens(case_range, c.name, uri, all_docs, None));
+                            let case_range = sv.name_range(&c.name.to_string());
+                            out.push(ref_count_lens(
+                                case_range,
+                                &c.name.to_string(),
+                                uri,
+                                all_docs,
+                                None,
+                            ));
                         }
                         _ => {}
                     }
@@ -305,7 +366,7 @@ fn collect_trait_usages_in_stmts(
                 if uses_trait && let Some(class_name) = c.name {
                     out.push(tower_lsp::lsp_types::Location {
                         uri: uri.clone(),
-                        range: sv.name_range(class_name),
+                        range: sv.name_range(&class_name.to_string()),
                     });
                 }
             }
@@ -377,12 +438,14 @@ fn find_method_name_range(
 ) -> Option<tower_lsp::lsp_types::Range> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(parent_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(parent_name.to_string()) =>
+            {
                 for member in c.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
-                        return Some(sv.name_range(m.name));
+                        return Some(sv.name_range(&m.name.to_string()));
                     }
                 }
             }
@@ -391,7 +454,7 @@ fn find_method_name_range(
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
-                        return Some(sv.name_range(m.name));
+                        return Some(sv.name_range(&m.name.to_string()));
                     }
                 }
             }
@@ -412,7 +475,7 @@ fn find_method_name_range(
 /// if its leading docblock contains `@test`, or if it carries a `#[Test]`
 /// or `#[PHPUnit\Framework\Attributes\Test]` PHP attribute.
 fn is_test_method(source: &str, m: &php_ast::MethodDecl<'_, '_>, member_start: u32) -> bool {
-    if m.name.starts_with("test") {
+    if m.name.to_string().starts_with("test") {
         return true;
     }
     let has_test_attr = m.attributes.iter().any(|attr| {

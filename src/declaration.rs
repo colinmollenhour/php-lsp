@@ -61,11 +61,11 @@ fn find_abstract_declaration(
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == word
                     {
-                        return Some(sv.name_range(m.name));
+                        return Some(sv.name_range(&m.name.to_string()));
                     }
                 }
                 if i.name == word {
-                    return Some(sv.name_range(i.name));
+                    return Some(sv.name_range(&i.name.to_string()));
                 }
             }
             StmtKind::Class(c) => {
@@ -74,7 +74,7 @@ fn find_abstract_declaration(
                         && m.is_abstract
                         && m.name == word
                     {
-                        return Some(sv.name_range(m.name));
+                        return Some(sv.name_range(&m.name.to_string()));
                     }
                 }
             }
@@ -84,7 +84,7 @@ fn find_abstract_declaration(
                         && m.is_abstract
                         && m.name == word
                     {
-                        return Some(sv.name_range(m.name));
+                        return Some(sv.name_range(&m.name.to_string()));
                     }
                 }
             }
@@ -110,22 +110,31 @@ fn find_any_declaration(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) if f.name == word => {
-                return Some(sv.name_range(f.name));
+                return Some(sv.name_range(&f.name.to_string()));
             }
-            StmtKind::Class(c) if c.name == Some(word) => {
-                return Some(sv.name_range(c.name.expect("match guard ensures Some")));
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(word.to_string()) =>
+            {
+                return Some(
+                    sv.name_range(
+                        &c.name
+                            .as_ref()
+                            .map(|n| n.to_string())
+                            .expect("match guard ensures Some"),
+                    ),
+                );
             }
             StmtKind::Class(c) => {
                 for member in c.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) if m.name == word => {
-                            return Some(sv.name_range(m.name));
+                            return Some(sv.name_range(&m.name.to_string()));
                         }
                         ClassMemberKind::ClassConst(cc) if cc.name == word => {
-                            return Some(sv.name_range(cc.name));
+                            return Some(sv.name_range(&cc.name.to_string()));
                         }
                         ClassMemberKind::Property(p) if p.name == bare => {
-                            return Some(sv.name_range(p.name));
+                            return Some(sv.name_range(&p.name.to_string()));
                         }
                         _ => {}
                     }
@@ -133,15 +142,15 @@ fn find_any_declaration(
             }
             StmtKind::Interface(i) => {
                 if i.name == word {
-                    return Some(sv.name_range(i.name));
+                    return Some(sv.name_range(&i.name.to_string()));
                 }
                 for member in i.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) if m.name == word => {
-                            return Some(sv.name_range(m.name));
+                            return Some(sv.name_range(&m.name.to_string()));
                         }
                         ClassMemberKind::ClassConst(cc) if cc.name == word => {
-                            return Some(sv.name_range(cc.name));
+                            return Some(sv.name_range(&cc.name.to_string()));
                         }
                         _ => {}
                     }
@@ -149,37 +158,37 @@ fn find_any_declaration(
             }
             StmtKind::Trait(t) => {
                 if t.name == word {
-                    return Some(sv.name_range(t.name));
+                    return Some(sv.name_range(&t.name.to_string()));
                 }
                 for member in t.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) if m.name == word => {
-                            return Some(sv.name_range(m.name));
+                            return Some(sv.name_range(&m.name.to_string()));
                         }
                         ClassMemberKind::ClassConst(cc) if cc.name == word => {
-                            return Some(sv.name_range(cc.name));
+                            return Some(sv.name_range(&cc.name.to_string()));
                         }
                         ClassMemberKind::Property(p) if p.name == bare => {
-                            return Some(sv.name_range(p.name));
+                            return Some(sv.name_range(&p.name.to_string()));
                         }
                         _ => {}
                     }
                 }
             }
             StmtKind::Enum(e) if e.name == word => {
-                return Some(sv.name_range(e.name));
+                return Some(sv.name_range(&e.name.to_string()));
             }
             StmtKind::Enum(e) => {
                 for member in e.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Case(c) if c.name == word => {
-                            return Some(sv.name_range(c.name));
+                            return Some(sv.name_range(&c.name.to_string()));
                         }
                         EnumMemberKind::Method(m) if m.name == word => {
-                            return Some(sv.name_range(m.name));
+                            return Some(sv.name_range(&m.name.to_string()));
                         }
                         EnumMemberKind::ClassConst(cc) if cc.name == word => {
-                            return Some(sv.name_range(cc.name));
+                            return Some(sv.name_range(&cc.name.to_string()));
                         }
                         _ => {}
                     }

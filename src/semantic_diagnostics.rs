@@ -45,10 +45,12 @@ pub fn semantic_diagnostics(
     };
     mir_db.ingest_stub_slice(&slice);
 
-    // Pass 2: analyse function/method bodies in the current document.
+    // Pass 2: analyse function/method bodies in the current document using FileAnalyzer.
+    // FileAnalyzer handles all composite types uniformly, including traits.
     let ver = php_version
         .and_then(|s| s.parse::<mir_analyzer::PhpVersion>().ok())
         .unwrap_or(mir_analyzer::PhpVersion::LATEST);
+
     let mut issue_buffer = mir_issues::IssueBuffer::new();
     let mut symbols = Vec::new();
     salsa::attach_allow_change(&*mir_db, || {
@@ -203,12 +205,12 @@ fn collect_duplicate_decls(
     let mut active_ns = current_ns.to_string();
 
     for stmt in stmts {
-        let name_and_span: Option<(&str, u32)> = match &stmt.kind {
-            StmtKind::Class(c) => c.name.map(|n| (n, stmt.span.start)),
-            StmtKind::Interface(i) => Some((i.name, stmt.span.start)),
-            StmtKind::Trait(t) => Some((t.name, stmt.span.start)),
-            StmtKind::Enum(e) => Some((e.name, stmt.span.start)),
-            StmtKind::Function(f) => Some((f.name, stmt.span.start)),
+        let name_and_span: Option<(String, u32)> = match &stmt.kind {
+            StmtKind::Class(c) => c.name.as_ref().map(|n| (n.to_string(), stmt.span.start)),
+            StmtKind::Interface(i) => Some((i.name.to_string(), stmt.span.start)),
+            StmtKind::Trait(t) => Some((t.name.to_string(), stmt.span.start)),
+            StmtKind::Enum(e) => Some((e.name.to_string(), stmt.span.start)),
+            StmtKind::Function(f) => Some((f.name.to_string(), stmt.span.start)),
             StmtKind::Namespace(ns) => {
                 let ns_name = ns
                     .name
@@ -239,7 +241,7 @@ fn collect_duplicate_decls(
         };
         if let Some((name, span_start)) = name_and_span {
             let key = if active_ns.is_empty() {
-                name.to_string()
+                name.clone()
             } else {
                 format!("{}\\{}", active_ns, name)
             };
@@ -247,7 +249,7 @@ fn collect_duplicate_decls(
                 // Find the byte offset of the actual name by searching forward from span_start.
                 // The span_start points to keywords like "class", "function", etc.,
                 // so we need to find where the identifier name appears.
-                let name_byte_offset = find_name_offset(&sv.source()[span_start as usize..], name)
+                let name_byte_offset = find_name_offset(&sv.source()[span_start as usize..], &name)
                     .map(|off| span_start + off as u32)
                     .unwrap_or(span_start);
 
