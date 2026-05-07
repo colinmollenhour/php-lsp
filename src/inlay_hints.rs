@@ -593,7 +593,7 @@ fn pos_in_range(pos: Position, range: Range) -> bool {
     if pos.line == range.start.line && pos.character < range.start.character {
         return false;
     }
-    if pos.line == range.end.line && pos.character > range.end.character {
+    if pos.line == range.end.line && pos.character >= range.end.character {
         return false;
     }
     true
