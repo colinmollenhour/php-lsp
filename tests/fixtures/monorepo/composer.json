@@ -1,0 +1,15 @@
+{
+  "name": "acme/monorepo",
+  "autoload": {
+    "psr-4": {
+      "Acme\\Core\\": "packages/core/src/",
+      "Acme\\Api\\": "packages/api/src/",
+      "Acme\\Cli\\": "packages/cli/src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Acme\\Tests\\": "packages/tests/src/"
+    }
+  }
+}
