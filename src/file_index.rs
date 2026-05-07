@@ -35,6 +35,8 @@ pub struct FunctionDef {
     /// Raw docblock text (the `/** … */` comment before the declaration).
     pub doc: Option<Box<str>>,
     pub start_line: u32,
+    /// Character position of the function name on its line (UTF-16 code units).
+    pub name_char: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +64,8 @@ pub struct ClassDef {
     /// Enum case names (only populated for `ClassKind::Enum`).
     pub cases: Vec<Box<str>>,
     pub start_line: u32,
+    /// Character position of the class/interface/trait/enum name on its line (UTF-16 code units).
+    pub name_char: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +86,8 @@ pub struct MethodDef {
     pub return_type: Option<Box<str>>,
     pub doc: Option<Box<str>>,
     pub start_line: u32,
+    /// Character position of the method name on its line (UTF-16 code units).
+    pub name_char: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +104,8 @@ pub struct PropertyDef {
     pub type_hint: Option<Box<str>>,
     pub visibility: Visibility,
     pub start_line: u32,
+    /// Character position of the property name on its line (UTF-16 code units).
+    pub name_char: u32,
 }
 
 // ── Extract ───────────────────────────────────────────────────────────────────
@@ -129,6 +137,14 @@ fn collect_stmts(
     namespace: Option<&str>,
     index: &mut FileIndex,
 ) {
+    use crate::ast::str_offset;
+
+    let name_char = |name: &str| -> u32 {
+        str_offset(source, name)
+            .map(|off| view.position_of(off).character)
+            .unwrap_or(0)
+    };
+
     // Track the current namespace for unbraced `namespace Foo;` statements.
     let mut cur_ns: Option<Box<str>> = namespace.map(|s| s.into());
 
@@ -170,6 +186,7 @@ fn collect_stmts(
                     return_type: f.return_type.as_ref().map(|t| format_type_hint(t).into()),
                     doc: doc_text,
                     start_line,
+                    name_char: name_char(f.name),
                 });
             }
 
@@ -199,6 +216,7 @@ fn collect_stmts(
                     constants: Vec::new(),
                     cases: Vec::new(),
                     start_line,
+                    name_char: name_char(class_name),
                 };
 
                 for member in c.members.iter() {
@@ -222,6 +240,7 @@ fn collect_stmts(
                                             .map(|t| format_type_hint(t).into()),
                                         visibility: pvis,
                                         start_line: pstart,
+                                        name_char: name_char(ast_param.name),
                                     });
                                 }
                             }
@@ -237,6 +256,7 @@ fn collect_stmts(
                                     .map(|t| format_type_hint(t).into()),
                                 doc: mdoc,
                                 start_line: mstart,
+                                name_char: name_char(m.name),
                             });
                         }
                         ClassMemberKind::Property(p) => {
@@ -248,6 +268,7 @@ fn collect_stmts(
                                 type_hint: p.type_hint.as_ref().map(|t| format_type_hint(t).into()),
                                 visibility: vis,
                                 start_line: pstart,
+                                name_char: name_char(p.name),
                             });
                         }
                         ClassMemberKind::ClassConst(cc) => {
@@ -287,6 +308,7 @@ fn collect_stmts(
                     constants: Vec::new(),
                     cases: Vec::new(),
                     start_line,
+                    name_char: name_char(i.name),
                 };
 
                 for member in i.members.iter() {
@@ -306,6 +328,7 @@ fn collect_stmts(
                                     .map(|t| format_type_hint(t).into()),
                                 doc: mdoc,
                                 start_line: mstart,
+                                name_char: name_char(m.name),
                             });
                         }
                         ClassMemberKind::ClassConst(cc) => {
@@ -335,6 +358,7 @@ fn collect_stmts(
                     constants: Vec::new(),
                     cases: Vec::new(),
                     start_line,
+                    name_char: name_char(t.name),
                 };
 
                 for member in t.members.iter() {
@@ -355,6 +379,7 @@ fn collect_stmts(
                                     .map(|t| format_type_hint(t).into()),
                                 doc: mdoc,
                                 start_line: mstart,
+                                name_char: name_char(m.name),
                             });
                         }
                         ClassMemberKind::Property(p) => {
@@ -366,6 +391,7 @@ fn collect_stmts(
                                 type_hint: p.type_hint.as_ref().map(|t| format_type_hint(t).into()),
                                 visibility: vis,
                                 start_line: pstart,
+                                name_char: name_char(p.name),
                             });
                         }
                         ClassMemberKind::ClassConst(cc) => {
@@ -405,6 +431,7 @@ fn collect_stmts(
                     constants: Vec::new(),
                     cases: Vec::new(),
                     start_line,
+                    name_char: name_char(e.name),
                 };
 
                 for member in e.members.iter() {
@@ -428,6 +455,7 @@ fn collect_stmts(
                                     .map(|t| format_type_hint(t).into()),
                                 doc: mdoc,
                                 start_line: mstart,
+                                name_char: name_char(m.name),
                             });
                         }
                         EnumMemberKind::ClassConst(cc) => {

@@ -407,7 +407,7 @@ async fn declaration_from_index_finds_abstract_method() {
     let (_, line, ch) = s.locate("caller.php", "speak()", 0);
     let resp = s.declaration("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["Animal.php:2:0-2:0"].assert_eq(&out);
+    expect!["Animal.php:2:29-2:34"].assert_eq(&out);
 }
 
 /// Interface method declaration served from a not-opened interface file.
@@ -429,7 +429,7 @@ async fn declaration_from_index_finds_interface_method() {
     let (_, line, ch) = s.locate("caller.php", "log($m)", 0);
     let resp = s.declaration("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["Logger.php:2:0-2:0"].assert_eq(&out);
+    expect!["Logger.php:2:20-2:23"].assert_eq(&out);
 }
 
 /// Interface name (as a type hint) served from a not-opened interface file.
@@ -451,7 +451,7 @@ async fn declaration_from_index_finds_interface_name() {
     let (_, line, ch) = s.locate("caller.php", "Logger $l", 0);
     let resp = s.declaration("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["Logger.php:1:0-1:0"].assert_eq(&out);
+    expect!["Logger.php:1:10-1:16"].assert_eq(&out);
 }
 
 /// No abstract counterpart: free function served via the index second-pass.
@@ -473,7 +473,7 @@ async fn declaration_from_index_falls_back_to_function() {
     let (_, line, ch) = s.locate("caller.php", "format_name('x')", 0);
     let resp = s.declaration("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["helpers.php:1:0-1:0"].assert_eq(&out);
+    expect!["helpers.php:1:9-1:20"].assert_eq(&out);
 }
 
 /// No abstract counterpart: plain class name served via the index second-pass.
@@ -496,7 +496,7 @@ async fn declaration_from_index_falls_back_to_class() {
     let ch = ch + "new ".len() as u32;
     let resp = s.declaration("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["Widget.php:1:0-1:0"].assert_eq(&out);
+    expect!["Widget.php:1:6-1:12"].assert_eq(&out);
 }
 
 /// Trait abstract method declaration served from unopened trait file.
@@ -518,7 +518,7 @@ async fn declaration_from_index_finds_trait_abstract_method() {
     let (_, line, ch) = s.locate("caller.php", "render()", 0);
     let resp = s.declaration("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["Renderable.php:2:0-2:0"].assert_eq(&out);
+    expect!["Renderable.php:2:29-2:35"].assert_eq(&out);
 }
 
 /// Enum case declaration served from unopened enum file.
@@ -540,7 +540,7 @@ async fn declaration_from_index_finds_enum_case() {
     let (_, line, ch) = s.locate("caller.php", "Active", 0);
     let resp = s.declaration("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["Status.php:1:0-1:0"].assert_eq(&out);
+    expect!["Status.php:1:5-1:11"].assert_eq(&out);
 }
 
 /// Enum constant declaration served from unopened enum file.
@@ -562,7 +562,7 @@ async fn declaration_from_index_finds_enum_constant() {
     let (_, line, ch) = s.locate("caller.php", "DEBUG", 0);
     let resp = s.declaration("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["Config.php:1:0-1:0"].assert_eq(&out);
+    expect!["Config.php:1:5-1:11"].assert_eq(&out);
 }
 
 /// Class constant declaration served from unopened class file.
@@ -584,7 +584,7 @@ async fn declaration_from_index_finds_class_constant() {
     let (_, line, ch) = s.locate("caller.php", "VERSION", 0);
     let resp = s.declaration("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["AppConfig.php:1:0-1:0"].assert_eq(&out);
+    expect!["AppConfig.php:1:6-1:15"].assert_eq(&out);
 }
 
 /// Word at cursor that doesn't match any open doc *or* any indexed entry

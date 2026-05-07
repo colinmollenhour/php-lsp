@@ -434,3 +434,187 @@ $0"#,
         .await;
     expect![[r#"<none>"#]].assert_eq(&out);
 }
+
+// ── Stub-index fallback (unopened file) ──────────────────────────────────────
+//
+// Tests for declaration resolution through FileIndex entries (unopened files).
+// These use tempdir to write files to disk, start a rooted server that scans
+// them, then only open the caller file so the declaration target is index-only.
+
+/// Abstract method in unopened parent class.
+#[tokio::test]
+async fn declaration_from_unopened_abstract_method() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Animal.php"),
+        "<?php\nabstract class Animal {\n    abstract public function speak(): string;\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction call(Animal $a): string { return $a->speak(); }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "speak()", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Animal.php:2:29-2:34"].assert_eq(&out);
+}
+
+/// Interface method in unopened interface.
+#[tokio::test]
+async fn declaration_from_unopened_interface_method() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Logger.php"),
+        "<?php\ninterface Logger {\n    public function log(string $msg): void;\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction emit(Logger $l, string $m): void { $l->log($m); }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "log($m)", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Logger.php:2:20-2:23"].assert_eq(&out);
+}
+
+/// Interface name in unopened interface.
+#[tokio::test]
+async fn declaration_from_unopened_interface_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Logger.php"),
+        "<?php\ninterface Logger {\n    public function log(): void;\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction emit(Logger $l): void { $l; }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "Logger $l", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Logger.php:1:10-1:16"].assert_eq(&out);
+}
+
+/// Free function in unopened file.
+#[tokio::test]
+async fn declaration_from_unopened_function() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("helpers.php"),
+        "<?php\nfunction format_name(string $s): string { return $s; }\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction caller(): string { return format_name('x'); }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "format_name('x')", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["helpers.php:1:9-1:20"].assert_eq(&out);
+}
+
+/// Class name in unopened class.
+#[tokio::test]
+async fn declaration_from_unopened_class_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Widget.php"),
+        "<?php\nclass Widget {\n    public function render(): void {}\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction make(): Widget { return new Widget(); }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "new Widget", 0);
+    let ch = ch + "new ".len() as u32;
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Widget.php:1:6-1:12"].assert_eq(&out);
+}
+
+/// Method in unopened class.
+#[tokio::test]
+async fn declaration_from_unopened_method() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Service.php"),
+        "<?php\nclass Service {\n    public function execute(): void {}\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction run(Service $s): void { $s->execute(); }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "execute()", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Service.php:2:20-2:27"].assert_eq(&out);
+}
+
+/// Property in unopened class (previously unimplemented for index path).
+#[tokio::test]
+async fn declaration_from_unopened_property() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Entity.php"),
+        "<?php\nclass Entity {\n    public string $name = '';\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction get(Entity $e): string { return $e->name; }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "->name", 0);
+    let ch = ch + "->".len() as u32; // move cursor to start of property name
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Entity.php:2:19-2:23"].assert_eq(&out);
+}
+
+/// Abstract method in unopened trait.
+#[tokio::test]
+async fn declaration_from_unopened_trait_abstract_method() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Loggable.php"),
+        "<?php\ntrait Loggable {\n    abstract public function record(): void;\n}\n",
+    )
+    .unwrap();
+    let caller_src = "<?php\nfunction output(): void { $x->record(); }\n";
+    std::fs::write(tmp.path().join("caller.php"), caller_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller_src).await;
+
+    let (_, line, ch) = s.locate("caller.php", "record()", 0);
+    let resp = s.declaration("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Loggable.php:2:29-2:35"].assert_eq(&out);
+}

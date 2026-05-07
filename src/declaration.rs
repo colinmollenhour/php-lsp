@@ -213,11 +213,20 @@ pub fn goto_declaration_from_index(
     use crate::file_index::ClassKind;
     use crate::util::word_at;
     let word = word_at(source, position)?;
-    let _bare = word.strip_prefix('$').unwrap_or(&word);
+    let bare = word.strip_prefix('$').unwrap_or(&word);
 
-    let line_range = |line: u32| -> tower_lsp::lsp_types::Range {
-        let p = tower_lsp::lsp_types::Position { line, character: 0 };
-        tower_lsp::lsp_types::Range { start: p, end: p }
+    let precise_range = |line: u32, name_char: u32, name: &str| -> tower_lsp::lsp_types::Range {
+        let end_char = name_char + name.encode_utf16().count() as u32;
+        tower_lsp::lsp_types::Range {
+            start: tower_lsp::lsp_types::Position {
+                line,
+                character: name_char,
+            },
+            end: tower_lsp::lsp_types::Position {
+                line,
+                character: end_char,
+            },
+        }
     };
 
     // First pass: abstract/interface declarations.
@@ -229,7 +238,7 @@ pub fn goto_declaration_from_index(
                     if cls.name.as_ref() == word {
                         return Some(Location {
                             uri: uri.clone(),
-                            range: line_range(cls.start_line),
+                            range: precise_range(cls.start_line, cls.name_char, &cls.name),
                         });
                     }
                     // Abstract method in interface.
@@ -237,7 +246,7 @@ pub fn goto_declaration_from_index(
                         if m.name.as_ref() == word {
                             return Some(Location {
                                 uri: uri.clone(),
-                                range: line_range(m.start_line),
+                                range: precise_range(m.start_line, m.name_char, &m.name),
                             });
                         }
                     }
@@ -248,7 +257,7 @@ pub fn goto_declaration_from_index(
                         if m.is_abstract && m.name.as_ref() == word {
                             return Some(Location {
                                 uri: uri.clone(),
-                                range: line_range(m.start_line),
+                                range: precise_range(m.start_line, m.name_char, &m.name),
                             });
                         }
                     }
@@ -259,7 +268,7 @@ pub fn goto_declaration_from_index(
                         if m.is_abstract && m.name.as_ref() == word {
                             return Some(Location {
                                 uri: uri.clone(),
-                                range: line_range(m.start_line),
+                                range: precise_range(m.start_line, m.name_char, &m.name),
                             });
                         }
                     }
@@ -276,7 +285,7 @@ pub fn goto_declaration_from_index(
             if f.name.as_ref() == word {
                 return Some(Location {
                     uri: uri.clone(),
-                    range: line_range(f.start_line),
+                    range: precise_range(f.start_line, f.name_char, &f.name),
                 });
             }
         }
@@ -286,7 +295,7 @@ pub fn goto_declaration_from_index(
             if cls.name.as_ref() == word {
                 return Some(Location {
                     uri: uri.clone(),
-                    range: line_range(cls.start_line),
+                    range: precise_range(cls.start_line, cls.name_char, &cls.name),
                 });
             }
 
@@ -295,22 +304,27 @@ pub fn goto_declaration_from_index(
                 if m.name.as_ref() == word {
                     return Some(Location {
                         uri: uri.clone(),
-                        range: line_range(m.start_line),
+                        range: precise_range(m.start_line, m.name_char, &m.name),
                     });
                 }
             }
 
-            // TODO: Properties (Phase 2). Currently FileIndex stores properties per-class
-            // but property lookup in unopened files requires finding the correct class context
-            // first. Enable after extending FileIndex to store class-qualified names or adding
-            // property line lookup.
+            // Properties.
+            for p in &cls.properties {
+                if p.name.as_ref() == bare {
+                    return Some(Location {
+                        uri: uri.clone(),
+                        range: precise_range(p.start_line, p.name_char, &p.name),
+                    });
+                }
+            }
 
             // Class/Interface/Trait/Enum constants.
             for c in &cls.constants {
                 if c.as_ref() == word {
                     return Some(Location {
                         uri: uri.clone(),
-                        range: line_range(cls.start_line),
+                        range: precise_range(cls.start_line, cls.name_char, &cls.name),
                     });
                 }
             }
@@ -321,7 +335,7 @@ pub fn goto_declaration_from_index(
                     if case_name.as_ref() == word {
                         return Some(Location {
                             uri: uri.clone(),
-                            range: line_range(cls.start_line),
+                            range: precise_range(cls.start_line, cls.name_char, &cls.name),
                         });
                     }
                 }
