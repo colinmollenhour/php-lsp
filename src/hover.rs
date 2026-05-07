@@ -478,7 +478,9 @@ fn scan_statements(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                     .unwrap_or_default();
                 return Some(format!("function {}({}){}", word, params, ret));
             }
-            StmtKind::Class(c) if c.name == Some(word) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(word.to_string()) =>
+            {
                 let kw = if c.modifiers.is_abstract {
                     "abstract class"
                 } else if c.modifiers.is_final {
@@ -837,7 +839,7 @@ pub fn class_hover_from_index(
                         }
                     }
                 };
-                let mut sig = format!("{} {}", kw, cls.name);
+                let mut sig = format!("{} {}", kw, &cls.name.to_string());
                 if let Some(parent) = &cls.parent {
                     sig.push_str(&format!(" extends {}", parent));
                 }
@@ -1148,7 +1150,9 @@ fn find_property_info_in_stmts<'a>(
 ) -> Option<(String, String, Option<Docblock>)> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
+            {
                 for member in c.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Property(p) if p.name == prop_name => {
@@ -1244,7 +1248,9 @@ fn scan_method_of_class_impl<'a>(
 ) -> Option<String> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
+            {
                 // 1. Direct method lookup.
                 for member in c.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
@@ -1391,7 +1397,9 @@ fn scan_class_const_of_class(
 ) -> Option<String> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
+            {
                 for member in c.members.iter() {
                     if let ClassMemberKind::ClassConst(k) = &member.kind
                         && k.name == const_name
@@ -1486,7 +1494,9 @@ fn find_method_sig_in_trait(
 fn find_parent_class_name(stmts: &[Stmt<'_, '_>], class_name: &str) -> Option<String> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
+            {
                 return c.extends.as_ref().map(|p| {
                     let pn = p.to_string_repr();
                     pn.rsplit('\\').next().unwrap_or(pn.as_ref()).to_owned()
@@ -1561,7 +1571,9 @@ fn find_method_docblock_impl<'a>(
 ) -> Option<crate::docblock::Docblock> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Class(c) if c.name == Some(class_name) => {
+            StmtKind::Class(c)
+                if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
+            {
                 // Direct lookup.
                 for member in c.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
@@ -1897,7 +1909,12 @@ fn find_param_sig_in_stmts(
                     .map(|raw| crate::docblock::parse_docblock(&raw));
                 return Some((sig, db));
             }
-            StmtKind::Class(c) if class_name == c.name => {
+            StmtKind::Class(c)
+                if class_name
+                    .as_ref()
+                    .map(|cn| cn == &c.name.as_ref().map(|n| n.to_string()).unwrap_or_default())
+                    .unwrap_or(false) =>
+            {
                 for member in c.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == callee_name
@@ -1910,7 +1927,12 @@ fn find_param_sig_in_stmts(
                     }
                 }
             }
-            StmtKind::Trait(t) if class_name == Some(t.name) => {
+            StmtKind::Trait(t)
+                if class_name
+                    .as_ref()
+                    .map(|cn| cn == &t.name.to_string())
+                    .unwrap_or(false) =>
+            {
                 for member in t.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == callee_name
@@ -1947,7 +1969,7 @@ fn format_single_param(p: &Param<'_, '_>) -> String {
         s.push_str("...");
     }
     s.push('$');
-    s.push_str(p.name);
+    s.push_str(&p.name.to_string());
     if let Some(default) = &p.default {
         s.push_str(&format!(" = {}", format_default_value(default)));
     }

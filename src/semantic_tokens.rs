@@ -394,13 +394,13 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
         StmtKind::Function(f) => {
             push_attributes(out, sv, &f.attributes);
             let mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
-            push_name(out, sv, f.name, TT_FUNCTION, mods);
+            push_name(out, sv, &f.name.to_string(), TT_FUNCTION, mods);
             for p in f.params.iter() {
                 push_attributes(out, sv, &p.attributes);
                 if let Some(th) = &p.type_hint {
                     push_type_hint(out, sv, th);
                 }
-                push_param(out, sv, p.name, TT_PARAMETER, MOD_DECLARATION);
+                push_param(out, sv, &p.name.to_string(), TT_PARAMETER, MOD_DECLARATION);
             }
             if let Some(rt) = &f.return_type {
                 push_type_hint(out, sv, rt);
@@ -411,7 +411,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
             push_attributes(out, sv, &c.attributes);
             if let Some(name) = c.name {
                 let mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
-                push_name(out, sv, name, TT_CLASS, mods);
+                push_name(out, sv, &name.to_string(), TT_CLASS, mods);
             }
             for member in c.members.iter() {
                 collect_class_member(sv, member, out);
@@ -420,12 +420,12 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
         StmtKind::Interface(i) => {
             push_attributes(out, sv, &i.attributes);
             let mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
-            push_name(out, sv, i.name, TT_INTERFACE, mods);
+            push_name(out, sv, &i.name.to_string(), TT_INTERFACE, mods);
         }
         StmtKind::Trait(t) => {
             push_attributes(out, sv, &t.attributes);
             let mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
-            push_name(out, sv, t.name, TT_CLASS, mods);
+            push_name(out, sv, &t.name.to_string(), TT_CLASS, mods);
             for member in t.members.iter() {
                 collect_class_member(sv, member, out);
             }
@@ -433,14 +433,14 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
         StmtKind::Enum(e) => {
             push_attributes(out, sv, &e.attributes);
             let mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
-            push_name(out, sv, e.name, TT_CLASS, mods);
+            push_name(out, sv, &e.name.to_string(), TT_CLASS, mods);
             for member in e.members.iter() {
                 match &member.kind {
                     EnumMemberKind::Case(c) => {
                         push_attributes(out, sv, &c.attributes);
                         let mmods =
                             MOD_DECLARATION | deprecated_mod(sv.source(), member.span.start);
-                        push_name(out, sv, c.name, TT_PROPERTY, mmods);
+                        push_name(out, sv, &c.name.to_string(), TT_PROPERTY, mmods);
                         if let Some(value) = &c.value {
                             collect_expr(sv, value, out);
                         }
@@ -452,12 +452,12 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
                         if m.is_static {
                             mmods |= MOD_STATIC;
                         }
-                        push_name(out, sv, m.name, TT_METHOD, mmods);
+                        push_name(out, sv, &m.name.to_string(), TT_METHOD, mmods);
                         for p in m.params.iter() {
                             if let Some(th) = &p.type_hint {
                                 push_type_hint(out, sv, th);
                             }
-                            push_param(out, sv, p.name, TT_PARAMETER, MOD_DECLARATION);
+                            push_param(out, sv, &p.name.to_string(), TT_PARAMETER, MOD_DECLARATION);
                         }
                         if let Some(rt) = &m.return_type {
                             push_type_hint(out, sv, rt);
@@ -473,7 +473,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
                         if let Some(th) = &k.type_hint {
                             push_type_hint(out, sv, th);
                         }
-                        push_name(out, sv, k.name, TT_PROPERTY, mmods);
+                        push_name(out, sv, &k.name.to_string(), TT_PROPERTY, mmods);
                         collect_expr(sv, &k.value, out);
                     }
                     EnumMemberKind::TraitUse(_) => {
@@ -555,13 +555,13 @@ fn collect_class_member(
         if m.is_abstract {
             mods |= MOD_ABSTRACT;
         }
-        push_name(out, sv, m.name, TT_METHOD, mods);
+        push_name(out, sv, &m.name.to_string(), TT_METHOD, mods);
         for p in m.params.iter() {
             push_attributes(out, sv, &p.attributes);
             if let Some(th) = &p.type_hint {
                 push_type_hint(out, sv, th);
             }
-            push_param(out, sv, p.name, TT_PARAMETER, MOD_DECLARATION);
+            push_param(out, sv, &p.name.to_string(), TT_PARAMETER, MOD_DECLARATION);
         }
         if let Some(rt) = &m.return_type {
             push_type_hint(out, sv, rt);
@@ -574,7 +574,7 @@ fn collect_class_member(
         if let Some(th) = &p.type_hint {
             push_type_hint(out, sv, th);
         }
-        push_name(out, sv, p.name, TT_PROPERTY, MOD_DECLARATION);
+        push_name(out, sv, &p.name.to_string(), TT_PROPERTY, MOD_DECLARATION);
     }
 }
 
@@ -708,7 +708,7 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
                 if let Some(th) = &p.type_hint {
                     push_type_hint(out, sv, th);
                 }
-                push_param(out, sv, p.name, TT_PARAMETER, MOD_DECLARATION);
+                push_param(out, sv, &p.name.to_string(), TT_PARAMETER, MOD_DECLARATION);
             }
             if let Some(rt) = &c.return_type {
                 push_type_hint(out, sv, rt);
@@ -720,7 +720,7 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
                 if let Some(th) = &p.type_hint {
                     push_type_hint(out, sv, th);
                 }
-                push_param(out, sv, p.name, TT_PARAMETER, MOD_DECLARATION);
+                push_param(out, sv, &p.name.to_string(), TT_PARAMETER, MOD_DECLARATION);
             }
             if let Some(rt) = &af.return_type {
                 push_type_hint(out, sv, rt);

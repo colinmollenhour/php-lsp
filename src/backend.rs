@@ -3077,8 +3077,8 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                 StmtKind::Class(c) => {
                     for member in c.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind {
-                            let start = str_offset(source, m.name).unwrap_or(0);
-                            let end = start + m.name.len() as u32;
+                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
+                            let end = start + m.name.to_string().len() as u32;
                             if cursor >= start && cursor < end {
                                 return true;
                             }
@@ -3088,8 +3088,8 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                 StmtKind::Interface(i) => {
                     for member in i.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind {
-                            let start = str_offset(source, m.name).unwrap_or(0);
-                            let end = start + m.name.len() as u32;
+                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
+                            let end = start + m.name.to_string().len() as u32;
                             if cursor >= start && cursor < end {
                                 return true;
                             }
@@ -3099,8 +3099,8 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                 StmtKind::Trait(t) => {
                     for member in t.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind {
-                            let start = str_offset(source, m.name).unwrap_or(0);
-                            let end = start + m.name.len() as u32;
+                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
+                            let end = start + m.name.to_string().len() as u32;
                             if cursor >= start && cursor < end {
                                 return true;
                             }
@@ -3110,8 +3110,8 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                 StmtKind::Enum(e) => {
                     for member in e.members.iter() {
                         if let EnumMemberKind::Method(m) = &member.kind {
-                            let start = str_offset(source, m.name).unwrap_or(0);
-                            let end = start + m.name.len() as u32;
+                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
+                            let end = start + m.name.to_string().len() as u32;
                             if cursor >= start && cursor < end {
                                 return true;
                             }
@@ -3151,10 +3151,10 @@ fn cursor_is_on_property_decl(
                 StmtKind::Class(c) => {
                     for member in c.members.iter() {
                         if let ClassMemberKind::Property(p) = &member.kind {
-                            let start = str_offset(source, p.name).unwrap_or(0);
-                            let end = start + p.name.len() as u32;
+                            let start = str_offset(source, &p.name.to_string()).unwrap_or(0);
+                            let end = start + p.name.to_string().len() as u32;
                             if cursor >= start && cursor < end {
-                                return Some(p.name.to_owned());
+                                return Some(p.name.to_string());
                             }
                         }
                     }
@@ -3162,10 +3162,10 @@ fn cursor_is_on_property_decl(
                 StmtKind::Trait(t) => {
                     for member in t.members.iter() {
                         if let ClassMemberKind::Property(p) = &member.kind {
-                            let start = str_offset(source, p.name).unwrap_or(0);
-                            let end = start + p.name.len() as u32;
+                            let start = str_offset(source, &p.name.to_string()).unwrap_or(0);
+                            let end = start + p.name.to_string().len() as u32;
                             if cursor >= start && cursor < end {
-                                return Some(p.name.to_owned());
+                                return Some(p.name.to_string());
                             }
                         }
                     }
@@ -3208,12 +3208,12 @@ fn class_name_at_construct_decl(
                         if let ClassMemberKind::Method(m) = &member.kind
                             && m.name == "__construct"
                         {
-                            let start = str_offset(source, m.name).unwrap_or(0);
-                            let end = start + m.name.len() as u32;
+                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
+                            let end = start + m.name.to_string().len() as u32;
                             if cursor >= start && cursor < end {
                                 let short = c.name?;
                                 return Some(if current_ns.is_empty() {
-                                    short.to_owned()
+                                    short.to_string()
                                 } else {
                                     format!("{}\\{}", current_ns, short)
                                 });
@@ -3273,10 +3273,13 @@ fn promoted_property_at_cursor(
                                 if param.visibility.is_none() {
                                     continue;
                                 }
-                                let name_start = str_offset(source, param.name).unwrap_or(0);
-                                let name_end = name_start + param.name.len() as u32;
+                                let name_start =
+                                    str_offset(source, &param.name.to_string()).unwrap_or(0);
+                                let name_end = name_start + param.name.to_string().len() as u32;
                                 if cursor >= name_start && cursor < name_end {
-                                    return Some(param.name.trim_start_matches('$').to_owned());
+                                    return Some(
+                                        param.name.to_string().trim_start_matches('$').to_string(),
+                                    );
                                 }
                             }
                         }

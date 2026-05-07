@@ -73,15 +73,15 @@ impl AllRefsVisitor<'_> {
 impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
     fn visit_stmt(&mut self, stmt: &Stmt<'arena, 'src>) -> ControlFlow<()> {
         match &stmt.kind {
-            StmtKind::Function(f) => self.push_name_str(f.name),
+            StmtKind::Function(f) => self.push_name_str(&f.name.to_string()),
             StmtKind::Class(c) => {
                 if let Some(name) = c.name {
-                    self.push_name_str(name);
+                    self.push_name_str(&name.to_string());
                 }
             }
-            StmtKind::Interface(i) => self.push_name_str(i.name),
-            StmtKind::Trait(t) => self.push_name_str(t.name),
-            StmtKind::Enum(e) => self.push_name_str(e.name),
+            StmtKind::Interface(i) => self.push_name_str(&i.name.to_string()),
+            StmtKind::Trait(t) => self.push_name_str(&t.name.to_string()),
+            StmtKind::Enum(e) => self.push_name_str(&e.name.to_string()),
             StmtKind::Use(u) if self.include_use => {
                 for use_item in u.uses.iter() {
                     let fqn = use_item.name.to_string_repr().into_owned();
@@ -104,14 +104,14 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
 
     fn visit_class_member(&mut self, member: &ClassMember<'arena, 'src>) -> ControlFlow<()> {
         if let ClassMemberKind::Method(m) = &member.kind {
-            self.push_name_str(m.name);
+            self.push_name_str(&m.name.to_string());
         }
         walk_class_member(self, member)
     }
 
     fn visit_enum_member(&mut self, member: &EnumMember<'arena, 'src>) -> ControlFlow<()> {
         if let EnumMemberKind::Method(m) = &member.kind {
-            self.push_name_str(m.name);
+            self.push_name_str(&m.name.to_string());
         }
         walk_enum_member(self, member)
     }
@@ -386,20 +386,20 @@ impl<'arena, 'src> Visitor<'arena, 'src> for PropertyRefsVisitor<'_> {
     fn visit_class_member(&mut self, member: &ClassMember<'arena, 'src>) -> ControlFlow<()> {
         match &member.kind {
             ClassMemberKind::Property(p) if p.name == self.prop_name => {
-                let offset = str_offset(self.source, p.name).unwrap_or(0);
+                let offset = str_offset(self.source, &p.name.to_string()).unwrap_or(0);
                 self.out.push(Span {
                     start: offset,
-                    end: offset + p.name.len() as u32,
+                    end: offset + p.name.to_string().len() as u32,
                 });
             }
             // Constructor-promoted parameters act as property declarations.
             ClassMemberKind::Method(m) if m.name == "__construct" => {
                 for p in m.params.iter() {
                     if p.visibility.is_some() && p.name == self.prop_name {
-                        let offset = str_offset(self.source, p.name).unwrap_or(0);
+                        let offset = str_offset(self.source, &p.name.to_string()).unwrap_or(0);
                         self.out.push(Span {
                             start: offset,
-                            end: offset + p.name.len() as u32,
+                            end: offset + p.name.to_string().len() as u32,
                         });
                     }
                 }

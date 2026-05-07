@@ -37,7 +37,7 @@ pub(super) fn collect_attribute_classes(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Class(c) => {
-                let short = c.name.unwrap_or("");
+                let short = c.name.as_ref().map(|n| n.to_string()).unwrap_or_default();
                 if short.is_empty() {
                     continue;
                 }
@@ -45,7 +45,7 @@ pub(super) fn collect_attribute_classes(
                 if let Some(target) = target {
                     out.push(AttributeClassEntry {
                         label: short.to_string(),
-                        fqn: fqn_for(short, &cur_ns),
+                        fqn: fqn_for(&short.to_string(), &cur_ns),
                         target,
                     });
                 }
@@ -200,12 +200,12 @@ pub(super) fn collect_classes_with_ns(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Class(c) => {
-                let short = c.name.unwrap_or("");
+                let short = c.name.as_ref().map(|n| n.to_string()).unwrap_or_default();
                 if !short.is_empty() {
                     items.push((
                         short.to_string(),
                         CompletionItemKind::CLASS,
-                        fqn_for(short, &cur_ns),
+                        fqn_for(&short.to_string(), &cur_ns),
                     ));
                 }
             }
@@ -213,21 +213,21 @@ pub(super) fn collect_classes_with_ns(
                 items.push((
                     i.name.to_string(),
                     CompletionItemKind::INTERFACE,
-                    fqn_for(i.name, &cur_ns),
+                    fqn_for(&i.name.to_string(), &cur_ns),
                 ));
             }
             StmtKind::Trait(t) => {
                 items.push((
                     t.name.to_string(),
                     CompletionItemKind::CLASS,
-                    fqn_for(t.name, &cur_ns),
+                    fqn_for(&t.name.to_string(), &cur_ns),
                 ));
             }
             StmtKind::Enum(e) => {
                 items.push((
                     e.name.to_string(),
                     CompletionItemKind::ENUM,
-                    fqn_for(e.name, &cur_ns),
+                    fqn_for(&e.name.to_string(), &cur_ns),
                 ));
             }
             StmtKind::Namespace(ns) => {
@@ -315,7 +315,7 @@ pub(super) fn collect_fqns_with_prefix(
                 let fqn = if ns.is_empty() {
                     i.name.to_string()
                 } else {
-                    format!("{ns}\\{}", i.name)
+                    format!("{ns}\\{}", &i.name.to_string())
                 };
                 if prefix.is_empty() || fqn.to_lowercase().contains(&prefix_lc) {
                     out.push(CompletionItem {

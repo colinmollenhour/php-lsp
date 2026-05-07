@@ -889,7 +889,7 @@ $fn = fn() => nonexistent_function();
         .await;
 }
 
-#[ignore = "mir-analyzer gap: trait method bodies are not analyzed"]
+#[ignore = "mir-analyzer 0.19: FileAnalyzer exists but is not in public API; StatementsAnalyzer still skips traits"]
 #[tokio::test]
 async fn undefined_function_detected_in_trait_method() {
     let mut server = TestServer::new().await;
