@@ -816,3 +816,99 @@ async fn semantic_tokens_final_method() {
         1:33 len=4 type=type mods=0b0"#]]
     .assert_eq(&out);
 }
+
+/// Verify enum class constants with type hints are tokenized.
+#[tokio::test]
+async fn semantic_tokens_enum_class_constant_with_type() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "enum_const.php",
+            "<?php\nenum Status { const int PENDING = 0; }\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("enum_const.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // Enum name, type hint, property (constant name), and number value
+    expect![[r#"
+        1:5 len=6 type=class mods=0b1
+        1:20 len=3 type=type mods=0b0
+        1:24 len=7 type=property mods=0b1
+        1:34 len=1 type=number mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify enum class constants with string values are tokenized.
+#[tokio::test]
+async fn semantic_tokens_enum_class_constant_string() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "enum_string.php",
+            "<?php\nenum Config { const string URL = \"https://api\"; }\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("enum_string.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // Enum name, type hint (string), property (constant name), and string value
+    expect![[r#"
+        1:5 len=6 type=class mods=0b1
+        1:20 len=6 type=type mods=0b0
+        1:27 len=3 type=property mods=0b1
+        1:33 len=13 type=string mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify mixed enum members (cases, constants, methods) are all tokenized.
+#[tokio::test]
+async fn semantic_tokens_enum_mixed_members() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "enum_mixed.php",
+            "<?php\nenum Response {\n    case Success;\n    const int ERROR_CODE = 500;\n    const string MESSAGE = \"error\";\n    public function status(): void {}\n}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("enum_mixed.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // Verify all enum members: name, case, constants (with types), method
+    expect![[r#"
+        1:5 len=8 type=class mods=0b1
+        2:9 len=7 type=property mods=0b1
+        3:10 len=3 type=type mods=0b0
+        3:14 len=10 type=property mods=0b1
+        3:27 len=3 type=number mods=0b0
+        4:10 len=6 type=type mods=0b0
+        4:17 len=7 type=property mods=0b1
+        4:27 len=7 type=string mods=0b0
+        5:20 len=6 type=method mods=0b1
+        5:30 len=4 type=type mods=0b0"#]]
+    .assert_eq(&out);
+}
