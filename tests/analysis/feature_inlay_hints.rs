@@ -318,3 +318,29 @@ $y = 2;
         .await;
     expect!["<no hints>"].assert_eq(&out);
 }
+
+#[tokio::test]
+async fn inlay_hints_respects_lsp_half_open_range_semantics() {
+    // LSP uses half-open range semantics [start, end) where end is exclusive.
+    // This test verifies that hints positioned exactly at range.end are excluded.
+    let mut s = TestServer::new().await;
+    s.open(
+        "range_test.php",
+        "<?php\nfunction f(int $x): void {}\nf(1);\n",
+    )
+    .await;
+
+    // Line 2: "f(1);"
+    //         01234
+    // Hint is at character 2 (start of argument "1")
+
+    // Range [0, 2) excludes the hint (it's AT the boundary, half-open semantics)
+    let resp = s.inlay_hints("range_test.php", 2, 0, 2, 2).await;
+    let out = render_inlay_hints(&resp);
+    expect!["<no hints>"].assert_eq(&out);
+
+    // Range [0, 3) includes the hint (it's within the range)
+    let resp = s.inlay_hints("range_test.php", 2, 0, 2, 3).await;
+    let out = render_inlay_hints(&resp);
+    expect![[r#"2:2 x:"#]].assert_eq(&out);
+}
