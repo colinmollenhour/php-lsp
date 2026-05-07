@@ -22,6 +22,8 @@ mod feature_execute_command;
 mod feature_file_ops;
 #[path = "workspace/feature_incremental.rs"]
 mod feature_incremental;
+#[path = "workspace/feature_project_structures.rs"]
+mod feature_project_structures;
 #[path = "workspace/feature_server.rs"]
 mod feature_server;
 #[path = "workspace/feature_workspace_folders.rs"]
