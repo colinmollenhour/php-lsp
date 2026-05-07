@@ -8,7 +8,7 @@ use std::sync::Arc;
 use php_ast::{ClassMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
-use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint};
+use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint, str_offset_in_range};
 use crate::type_map::TypeMap;
 use crate::util::word_at;
 
@@ -114,23 +114,54 @@ fn find_class_range(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], name: &str) -> O
             StmtKind::Class(c)
                 if c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string()) =>
             {
-                return Some(
-                    sv.name_range(
-                        &c.name
-                            .as_ref()
-                            .map(|n| n.to_string())
-                            .expect("match guard ensures Some"),
-                    ),
-                );
+                // Use statement span to find the name within the declaration context,
+                // not the first occurrence in the file (which might be a different use).
+                let stmt_range = sv.range_of(stmt.span);
+                let name_in_source = c
+                    .name
+                    .as_ref()
+                    .map(|n| n.to_string())
+                    .expect("match guard ensures Some");
+                if let Some(pos) = str_offset_in_range(sv.source(), stmt.span, &name_in_source) {
+                    return Some(Range {
+                        start: sv.position_of(pos),
+                        end: sv.position_of(pos + name_in_source.len() as u32),
+                    });
+                }
+                return Some(stmt_range);
             }
             StmtKind::Interface(i) if i.name == name => {
-                return Some(sv.name_range(&i.name.to_string()));
+                // Use statement span to find the name within the declaration context.
+                if let Some(pos) = str_offset_in_range(sv.source(), stmt.span, &i.name.to_string())
+                {
+                    return Some(Range {
+                        start: sv.position_of(pos),
+                        end: sv.position_of(pos + i.name.to_string().len() as u32),
+                    });
+                }
+                return Some(sv.range_of(stmt.span));
             }
             StmtKind::Trait(t) if t.name == name => {
-                return Some(sv.name_range(&t.name.to_string()));
+                // Use statement span to find the name within the declaration context.
+                if let Some(pos) = str_offset_in_range(sv.source(), stmt.span, &t.name.to_string())
+                {
+                    return Some(Range {
+                        start: sv.position_of(pos),
+                        end: sv.position_of(pos + t.name.to_string().len() as u32),
+                    });
+                }
+                return Some(sv.range_of(stmt.span));
             }
             StmtKind::Enum(e) if e.name == name => {
-                return Some(sv.name_range(&e.name.to_string()));
+                // Use statement span to find the name within the declaration context.
+                if let Some(pos) = str_offset_in_range(sv.source(), stmt.span, &e.name.to_string())
+                {
+                    return Some(Range {
+                        start: sv.position_of(pos),
+                        end: sv.position_of(pos + e.name.to_string().len() as u32),
+                    });
+                }
+                return Some(sv.range_of(stmt.span));
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body

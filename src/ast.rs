@@ -344,6 +344,19 @@ pub fn name_range(source: &str, line_starts: &[u32], name: &str) -> Option<Range
     })
 }
 
+/// Find a name within a specific byte range of the source, with word-boundary matching.
+/// Returns the absolute byte offset if found, None otherwise.
+pub fn str_offset_in_range(source: &str, span: Span, name: &str) -> Option<u32> {
+    let span_start = span.start as usize;
+    let span_end = span.end as usize;
+    if span_end > source.len() {
+        return None;
+    }
+    let span_text = &source[span_start..span_end];
+    let offset = str_offset(span_text, name)?;
+    Some(span_start as u32 + offset)
+}
+
 // ── TypeHint formatting ────────────────────────────────────────────────────────
 
 /// Format a `TypeHint` as a PHP type string, e.g. `?int`, `string|null`.

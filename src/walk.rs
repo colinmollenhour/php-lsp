@@ -11,7 +11,7 @@ use php_ast::{
     },
 };
 
-use crate::ast::str_offset;
+use crate::ast::{str_offset, str_offset_in_range};
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
@@ -59,9 +59,10 @@ struct AllRefsVisitor<'a> {
 }
 
 impl AllRefsVisitor<'_> {
-    fn push_name_str(&mut self, name: &str) {
+    fn push_name_str(&mut self, name: &str, stmt_span: Span) {
         if name == self.word {
-            let start = str_offset(self.source, name).unwrap_or(0);
+            let start =
+                str_offset_in_range(self.source, stmt_span, name).unwrap_or(stmt_span.start);
             self.out.push(Span {
                 start,
                 end: start + name.len() as u32,
@@ -73,15 +74,15 @@ impl AllRefsVisitor<'_> {
 impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
     fn visit_stmt(&mut self, stmt: &Stmt<'arena, 'src>) -> ControlFlow<()> {
         match &stmt.kind {
-            StmtKind::Function(f) => self.push_name_str(&f.name.to_string()),
+            StmtKind::Function(f) => self.push_name_str(&f.name.to_string(), stmt.span),
             StmtKind::Class(c) => {
                 if let Some(name) = c.name {
-                    self.push_name_str(&name.to_string());
+                    self.push_name_str(&name.to_string(), stmt.span);
                 }
             }
-            StmtKind::Interface(i) => self.push_name_str(&i.name.to_string()),
-            StmtKind::Trait(t) => self.push_name_str(&t.name.to_string()),
-            StmtKind::Enum(e) => self.push_name_str(&e.name.to_string()),
+            StmtKind::Interface(i) => self.push_name_str(&i.name.to_string(), stmt.span),
+            StmtKind::Trait(t) => self.push_name_str(&t.name.to_string(), stmt.span),
+            StmtKind::Enum(e) => self.push_name_str(&e.name.to_string(), stmt.span),
             StmtKind::Use(u) if self.include_use => {
                 for use_item in u.uses.iter() {
                     let fqn = use_item.name.to_string_repr().into_owned();
@@ -104,14 +105,29 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
 
     fn visit_class_member(&mut self, member: &ClassMember<'arena, 'src>) -> ControlFlow<()> {
         if let ClassMemberKind::Method(m) = &member.kind {
-            self.push_name_str(&m.name.to_string());
+            // For class members, we don't have a statement span, so we'll search the entire source
+            // This is used during general reference walking and will be deduplicated if needed
+            let start = str_offset(self.source, &m.name.to_string()).unwrap_or(0);
+            if m.name == self.word {
+                self.out.push(Span {
+                    start,
+                    end: start + m.name.to_string().len() as u32,
+                });
+            }
         }
         walk_class_member(self, member)
     }
 
     fn visit_enum_member(&mut self, member: &EnumMember<'arena, 'src>) -> ControlFlow<()> {
         if let EnumMemberKind::Method(m) = &member.kind {
-            self.push_name_str(&m.name.to_string());
+            // For enum members, we don't have a statement span, so we'll search the entire source
+            let start = str_offset(self.source, &m.name.to_string()).unwrap_or(0);
+            if m.name == self.word {
+                self.out.push(Span {
+                    start,
+                    end: start + m.name.to_string().len() as u32,
+                });
+            }
         }
         walk_enum_member(self, member)
     }
