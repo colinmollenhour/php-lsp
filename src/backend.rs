@@ -3109,7 +3109,7 @@ async fn run_phpunit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{FeaturesConfig, MAX_INDEXED_FILES};
+    use crate::config::{DiagnosticsConfig, FeaturesConfig, MAX_INDEXED_FILES};
     use crate::use_import::find_use_insert_line;
     use tower_lsp::lsp_types::{Position, Range, Url};
 

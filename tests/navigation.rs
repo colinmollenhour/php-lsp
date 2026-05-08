@@ -27,3 +27,5 @@ mod feature_moniker;
 mod feature_references;
 #[path = "navigation/feature_rename.rs"]
 mod feature_rename;
+#[path = "navigation/feature_type_definition.rs"]
+mod feature_type_definition;

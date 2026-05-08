@@ -5,7 +5,7 @@
 /// and for function parameters with a declared type hint.
 use std::sync::Arc;
 
-use php_ast::{ClassMemberKind, NamespaceBody, Stmt, StmtKind};
+use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint, str_offset_in_range};
@@ -84,6 +84,19 @@ fn param_type_for(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
             StmtKind::Trait(trait_) => {
                 for member in trait_.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
+                        for p in m.params.iter() {
+                            if p.name == word
+                                && let Some(type_hint) = &p.type_hint
+                            {
+                                return Some(format_type_hint(type_hint));
+                            }
+                        }
+                    }
+                }
+            }
+            StmtKind::Enum(e) => {
+                for member in e.members.iter() {
+                    if let EnumMemberKind::Method(m) = &member.kind {
                         for p in m.params.iter() {
                             if p.name == word
                                 && let Some(type_hint) = &p.type_hint
@@ -199,20 +212,32 @@ pub fn goto_type_definition_from_index(
         Range { start: p, end: p }
     };
 
+    // First pass: look for exact FQN match (high priority)
     for (uri, idx) in indexes {
         for cls in &idx.classes {
-            // Match by short name (last segment after `\`).
+            if cls.name.as_ref() == class_name {
+                return Some(Location {
+                    uri: uri.clone(),
+                    range: line_range(cls.start_line),
+                });
+            }
+        }
+    }
+
+    // Second pass: look for short name match (lower priority, may be ambiguous)
+    let cn_short = class_name
+        .rsplit('\\')
+        .next()
+        .unwrap_or(class_name.as_str());
+    for (uri, idx) in indexes {
+        for cls in &idx.classes {
             let short = cls
                 .name
                 .as_ref()
                 .rsplit('\\')
                 .next()
                 .unwrap_or(cls.name.as_ref());
-            let cn_short = class_name
-                .rsplit('\\')
-                .next()
-                .unwrap_or(class_name.as_str());
-            if cls.name.as_ref() == class_name || short == cn_short {
+            if short == cn_short {
                 return Some(Location {
                     uri: uri.clone(),
                     range: line_range(cls.start_line),
@@ -231,126 +256,5 @@ fn _offset_to_position_range(sv: SourceView<'_>, name_str: &str, _name: &str) ->
             line: start.line,
             character: start.character + utf16_code_units(name_str),
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_utils::{file_url, parse_doc, position};
-
-    #[test]
-    fn resolves_variable_type_to_class() {
-        let src = "<?php\nclass Foo {}\n$obj = new Foo();\n$obj->bar();";
-        let parsed = ParsedDoc::parse(src.to_string());
-        let docs = vec![(file_url("/a.php"), Arc::new(parse_doc(src)))];
-        let loc = goto_type_definition(src, &parsed, None, &docs, position(3, 2));
-        assert!(loc.is_some(), "expected type definition for $obj");
-        assert_eq!(loc.unwrap().range.start.line, 1);
-    }
-
-    #[test]
-    fn cross_file_type_definition() {
-        let src = "<?php\n$obj = new Mailer();\n$obj->send();";
-        let parsed = ParsedDoc::parse(src.to_string());
-        let other_src = "<?php\nclass Mailer {}";
-        let other_uri = file_url("/mailer.php");
-        let docs = vec![
-            (file_url("/a.php"), Arc::new(parse_doc(src))),
-            (
-                other_uri.clone(),
-                Arc::new(ParsedDoc::parse(other_src.to_string())),
-            ),
-        ];
-        let loc = goto_type_definition(src, &parsed, None, &docs, position(2, 2));
-        assert!(loc.is_some());
-        assert_eq!(loc.unwrap().uri, other_uri);
-    }
-
-    #[test]
-    fn unknown_variable_returns_none() {
-        let src = "<?php\n$unknown->foo();";
-        let parsed = ParsedDoc::parse(src.to_string());
-        let docs = vec![(file_url("/a.php"), Arc::new(parse_doc(src)))];
-        let loc = goto_type_definition(src, &parsed, None, &docs, position(1, 2));
-        assert!(loc.is_none());
-    }
-
-    #[test]
-    fn resolves_interface_type() {
-        let src = "<?php\ninterface Countable {}\n$obj = new MyList();\nclass MyList implements Countable {}";
-        let parsed = ParsedDoc::parse(src.to_string());
-        let docs = vec![(file_url("/a.php"), Arc::new(parse_doc(src)))];
-        let loc = goto_type_definition(src, &parsed, None, &docs, position(2, 2));
-        assert!(loc.is_some());
-        assert_eq!(loc.unwrap().range.start.line, 3);
-    }
-
-    #[test]
-    fn returns_none_for_non_variable_without_type() {
-        let src = "<?php\nfunction greet() {}\ngreet();";
-        let parsed = ParsedDoc::parse(src.to_string());
-        let docs = vec![(file_url("/a.php"), Arc::new(parse_doc(src)))];
-        let loc = goto_type_definition(src, &parsed, None, &docs, position(2, 2));
-        assert!(loc.is_none());
-    }
-
-    #[test]
-    fn resolves_enum_typed_param() {
-        // Cursor on `$s` in the function body — TypeMap infers Status from the typed param.
-        let src = "<?php\nenum Status { case Active; }\nfunction process(Status $s): void { $s-> }";
-        let parsed = ParsedDoc::parse(src.to_string());
-        let docs = vec![(file_url("/a.php"), Arc::new(parse_doc(src)))];
-        // "function process(Status $s): void { " is 37 chars, so $s is at col 37.
-        let loc = goto_type_definition(src, &parsed, None, &docs, position(2, 37));
-        assert!(
-            loc.is_some(),
-            "expected type definition for Status-typed param"
-        );
-        assert_eq!(loc.unwrap().range.start.line, 1);
-    }
-
-    #[test]
-    fn resolves_trait_typed_param() {
-        // Cursor on `$l` in the function body — TypeMap infers Logger from the typed param.
-        let src = "<?php\ntrait Logger {}\nfunction process(Logger $l): void { $l-> }";
-        let parsed = ParsedDoc::parse(src.to_string());
-        let docs = vec![(file_url("/a.php"), Arc::new(parse_doc(src)))];
-        // "function process(Logger $l): void { " is 37 chars, so $l is at col 37.
-        let loc = goto_type_definition(src, &parsed, None, &docs, position(2, 37));
-        assert!(
-            loc.is_some(),
-            "expected type definition for trait-typed param"
-        );
-        assert_eq!(loc.unwrap().range.start.line, 1);
-    }
-
-    // ── goto_type_definition_from_index ───────────────────────────────────────
-
-    fn make_index(path: &str, src: &str) -> (Url, std::sync::Arc<crate::file_index::FileIndex>) {
-        use crate::file_index::FileIndex;
-        let u = file_url(path);
-        let d = ParsedDoc::parse(src.to_string());
-        (u.clone(), std::sync::Arc::new(FileIndex::extract(&d)))
-    }
-
-    #[test]
-    fn from_index_resolves_variable_to_cross_file_class() {
-        // Current file infers $obj → Mailer via new Mailer().
-        // Mailer class lives in mailer.php (background-indexed, not in open_docs).
-        let src = "<?php\n$obj = new Mailer();\n$obj->send();";
-        let parsed = ParsedDoc::parse(src.to_string());
-        let (mailer_uri, mailer_idx) = make_index(
-            "/mailer.php",
-            "<?php\nclass Mailer { public function send(): void {} }",
-        );
-        let indexes = vec![(mailer_uri.clone(), mailer_idx)];
-        // Cursor on $obj in "$obj->send();" — line 2, char 2.
-        let loc = goto_type_definition_from_index(src, &parsed, None, &indexes, position(2, 2));
-        assert!(
-            loc.is_some(),
-            "expected type definition for $obj (Mailer) in index"
-        );
-        assert_eq!(loc.unwrap().uri, mailer_uri, "should point to mailer.php");
     }
 }
