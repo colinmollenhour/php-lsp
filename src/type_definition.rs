@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint, str_offset_in_range};
 use crate::type_map::TypeMap;
-use crate::util::word_at;
+use crate::util::{utf16_code_units, word_at};
 
 /// Given the cursor position, resolve the type of the symbol and return the
 /// location of that type's class/interface declaration.
@@ -229,8 +229,7 @@ fn _offset_to_position_range(sv: SourceView<'_>, name_str: &str, _name: &str) ->
         start,
         end: Position {
             line: start.line,
-            character: start.character
-                + name_str.chars().map(|c| c.len_utf16() as u32).sum::<u32>(),
+            character: start.character + utf16_code_units(name_str),
         },
     }
 }

@@ -7,6 +7,7 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Posit
 
 use crate::ast::{ParsedDoc, SourceView};
 use crate::backend::DiagnosticsConfig;
+use crate::diagnostics::PHP_LSP_SOURCE;
 
 /// Run semantic checks on `doc` using the backend's persistent `MirDb`.
 /// The MirDb is updated incrementally: the current file's definitions are
@@ -269,7 +270,7 @@ fn collect_duplicate_decls(
                     message: format!(
                         "Duplicate declaration: `{name}` is already defined in this file"
                     ),
-                    source: Some("php-lsp".to_string()),
+                    source: Some(PHP_LSP_SOURCE.to_string()),
                     ..Default::default()
                 });
             }
@@ -324,7 +325,7 @@ fn to_lsp_diagnostic(issue: mir_issues::Issue, _uri: &Url) -> Diagnostic {
             mir_issues::Severity::Info => DiagnosticSeverity::INFORMATION,
         }),
         code: Some(NumberOrString::String(issue.kind.name().to_string())),
-        source: Some("php-lsp".to_string()),
+        source: Some(PHP_LSP_SOURCE.to_string()),
         message: issue.kind.message(),
         ..Default::default()
     }

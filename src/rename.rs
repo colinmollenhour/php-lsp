@@ -5,6 +5,7 @@ use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
 use crate::ast::ParsedDoc;
 use crate::references::find_references_with_use;
+use crate::util::utf16_code_units;
 use crate::walk::{collect_var_refs_in_scope, property_refs_in_stmts};
 
 /// Compute a WorkspaceEdit that renames every occurrence of `word` to `new_name`
@@ -61,7 +62,7 @@ pub fn prepare_rename(source: &str, position: Position) -> Option<Range> {
 
     let bare_word = word.trim_start_matches('$');
     let start_utf16: u32 = chars[..left].iter().map(|c| c.len_utf16() as u32).sum();
-    let end_utf16: u32 = start_utf16 + bare_word.chars().map(|c| c.len_utf16() as u32).sum::<u32>();
+    let end_utf16: u32 = start_utf16 + utf16_code_units(bare_word);
     Some(Range {
         start: Position {
             line: position.line,
