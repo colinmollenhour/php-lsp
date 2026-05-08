@@ -9,6 +9,7 @@ mod cache;
 mod call_hierarchy;
 mod code_lens;
 mod completion;
+mod config;
 mod db;
 mod declaration;
 mod definition;
@@ -33,6 +34,7 @@ mod inline_action;
 mod inline_value;
 mod moniker;
 mod on_type_format;
+mod open_files;
 mod organize_imports;
 mod phpdoc_action;
 mod phpstorm_meta;
@@ -54,6 +56,7 @@ mod type_map;
 mod use_import;
 mod util;
 mod walk;
+mod workspace_scan;
 
 #[cfg(not(feature = "dhat-heap"))]
 #[global_allocator]

@@ -6,7 +6,7 @@ use php_ast::StmtKind;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 
 use crate::ast::{ParsedDoc, SourceView};
-use crate::backend::DiagnosticsConfig;
+use crate::config::DiagnosticsConfig;
 use crate::diagnostics::PHP_LSP_SOURCE;
 
 /// Run semantic checks on `doc` using the backend's persistent `MirDb`.
