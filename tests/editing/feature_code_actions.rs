@@ -264,6 +264,138 @@ async fn code_action_resolve_promote_constructor_params() {
 }
 
 #[tokio::test]
+async fn code_action_resolve_promote_simple_private_property() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "promote.php",
+            "<?php\nclass Foo {\n    private string $name$0;\n    public function __construct(string $name) {\n        $this->name = $name;\n    }\n}\n",
+        )
+        .await;
+
+    let resp = server.code_action("promote.php", 2, 0, 5, 6).await;
+    let action = resp["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.to_lowercase().contains("promot"))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .expect("promote action should be offered for promotable properties");
+
+    let title = action["title"].as_str().expect("action must have title");
+    assert_eq!(
+        title, "Promote constructor parameter",
+        "single property should use singular form"
+    );
+
+    assert!(action["edit"].is_null(), "action must be deferred");
+
+    let resolved = server.code_action_resolve(action).await;
+    assert!(resolved["error"].is_null());
+    let out = canonicalize_workspace_edit(&resolved["result"]["edit"], &server.uri(""));
+    expect![[r#"
+        // promote.php
+        2:0-3:0 → ""
+        3:32-3:32 → "private "
+        4:0-5:0 → """#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn code_action_resolve_promote_readonly_property() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "promote.php",
+            "<?php\nclass Bar {\n    private readonly string $id$0;\n    public function __construct(string $id) {\n        $this->id = $id;\n    }\n}\n",
+        )
+        .await;
+
+    let resp = server.code_action("promote.php", 2, 0, 5, 6).await;
+    let action = resp["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.to_lowercase().contains("promot"))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .expect("promote action should be offered for readonly properties");
+
+    let title = action["title"].as_str().expect("action must have title");
+    assert_eq!(
+        title, "Promote constructor parameter",
+        "readonly property should also use singular form"
+    );
+
+    assert!(action["edit"].is_null(), "action must be deferred");
+
+    let resolved = server.code_action_resolve(action).await;
+    assert!(resolved["error"].is_null());
+    let out = canonicalize_workspace_edit(&resolved["result"]["edit"], &server.uri(""));
+    expect![[r#"
+        // promote.php
+        2:0-3:0 → ""
+        3:32-3:32 → "private readonly "
+        4:0-5:0 → """#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn code_action_resolve_promote_multiple_properties() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "promote.php",
+            "<?php\nclass Baz {\n    private string $name$0;\n    protected int $age;\n    public function __construct(string $name, int $age) {\n        $this->name = $name;\n        $this->age = $age;\n    }\n}\n",
+        )
+        .await;
+
+    let resp = server.code_action("promote.php", 2, 0, 7, 6).await;
+    let action = resp["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.to_lowercase().contains("promot"))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .expect("promote action should be offered for multiple properties");
+
+    let title = action["title"].as_str().expect("action must have title");
+    assert_eq!(
+        title, "Promote 2 constructor parameters",
+        "multiple properties should use plural form with count"
+    );
+
+    assert!(action["edit"].is_null(), "action must be deferred");
+
+    let resolved = server.code_action_resolve(action).await;
+    assert!(resolved["error"].is_null());
+    let out = canonicalize_workspace_edit(&resolved["result"]["edit"], &server.uri(""));
+    expect![[r#"
+        // promote.php
+        2:0-3:0 → ""
+        3:0-4:0 → ""
+        4:32-4:32 → "private "
+        4:46-4:46 → "protected "
+        5:0-6:0 → ""
+        6:0-7:0 → """#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
 async fn code_action_resolve_without_data_is_passthrough() {
     let mut server = TestServer::new().await;
     server.open("noop.php", "<?php").await;
@@ -282,5 +414,112 @@ async fn code_action_resolve_without_data_is_passthrough() {
     assert!(
         resolved["result"]["edit"].is_null(),
         "no edit should be added for data-less actions"
+    );
+}
+
+// ── Negative tests for promote_action: verify action is NOT offered ────
+
+#[tokio::test]
+async fn promote_action_not_offered_without_constructor() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Foo {
+    private string $name$0;
+}
+"#,
+        )
+        .await;
+    // Should NOT contain promote action
+    assert!(
+        !out.contains("Promote"),
+        "promote action should not be offered when constructor is missing"
+    );
+}
+
+#[tokio::test]
+async fn promote_action_not_offered_for_static_properties() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Foo {
+    private static string $name$0;
+    public function __construct() {}
+}
+"#,
+        )
+        .await;
+    // Static properties should not be promotable
+    assert!(
+        !out.contains("Promote"),
+        "promote action should not be offered for static properties"
+    );
+}
+
+#[tokio::test]
+async fn promote_action_not_offered_for_mismatched_names() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Foo {
+    private string $title$0;
+    public function __construct(string $name) {
+        $this->title = $name;
+    }
+}
+"#,
+        )
+        .await;
+    // Param name ($name) doesn't match property name ($title)
+    assert!(
+        !out.contains("Promote"),
+        "promote action should not be offered when param name doesn't match property name"
+    );
+}
+
+#[tokio::test]
+async fn promote_action_not_offered_for_complex_assignments() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Foo {
+    private string $name$0;
+    public function __construct(string $name) {
+        $this->name = strtolower($name);
+    }
+}
+"#,
+        )
+        .await;
+    // Only simple assignments ($this->x = $x) are promotable
+    assert!(
+        !out.contains("Promote"),
+        "promote action should not be offered for complex assignments"
+    );
+}
+
+#[tokio::test]
+async fn promote_action_not_offered_without_visibility_modifier() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Foo {
+    string $name$0;
+    public function __construct(string $name) {
+        $this->name = $name;
+    }
+}
+"#,
+        )
+        .await;
+    // Properties must have visibility modifier
+    assert!(
+        !out.contains("Promote"),
+        "promote action should not be offered for properties without visibility modifier"
     );
 }

@@ -408,3 +408,99 @@ async fn will_delete_file_strips_use_imports_from_dependents() {
         4:0-5:0 → """#]]
     .assert_eq(&snap);
 }
+
+/// Rename must match exact word boundaries and not rename partial matches.
+#[tokio::test]
+async fn rename_does_not_match_partial_words() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function foo$0() {}
+function foobar() {}
+function barfoo() {}
+foo();
+foobar();
+barfoo();
+"#,
+            "baz",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        1:9-1:12 → "baz"
+        4:0-4:3 → "baz""#]]
+    .assert_eq(&out);
+}
+
+/// Rename a variable should only affect the same scope, not variables with the
+/// same name in other function scopes.
+#[tokio::test]
+async fn rename_variable_does_not_cross_function_boundary() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function foo() { $x$0 = 1; }
+function bar() { $x = 2; }
+"#,
+            "$y",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        1:17-1:19 → "$y""#]]
+    .assert_eq(&out);
+}
+
+/// Rename a property across multiple files should update declaration and all uses.
+/// When renaming from access site ($obj->prop), all occurrences are updated.
+#[tokio::test]
+async fn rename_property_works_across_files() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"//- /a.php
+<?php
+class Foo {
+    public int $count;
+}
+
+//- /b.php
+<?php
+$foo = new Foo();
+echo $foo->coun$0t;
+"#,
+            "total",
+        )
+        .await;
+    expect![[r#"
+        // a.php
+        2:16-2:21 → "total"
+
+        // b.php
+        2:11-2:16 → "total""#]]
+    .assert_eq(&out);
+}
+
+/// Property rename from declaration site is not supported - must rename from access site.
+/// This documents a current limitation: property_refs_in_stmts only finds access sites.
+#[tokio::test]
+async fn rename_property_from_declaration_site_not_supported() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+class Foo {
+    public int $coun$0t;
+}
+$foo = new Foo();
+$foo->count++;
+echo $foo->count;
+"#,
+            "total",
+        )
+        .await;
+    // Current implementation limitation: must rename from access site, not declaration
+    expect!["<no `changes` map in {}>"].assert_eq(&out);
+}
