@@ -38,8 +38,8 @@ pub fn prepare_type_hierarchy_from_workspace(
     position: Position,
 ) -> Option<TypeHierarchyItem> {
     use crate::file_index::ClassKind;
-    use crate::util::word_at;
-    let word = word_at(source, position)?;
+    use crate::util::word_at_position;
+    let word = word_at_position(source, position)?;
     let refs = wi.classes_by_name.get(&word)?;
     let (uri, cls) = wi.at(*refs.first()?)?;
     let kind = match cls.kind {

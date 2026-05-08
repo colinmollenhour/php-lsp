@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Posi
 use crate::ast::{MethodReturnsMap, ParsedDoc, format_type_hint};
 use crate::docblock::{Docblock, docblock_before, find_docblock, parse_docblock};
 use crate::type_map::TypeMap;
-use crate::util::{is_php_builtin, php_doc_url, word_at, word_range_at};
+use crate::util::{is_php_builtin, php_doc_url, word_at_position, word_range_at};
 
 pub fn hover_info(
     source: &str,
@@ -51,7 +51,7 @@ pub fn hover_at(
                 .trim_end_matches(';')
                 .trim();
             if !fqn.is_empty() {
-                let maybe_word = word_at(source, position);
+                let maybe_word = word_at_position(source, position);
                 let alias = fqn.rsplit('\\').next().unwrap_or(fqn);
                 let matches = match &maybe_word {
                     Some(w) => w == alias || fqn.contains(w.as_str()),
@@ -70,7 +70,7 @@ pub fn hover_at(
         }
     }
 
-    let word = word_at(source, position)?;
+    let word = word_at_position(source, position)?;
 
     // Keyword hover — must be checked before the static-access path so that
     // `static::foo()` still falls through.  The `::` guard prevents this branch
@@ -2271,7 +2271,7 @@ mod tests {
     #[test]
     fn word_at_extracts_from_middle_of_identifier() {
         let (src, p) = cursor("<?php\nfunction greet$0User() {}");
-        let word = word_at(&src, p);
+        let word = word_at_position(&src, p);
         assert_eq!(word.as_deref(), Some("greetUser"));
     }
 

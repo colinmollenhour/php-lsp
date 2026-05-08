@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::*;
 use std::collections::HashMap;
 
 use crate::ast::{ParsedDoc, str_offset};
-use crate::util::word_at;
+use crate::util::word_at_position;
 
 /// Return a moniker for the symbol at `position`.
 ///
@@ -25,7 +25,7 @@ pub fn moniker_at(
     position: Position,
     file_imports: &HashMap<String, String>,
 ) -> Option<Moniker> {
-    let word = word_at(source, position)?;
+    let word = word_at_position(source, position)?;
     if word.is_empty() {
         return None;
     }
@@ -70,7 +70,7 @@ fn enclosing_member_identifier(
     position: Position,
     word: &str,
 ) -> Option<String> {
-    let cursor_byte = position_to_byte(source, position)?;
+    let cursor_byte = doc.view().byte_of_position(position);
     // Property declarations carry the AST name without the `$`; strip it
     // from the cursor word before comparing.
     let bare = word.trim_start_matches('\\').trim_start_matches('$');
@@ -239,31 +239,6 @@ fn cursor_on_name(source: &str, cursor_byte: u32, name: &str) -> bool {
 #[inline]
 fn span_contains(start: u32, end: u32, off: u32) -> bool {
     off >= start && off < end
-}
-
-/// UTF-16 `Position` → byte offset. Returns `None` if `position` is past the
-/// end of the file. Mirrors the line-walking helper in `selection_range.rs`
-/// without needing a `SourceView`.
-fn position_to_byte(source: &str, position: Position) -> Option<u32> {
-    let mut byte: u32 = 0;
-    for (line, ln) in (0_u32..).zip(source.split_inclusive('\n')) {
-        if line == position.line {
-            let raw = ln.strip_suffix('\n').unwrap_or(ln);
-            let raw = raw.strip_suffix('\r').unwrap_or(raw);
-            let mut col_utf16: u32 = 0;
-            let mut byte_in_line: u32 = 0;
-            for ch in raw.chars() {
-                if col_utf16 >= position.character {
-                    break;
-                }
-                col_utf16 += ch.len_utf16() as u32;
-                byte_in_line += ch.len_utf8() as u32;
-            }
-            return Some(byte + byte_in_line);
-        }
-        byte += ln.len() as u32;
-    }
-    None
 }
 
 /// Moniker-flavored FQN resolution. Like `resolve_fqn` but does NOT attach

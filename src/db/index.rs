@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use salsa::{Database, Update};
+use salsa::Database;
 
 use crate::db::input::SourceFile;
 use crate::db::parse::parsed_doc;
@@ -26,17 +26,7 @@ impl IndexArc {
 // SAFETY: same contract as `ParsedArc::maybe_update` — only writes through
 // `old_pointer` when returning `true`. `FileIndex` is `Send + Sync` by virtue
 // of its fields (all owned `String`/`Vec`).
-unsafe impl Update for IndexArc {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_ref = unsafe { &mut *old_pointer };
-        if Arc::ptr_eq(&old_ref.0, &new_value.0) {
-            false
-        } else {
-            *old_ref = new_value;
-            true
-        }
-    }
-}
+crate::impl_arc_update!(IndexArc);
 
 /// Build the compact symbol index for a file. `no_eq` so salsa doesn't try to
 /// compare `IndexArc` structurally; invalidation flows from `parsed_doc`.

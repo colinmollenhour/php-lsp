@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use mir_codebase::storage::StubSlice;
-use salsa::{Database, Update};
+use salsa::Database;
 
 use crate::db::input::SourceFile;
 use crate::db::parse::parsed_doc;
@@ -23,17 +23,7 @@ impl SliceArc {
 }
 
 // SAFETY: identical contract to `ParsedArc::maybe_update`.
-unsafe impl Update for SliceArc {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_ref = unsafe { &mut *old_pointer };
-        if Arc::ptr_eq(&old_ref.0, &new_value.0) {
-            false
-        } else {
-            *old_ref = new_value;
-            true
-        }
-    }
-}
+crate::impl_arc_update!(SliceArc);
 
 /// Collect Pass-1 definitions (classes, interfaces, traits, enums, functions,
 /// constants, global_vars) from a file. Uses mir-analyzer's collector in its

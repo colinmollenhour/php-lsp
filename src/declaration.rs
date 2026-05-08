@@ -12,7 +12,7 @@ use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::ast::{ParsedDoc, SourceView};
-use crate::util::{strip_variable_sigil, utf16_code_units, word_at};
+use crate::util::{strip_variable_sigil, utf16_code_units, word_at_position};
 
 /// Find the abstract or interface declaration of `word`.
 /// Prefers abstract/interface declarations; falls back to any declaration.
@@ -21,7 +21,7 @@ pub fn goto_declaration(
     all_docs: &[(Url, Arc<ParsedDoc>)],
     position: Position,
 ) -> Option<Location> {
-    let word = word_at(source, position)?;
+    let word = word_at_position(source, position)?;
 
     // First pass: look for an abstract or interface declaration
     for (uri, doc) in all_docs {
@@ -220,8 +220,8 @@ pub fn goto_declaration_from_index(
     position: tower_lsp::lsp_types::Position,
 ) -> Option<Location> {
     use crate::file_index::ClassKind;
-    use crate::util::word_at;
-    let word = word_at(source, position)?;
+    use crate::util::word_at_position;
+    let word = word_at_position(source, position)?;
     let bare = strip_variable_sigil(&word);
 
     let precise_range = |line: u32, name_char: u32, name: &str| -> tower_lsp::lsp_types::Range {
