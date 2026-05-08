@@ -504,3 +504,200 @@ echo $foo->count;
     // Current implementation limitation: must rename from access site, not declaration
     expect!["<no `changes` map in {}>"].assert_eq(&out);
 }
+
+/// Renaming must respect static properties and not confuse them with instance properties.
+#[tokio::test]
+async fn rename_distinguishes_static_from_instance_properties() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+class Config {
+    public static $instance;
+    public $count;
+    public function test(): void {
+        $this->coun$0t++;
+    }
+}
+"#,
+            "total",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        3:12-3:17 → "total"
+        5:15-5:20 → "total""#]]
+    .assert_eq(&out);
+}
+
+/// Rename must be case-sensitive and not match names that differ only in case.
+#[tokio::test]
+async fn rename_is_case_sensitive() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function test() {}
+function Test() {}
+tes$0t();
+"#,
+            "verify",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        1:9-1:13 → "verify"
+        3:0-3:4 → "verify""#]]
+    .assert_eq(&out);
+}
+
+/// Rename multiple occurrences of the same function in different scopes.
+#[tokio::test]
+async fn rename_function_multiple_scopes() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function process$0() { process(); }
+if (true) { process(); }
+while (true) { process(); break; }
+"#,
+            "handle",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        1:9-1:16 → "handle"
+        1:21-1:28 → "handle"
+        2:12-2:19 → "handle"
+        3:15-3:22 → "handle""#]]
+    .assert_eq(&out);
+}
+
+/// Rename variable across multiple functions (comprehensive coverage).
+/// Verifies that rename works correctly with deeply nested scopes.
+#[tokio::test]
+async fn rename_variable_deep_scopes() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function outer() {
+    $x$0 = 1;
+    function inner() {
+        $x = 2;
+    }
+    echo $x;
+}
+"#,
+            "$y",
+        )
+        .await;
+    // Rename should only affect $x in outer scope, not the inner $x
+    expect![[r#"
+        // main.php
+        2:4-2:6 → "$y"
+        6:9-6:11 → "$y""#]]
+    .assert_eq(&out);
+}
+
+// --- Documented Limitations ---
+
+/// **LIMITATION**: Property rename only works from access sites (->prop, ?->prop),
+/// NOT from property declarations. This is by design - the `property_refs_in_stmts`
+/// function only finds property access expressions, not declarations.
+/// Workaround: Position cursor on a property access site, not the declaration.
+#[tokio::test]
+async fn rename_limitation_property_from_declaration_site() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+class Foo {
+    public int $coun$0t;
+}
+$foo = new Foo();
+$foo->count++;
+echo $foo->count;
+"#,
+            "total",
+        )
+        .await;
+    // Property rename from declaration site is not supported
+    // Expected: no changes because the implementation can't find the property via declaration
+    expect!["<no `changes` map in {}>"].assert_eq(&out);
+}
+
+/// **LIMITATION**: Property rename from declaration fails, but rename from
+/// access site succeeds. This test demonstrates the workaround.
+#[tokio::test]
+async fn rename_property_from_access_site_works() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+class Foo {
+    public int $count;
+}
+$foo = new Foo();
+$foo->coun$0t++;
+echo $foo->count;
+"#,
+            "total",
+        )
+        .await;
+    // Property rename FROM access site works correctly
+    expect![[r#"
+        // main.php
+        2:16-2:21 → "total"
+        5:6-5:11 → "total"
+        6:11-6:16 → "total""#]]
+    .assert_eq(&out);
+}
+
+/// **LIMITATION**: Callable/closure parameter types are not fully supported.
+/// Type hints like `callable`, `Closure`, etc. don't resolve to actual type definitions.
+#[tokio::test]
+async fn rename_limitation_callable_types() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function process(callable $callback$0): void {
+    $callback();
+}
+"#,
+            "$handler",
+        )
+        .await;
+    // Rename the parameter itself works
+    expect![[r#"
+        // main.php
+        1:17-1:35 → "$handler"
+        2:4-2:13 → "$handler""#]]
+    .assert_eq(&out);
+}
+
+/// **LIMITATION**: Superglobals ($_GET, $_POST, etc.) can technically be renamed,
+/// but doing so breaks PHP functionality. This test documents that the feature
+/// doesn't prevent renaming superglobals (unlike some IDEs that protect them).
+#[tokio::test]
+async fn rename_allows_superglobal_rename() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+if (isset($_GET$0['id'])) {
+    echo $_GET['id'];
+}
+"#,
+            "$params",
+        )
+        .await;
+    // Superglobals CAN be renamed by this implementation (not recommended!)
+    expect![[r#"
+        // main.php
+        1:10-1:15 → "$params"
+        2:9-2:14 → "$params""#]]
+    .assert_eq(&out);
+}

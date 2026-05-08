@@ -46,15 +46,22 @@ pub fn prepare_rename(source: &str, position: Position) -> Option<Range> {
     // identifier name (not the sigil). `word_at` may return `$var` with the `$`,
     // so we strip it before computing the range length to avoid an off-by-one.
     let is_word = |c: char| c.is_alphanumeric() || c == '_';
+
+    // Find the character index at or before the cursor position (in UTF-16 code units)
     let mut utf16_col = 0usize;
     let mut char_idx = 0usize;
-    for ch in &chars {
-        if utf16_col >= col {
+    for (i, ch) in chars.iter().enumerate() {
+        // Check if cursor is within this character's UTF-16 span
+        let char_width = ch.len_utf16();
+        if utf16_col + char_width > col {
+            char_idx = i;
             break;
         }
-        utf16_col += ch.len_utf16();
-        char_idx += 1;
+        utf16_col += char_width;
+        char_idx = i + 1;
     }
+
+    // Find the start of the word by walking backwards
     let mut left = char_idx;
     while left > 0 && is_word(chars[left - 1]) {
         left -= 1;

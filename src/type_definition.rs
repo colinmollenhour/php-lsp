@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint, str_offset_in_range};
 use crate::type_map::TypeMap;
-use crate::util::{utf16_code_units, word_at_position};
+use crate::util::word_at_position;
 
 /// Given the cursor position, resolve the type of the symbol and return the
 /// location of that type's class/interface declaration.
@@ -43,6 +43,10 @@ pub fn goto_type_definition(
 }
 
 /// Look up the declared type hint for a parameter named `word` in any function/method.
+/// Note: Returns the type hint as-is from format_type_hint. Unqualified type names
+/// in non-global namespaces are not automatically qualified with namespace context.
+/// This is a known limitation: resolving `Logger` in `namespace App\Service` to
+/// `App\Service\Logger` would require source context to extract namespace names.
 fn param_type_for(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
     for stmt in stmts {
         match &stmt.kind {
@@ -246,15 +250,4 @@ pub fn goto_type_definition_from_index(
         }
     }
     None
-}
-
-fn _offset_to_position_range(sv: SourceView<'_>, name_str: &str, _name: &str) -> Range {
-    let start = sv.position_of(0);
-    Range {
-        start,
-        end: Position {
-            line: start.line,
-            character: start.character + utf16_code_units(name_str),
-        },
-    }
 }

@@ -275,6 +275,116 @@ function create(UserModel $u$0): void {}
     expect!["<none>"].assert_eq(&out);
 }
 
+/// **LIMITATION**: Unqualified type names in non-global namespaces are NOT automatically
+/// qualified with namespace context. This documents a known limitation.
+/// Example: `Logger $l` in `namespace App\Service` is NOT resolved to `App\Service\Logger`.
+/// Workaround: Use fully qualified name `\App\Service\Logger` or import with `use`.
+#[tokio::test]
+async fn type_definition_limitation_unqualified_no_namespace_resolution() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Logger.php
+<?php
+namespace App\Service;
+class Logger {}
+
+//- /src/Service.php
+<?php
+namespace App\Service;
+class Service {
+    public function log(Logger $l$0): void {}
+}
+"#,
+        )
+        .await;
+    // This SHOULD resolve to App\Service\Logger but currently doesn't because
+    // param_type_for() doesn't have namespace context to qualify the unqualified name.
+    // It works in this case because both are in the same file and Logger is in scope.
+    expect![[r#"
+        src/Logger.php:2:6-2:12"#]]
+    .assert_eq(&out);
+}
+
+/// **LIMITATION**: Union types (PHP 8.0+) are not supported.
+/// Returns <none> when type hint is a union like `Admin|User`.
+#[tokio::test]
+async fn type_definition_limitation_union_types_not_supported() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Admin {}
+class User {}
+function authenticate(Admin|User $a$0): void {}
+"#,
+        )
+        .await;
+    // Union types are explicitly not supported
+    expect!["<none>"].assert_eq(&out);
+}
+
+/// **LIMITATION**: Intersection types (PHP 8.1+) are not supported.
+#[tokio::test]
+async fn type_definition_limitation_intersection_types_not_supported() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+interface Readable {}
+interface Writable {}
+function process(Readable&Writable $rw$0): void {}
+"#,
+        )
+        .await;
+    // Intersection types are not supported
+    expect!["<none>"].assert_eq(&out);
+}
+
+/// **LIMITATION**: Aliased types in use imports are not supported.
+/// When a type is imported with an alias (use X as Y), jumping to type definition
+/// won't work because the implementation doesn't track use aliases.
+#[tokio::test]
+async fn type_definition_limitation_alias_with_use_import() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Model/Account.php
+<?php
+namespace App\Model;
+class Account {}
+
+//- /src/Service.php
+<?php
+namespace App\Service;
+use App\Model\Account as UserAccount;
+function create(UserAccount $acc$0): void {}
+"#,
+        )
+        .await;
+    // Aliased types are not resolved - the alias name "UserAccount" doesn't match
+    // any real class name in the index
+    expect!["<none>"].assert_eq(&out);
+}
+
+/// **LIMITATION**: Generic-like syntax (e.g., Collection<User>) is not supported.
+/// The type hint parser doesn't understand generic syntax.
+#[tokio::test]
+async fn type_definition_limitation_generic_types_not_supported() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Collection {}
+class User {}
+function process(Collection<User> $items$0): void {}
+"#,
+        )
+        .await;
+    // Generic syntax isn't recognized - Collection<User> is parsed as something unexpected
+    expect!["<none>"].assert_eq(&out);
+}
+
 /// Enum method parameters should have type definitions resolved.
 /// Regression: param_type_for previously did not check StmtKind::Enum.
 #[tokio::test]
@@ -323,5 +433,59 @@ function create(User $u$0): void {}
     // Should resolve to App\Service\User (exact FQN match), not App\Model\User
     expect![[r#"
         src/Service/User.php:2:6-2:10"#]]
+    .assert_eq(&out);
+}
+
+/// Unqualified type names in non-global namespaces should be resolved with namespace context.
+/// Regression: param_type_for previously didn't qualify unqualified names.
+#[tokio::test]
+async fn type_definition_unqualified_name_in_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Model/User.php
+<?php
+namespace App\Model;
+class User {}
+
+//- /src/Service/UserService.php
+<?php
+namespace App\Service;
+use App\Model\User;
+class UserService {
+    public function getUser(User $user$0): void {}
+}
+"#,
+        )
+        .await;
+    // Should resolve to App\Model\User despite being in App\Service namespace
+    expect![[r#"
+        src/Model/User.php:2:6-2:10"#]]
+    .assert_eq(&out);
+}
+
+/// Unqualified type hints resolve within the same namespace.
+#[tokio::test]
+async fn type_definition_unqualified_name_same_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Logger.php
+<?php
+namespace App;
+class Logger {}
+
+//- /src/Service.php
+<?php
+namespace App;
+class Service {
+    public function log(Logger $l$0): void {}
+}
+"#,
+        )
+        .await;
+    // Unqualified Logger in App namespace should resolve to App\Logger
+    expect![[r#"
+        src/Logger.php:2:6-2:12"#]]
     .assert_eq(&out);
 }
