@@ -191,22 +191,15 @@ fn compute_diagnostic_result_id(diagnostics: &[Diagnostic], uri: &str) -> String
     use std::hash::{Hash, Hasher};
 
     let mut hasher = DefaultHasher::new();
-    // Include URI so each file has a unique ID
     uri.hash(&mut hasher);
-    // Hash diagnostic count (should change if diagnostics are added/removed)
     diagnostics.len().hash(&mut hasher);
 
-    // Hash all diagnostic fields that affect semantic meaning
-    // This ensures result_id changes when any diagnostic property changes
     for diag in diagnostics {
-        // Position (both start and end)
         diag.range.start.line.hash(&mut hasher);
         diag.range.start.character.hash(&mut hasher);
         diag.range.end.line.hash(&mut hasher);
         diag.range.end.character.hash(&mut hasher);
-        // Content and classification
         diag.message.hash(&mut hasher);
-        // Severity as numeric value (error=1, warning=2, info=3, hint=4, None=0)
         let severity_val = match diag.severity {
             Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR) => 1,
             Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING) => 2,
@@ -216,14 +209,12 @@ fn compute_diagnostic_result_id(diagnostics: &[Diagnostic], uri: &str) -> String
             _ => 5, // Unknown variants
         };
         severity_val.hash(&mut hasher);
-        // Code (diagnostic code identifier)
         if let Some(code) = &diag.code {
             format!("{:?}", code).hash(&mut hasher);
         }
         if let Some(source) = &diag.source {
             source.hash(&mut hasher);
         }
-        // Tags (Unnecessary=1, Deprecated=2, None=0)
         if let Some(tags) = &diag.tags {
             for tag in tags {
                 let tag_val = match *tag {
@@ -276,15 +267,11 @@ impl LanguageServer for Backend {
             }
         }
 
-        // Parse initializationOptions merged with .php-lsp.json (editor wins per-key).
         {
             let opts = params.initialization_options.as_ref();
             let roots = self.root_paths.read().unwrap().clone();
-
-            // Load .php-lsp.json from the workspace root (first root wins).
             let file_cfg = crate::autoload::load_project_config_json(&roots);
 
-            // Warn if the file exists but is not valid JSON (Null sentinel).
             if matches!(file_cfg, Some(serde_json::Value::Null)) {
                 self.client
                     .log_message(
@@ -294,7 +281,6 @@ impl LanguageServer for Backend {
                     .await;
             }
 
-            // Warn if .php-lsp.json contains an unrecognised phpVersion.
             if let Some(serde_json::Value::Object(ref obj)) = file_cfg
                 && let Some(ver) = obj.get("phpVersion").and_then(|v| v.as_str())
                 && !crate::autoload::is_valid_php_version(ver)
@@ -310,7 +296,6 @@ impl LanguageServer for Backend {
                     .await;
             }
 
-            // Warn if the client supplied an unrecognised phpVersion.
             if let Some(ver) = opts
                 .and_then(|o| o.get("phpVersion"))
                 .and_then(|v| v.as_str())
@@ -526,7 +511,6 @@ impl LanguageServer for Backend {
                 method: "textDocument/prepareTypeHierarchy".to_string(),
                 register_options: Some(serde_json::json!({"documentSelector": php_selector})),
             },
-            // Watch for configuration changes so we can pull the latest settings.
             Registration {
                 id: "php-lsp-config-change".to_string(),
                 method: "workspace/didChangeConfiguration".to_string(),
@@ -535,11 +519,9 @@ impl LanguageServer for Backend {
         ];
         self.client.register_capability(registrations).await.ok();
 
-        // Load PSR-4 autoload map and kick off background workspace scan.
         // Extract roots first so RwLockReadGuard is dropped before any .await.
         let roots = self.root_paths.read().unwrap().clone();
         if !roots.is_empty() {
-            // Build PSR-4 map from all roots (entries from all roots are merged).
             {
                 let mut merged = Psr4Map::empty();
                 for root in &roots {
@@ -547,10 +529,8 @@ impl LanguageServer for Backend {
                 }
                 *self.psr4.write().unwrap() = merged;
             }
-            // Load PHPStorm metadata from the first root, if present.
             *self.meta.write().unwrap() = PhpStormMeta::load(&roots[0]);
 
-            // Create a client-side progress indicator for the workspace scan.
             let token = NumberOrString::String("php-lsp/indexing".to_string());
             self.client
                 .send_request::<WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
