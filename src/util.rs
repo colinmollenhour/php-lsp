@@ -351,16 +351,8 @@ pub(crate) fn split_params(s: &str) -> Vec<&str> {
 }
 
 /// Extract the word (identifier) under the cursor, handling UTF-16 offsets.
-pub(crate) fn word_at(source: &str, position: Position) -> Option<String> {
-    // Use split('\n') rather than lines() so that a trailing newline produces a
-    // final empty entry — lines() silently drops it, causing word_at to return
-    // None for any cursor on the last line of a normally-saved PHP file.
-    let raw = source.split('\n').nth(position.line as usize)?;
-    let line = raw.strip_suffix('\r').unwrap_or(raw);
-    let char_offset = position.character as usize;
-
+fn char_range_for_word(line: &str, char_offset: usize) -> Option<(usize, usize)> {
     let chars: Vec<char> = line.chars().collect();
-
     let mut utf16_len = 0usize;
     let mut char_pos = 0usize;
     for ch in &chars {
@@ -370,28 +362,35 @@ pub(crate) fn word_at(source: &str, position: Position) -> Option<String> {
         utf16_len += ch.len_utf16();
         char_pos += 1;
     }
-
     let total_utf16: usize = chars.iter().map(|c| c.len_utf16()).sum();
     if char_offset > total_utf16 {
         return None;
     }
-
     let is_word = |c: char| c.is_alphanumeric() || c == '_' || c == '$' || c == '\\';
-
     let mut left = char_pos;
     while left > 0 && is_word(chars[left - 1]) {
         left -= 1;
     }
-
     let mut right = char_pos;
     while right < chars.len() && is_word(chars[right]) {
         right += 1;
     }
-
     if left == right {
-        return None;
+        None
+    } else {
+        Some((left, right))
     }
+}
 
+pub(crate) fn word_at(source: &str, position: Position) -> Option<String> {
+    // Use split('\n') rather than lines() so that a trailing newline produces a
+    // final empty entry — lines() silently drops it, causing word_at to return
+    // None for any cursor on the last line of a normally-saved PHP file.
+    let raw = source.split('\n').nth(position.line as usize)?;
+    let line = raw.strip_suffix('\r').unwrap_or(raw);
+    let char_offset = position.character as usize;
+    let chars: Vec<char> = line.chars().collect();
+    let (left, right) = char_range_for_word(line, char_offset)?;
     let word: String = chars[left..right].iter().collect();
     if word.is_empty() { None } else { Some(word) }
 }
@@ -402,38 +401,8 @@ pub(crate) fn word_range_at(source: &str, position: Position) -> Option<Range> {
     let raw = source.split('\n').nth(position.line as usize)?;
     let line = raw.strip_suffix('\r').unwrap_or(raw);
     let char_offset = position.character as usize;
-
     let chars: Vec<char> = line.chars().collect();
-
-    let mut utf16_len = 0usize;
-    let mut char_pos = 0usize;
-    for ch in &chars {
-        if utf16_len >= char_offset {
-            break;
-        }
-        utf16_len += ch.len_utf16();
-        char_pos += 1;
-    }
-
-    let total_utf16: usize = chars.iter().map(|c| c.len_utf16()).sum();
-    if char_offset > total_utf16 {
-        return None;
-    }
-
-    let is_word = |c: char| c.is_alphanumeric() || c == '_' || c == '$' || c == '\\';
-
-    let mut left = char_pos;
-    while left > 0 && is_word(chars[left - 1]) {
-        left -= 1;
-    }
-    let mut right = char_pos;
-    while right < chars.len() && is_word(chars[right]) {
-        right += 1;
-    }
-    if left == right {
-        return None;
-    }
-
+    let (left, right) = char_range_for_word(line, char_offset)?;
     let start_col = chars[..left]
         .iter()
         .map(|c| c.len_utf16() as u32)
@@ -490,6 +459,18 @@ pub(crate) fn selected_text_range(source: &str, range: tower_lsp::lsp_types::Ran
         }
         result
     }
+}
+
+/// Count the UTF-16 code units in a string.
+/// Needed for LSP `Position.character` calculations, which use UTF-16 offsets.
+pub fn utf16_code_units(s: &str) -> u32 {
+    s.chars().map(|c| c.len_utf16() as u32).sum()
+}
+
+/// Strip the leading `$` sigil from a variable name, if present.
+/// Variables are stored both ways: `$var` in source, `var` in symbol tables.
+pub fn strip_variable_sigil(word: &str) -> &str {
+    word.strip_prefix('$').unwrap_or(word)
 }
 
 #[cfg(test)]

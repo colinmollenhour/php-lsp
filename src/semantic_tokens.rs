@@ -11,6 +11,7 @@ use tower_lsp::lsp_types::{
 
 use crate::ast::{ParsedDoc, SourceView, str_offset};
 use crate::docblock::{docblock_before, parse_docblock};
+use crate::util::utf16_code_units;
 
 // Token type indices — order must match `legend()` vec order
 const _TT_NAMESPACE: u32 = 0;
@@ -184,7 +185,7 @@ fn push_name(
         out,
         sv,
         offset,
-        name.chars().map(|c| c.len_utf16() as u32).sum::<u32>(),
+        utf16_code_units(name),
         token_type,
         modifiers,
     );
@@ -212,7 +213,7 @@ fn push_param(
         out,
         sv,
         offset,
-        extra_len + name.chars().map(|c| c.len_utf16() as u32).sum::<u32>(),
+        extra_len + utf16_code_units(name),
         token_type,
         modifiers,
     );
@@ -222,7 +223,7 @@ fn push_attributes(out: &mut Vec<RawToken>, sv: SourceView<'_>, attrs: &[Attribu
     for attr in attrs.iter() {
         let span = attr.name.span();
         let segment = &sv.source()[span.start as usize..span.end as usize];
-        let len: u32 = segment.chars().map(|c| c.len_utf16() as u32).sum();
+        let len: u32 = utf16_code_units(segment);
         push_at(out, sv, span.start, len, TT_CLASS, 0);
     }
 }
@@ -289,7 +290,7 @@ fn collect_comments(sv: SourceView<'_>, out: &mut Vec<RawToken>) {
                         i += 1;
                     }
                     let text = &sv.source()[start..i];
-                    let len_utf16: u32 = text.chars().map(|c| c.len_utf16() as u32).sum();
+                    let len_utf16: u32 = utf16_code_units(text);
                     push_at(out, sv, start as u32, len_utf16, TT_COMMENT, 0);
                 } else if bytes[i + 1] == b'*' {
                     // Multi-line comment: `/* ... */`
@@ -316,7 +317,7 @@ fn collect_comments(sv: SourceView<'_>, out: &mut Vec<RawToken>) {
                     i += 1;
                 }
                 let text = &sv.source()[start..i];
-                let len_utf16: u32 = text.chars().map(|c| c.len_utf16() as u32).sum();
+                let len_utf16: u32 = utf16_code_units(text);
                 push_at(out, sv, start as u32, len_utf16, TT_COMMENT, 0);
             }
             _ => {
@@ -336,7 +337,7 @@ fn emit_multiline_comment(sv: SourceView<'_>, start: usize, end: usize, out: &mu
             let line_end = start + rel; // byte index of newline
             if line_end > line_start {
                 let segment = &sv.source()[line_start..line_end];
-                let len_utf16: u32 = segment.chars().map(|c| c.len_utf16() as u32).sum();
+                let len_utf16: u32 = utf16_code_units(segment);
                 if len_utf16 > 0 {
                     push_at(out, sv, line_start as u32, len_utf16, TT_COMMENT, 0);
                 }
@@ -347,7 +348,7 @@ fn emit_multiline_comment(sv: SourceView<'_>, start: usize, end: usize, out: &mu
     // Last (or only) line
     if line_start < end {
         let segment = &sv.source()[line_start..end];
-        let len_utf16: u32 = segment.chars().map(|c| c.len_utf16() as u32).sum();
+        let len_utf16: u32 = utf16_code_units(segment);
         if len_utf16 > 0 {
             push_at(out, sv, line_start as u32, len_utf16, TT_COMMENT, 0);
         }
@@ -364,12 +365,12 @@ fn push_type_hint(out: &mut Vec<RawToken>, sv: SourceView<'_>, hint: &TypeHint<'
         TypeHintKind::Named(name) => {
             let span = name.span();
             let segment = &sv.source()[span.start as usize..span.end as usize];
-            let len: u32 = segment.chars().map(|c| c.len_utf16() as u32).sum();
+            let len: u32 = utf16_code_units(segment);
             push_at(out, sv, span.start, len, TT_TYPE, 0);
         }
         TypeHintKind::Keyword(builtin, span) => {
             let text = builtin.as_str();
-            let len_utf16: u32 = text.chars().map(|c| c.len_utf16() as u32).sum();
+            let len_utf16: u32 = utf16_code_units(text);
             push_at(out, sv, span.start, len_utf16, TT_TYPE, 0);
         }
         TypeHintKind::Nullable(inner) => {
@@ -587,14 +588,14 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
         }
         ExprKind::String(_) | ExprKind::Nowdoc { .. } => {
             let segment = &sv.source()[expr.span.start as usize..expr.span.end as usize];
-            let len: u32 = segment.chars().map(|c| c.len_utf16() as u32).sum();
+            let len: u32 = utf16_code_units(segment);
             push_at(out, sv, expr.span.start, len, TT_STRING, 0);
         }
         ExprKind::InterpolatedString(parts) | ExprKind::ShellExec(parts) => {
             // Emit the whole span as a string; embedded variables are not
             // re-coloured here to keep the implementation simple.
             let segment = &sv.source()[expr.span.start as usize..expr.span.end as usize];
-            let len: u32 = segment.chars().map(|c| c.len_utf16() as u32).sum();
+            let len: u32 = utf16_code_units(segment);
             push_at(out, sv, expr.span.start, len, TT_STRING, 0);
             // Still recurse into embedded expressions so method/function calls
             // inside `"... {$obj->method()} ..."` get proper tokens.
@@ -606,7 +607,7 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
         }
         ExprKind::Heredoc { parts, .. } => {
             let segment = &sv.source()[expr.span.start as usize..expr.span.end as usize];
-            let len: u32 = segment.chars().map(|c| c.len_utf16() as u32).sum();
+            let len: u32 = utf16_code_units(segment);
             push_at(out, sv, expr.span.start, len, TT_STRING, 0);
             for part in parts.iter() {
                 if let php_ast::StringPart::Expr(inner) = part {
@@ -627,7 +628,7 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
                     out,
                     sv,
                     f.name.span.start,
-                    name_str.chars().map(|c| c.len_utf16() as u32).sum::<u32>(),
+                    utf16_code_units(name_str),
                     TT_FUNCTION,
                     0,
                 );
@@ -646,7 +647,7 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
                     out,
                     sv,
                     m.method.span.start,
-                    name_str.chars().map(|c| c.len_utf16() as u32).sum::<u32>(),
+                    utf16_code_units(name_str),
                     TT_METHOD,
                     0,
                 );
@@ -663,7 +664,7 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
                     out,
                     sv,
                     m.method.span.start,
-                    name_str.chars().map(|c| c.len_utf16() as u32).sum::<u32>(),
+                    utf16_code_units(name_str),
                     TT_METHOD,
                     0,
                 );
@@ -730,7 +731,7 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
         // ── Variables ─────────────────────────────────────────────────────────
         ExprKind::Variable(_) => {
             let segment = &sv.source()[expr.span.start as usize..expr.span.end as usize];
-            let len: u32 = segment.chars().map(|c| c.len_utf16() as u32).sum();
+            let len: u32 = utf16_code_units(segment);
             push_at(out, sv, expr.span.start, len, TT_VARIABLE, 0);
         }
         _ => {}
@@ -1223,7 +1224,7 @@ mod tests {
             .find(|t| t.token_type == TT_TYPE)
             .expect("expected a TT_TYPE token for the named type hint");
         let name = "Héros";
-        let utf16_len: u32 = name.chars().map(|c| c.len_utf16() as u32).sum();
+        let utf16_len = utf16_code_units(name);
         let byte_len = name.len() as u32;
         assert_ne!(
             utf16_len, byte_len,
@@ -1247,7 +1248,7 @@ mod tests {
             .find(|t| t.token_type == TT_CLASS && t.token_modifiers_bitset == 0)
             .expect("expected a bare TT_CLASS token for the attribute name");
         let name = "Routé";
-        let utf16_len: u32 = name.chars().map(|c| c.len_utf16() as u32).sum();
+        let utf16_len = utf16_code_units(name);
         let byte_len = name.len() as u32;
         assert_ne!(
             utf16_len, byte_len,
@@ -1272,7 +1273,7 @@ mod tests {
             .find(|t| t.token_type == TT_STRING)
             .expect("expected a TT_STRING token for the string literal");
         let content = "\"café\"";
-        let utf16_len: u32 = content.chars().map(|c| c.len_utf16() as u32).sum();
+        let utf16_len: u32 = utf16_code_units(content);
         let byte_len = content.len() as u32;
         assert_ne!(
             utf16_len, byte_len,
@@ -1297,7 +1298,7 @@ mod tests {
             .find(|t| t.token_type == TT_VARIABLE)
             .expect("expected a TT_VARIABLE token");
         let name = "$café";
-        let utf16_len: u32 = name.chars().map(|c| c.len_utf16() as u32).sum();
+        let utf16_len = utf16_code_units(name);
         let byte_len = name.len() as u32;
         assert_ne!(
             utf16_len, byte_len,

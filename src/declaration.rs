@@ -12,7 +12,7 @@ use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::ast::{ParsedDoc, SourceView};
-use crate::util::word_at;
+use crate::util::{strip_variable_sigil, utf16_code_units, word_at};
 
 /// Find the abstract or interface declaration of `word`.
 /// Prefers abstract/interface declarations; falls back to any declaration.
@@ -106,7 +106,7 @@ fn find_any_declaration(
     stmts: &[Stmt<'_, '_>],
     word: &str,
 ) -> Option<tower_lsp::lsp_types::Range> {
-    let bare = word.strip_prefix('$').unwrap_or(word);
+    let bare = strip_variable_sigil(word);
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) if f.name == word => {
@@ -222,10 +222,10 @@ pub fn goto_declaration_from_index(
     use crate::file_index::ClassKind;
     use crate::util::word_at;
     let word = word_at(source, position)?;
-    let bare = word.strip_prefix('$').unwrap_or(&word);
+    let bare = strip_variable_sigil(&word);
 
     let precise_range = |line: u32, name_char: u32, name: &str| -> tower_lsp::lsp_types::Range {
-        let end_char = name_char + name.encode_utf16().count() as u32;
+        let end_char = name_char + utf16_code_units(name);
         tower_lsp::lsp_types::Range {
             start: tower_lsp::lsp_types::Position {
                 line,

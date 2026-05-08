@@ -4,6 +4,8 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 use crate::ast::ParsedDoc;
 
+pub const PHP_LSP_SOURCE: &str = "php-lsp";
+
 /// Parse `source` without converting parse errors into LSP `Diagnostic`s.
 ///
 /// Hot-path callers (workspace scan, the salsa `parsed_doc` query) discard
@@ -43,7 +45,7 @@ pub fn diagnostics_from_doc(doc: &ParsedDoc) -> Vec<Diagnostic> {
             Diagnostic {
                 range: Range { start, end },
                 severity: Some(DiagnosticSeverity::ERROR),
-                source: Some("php-lsp".to_string()),
+                source: Some(PHP_LSP_SOURCE.to_string()),
                 message: e.to_string(),
                 ..Default::default()
             }

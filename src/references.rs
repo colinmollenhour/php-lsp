@@ -6,6 +6,7 @@ use rayon::prelude::*;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{ParsedDoc, str_offset_in_range};
+use crate::util::utf16_code_units;
 use crate::walk::{
     class_refs_in_stmts, function_refs_in_stmts, method_refs_in_stmts, new_refs_in_stmts,
     property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use,
@@ -99,7 +100,6 @@ pub fn find_constructor_references(
     all_docs: &[(Url, Arc<ParsedDoc>)],
     class_fqn: Option<&str>,
 ) -> Vec<Location> {
-    let _class_utf16_len: u32 = short_name.chars().map(|c| c.len_utf16() as u32).sum();
     all_docs
         .par_iter()
         .flat_map_iter(|(uri, doc)| {
@@ -367,7 +367,7 @@ fn scan_doc(
     }
 
     let sv = doc.view();
-    let word_utf16_len: u32 = word.chars().map(|c| c.len_utf16() as u32).sum();
+    let word_utf16_len: u32 = utf16_code_units(word);
     spans
         .into_iter()
         .map(|span| {
@@ -1032,8 +1032,7 @@ mod tests {
         );
         assert_eq!(
             refs[0].range.end.character,
-            refs[0].range.start.character
-                + "greet".chars().map(|c| c.len_utf16() as u32).sum::<u32>(),
+            refs[0].range.start.character + utf16_code_units("greet"),
             "range should span exactly the function name"
         );
     }

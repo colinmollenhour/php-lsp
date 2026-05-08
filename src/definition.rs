@@ -4,8 +4,19 @@ use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{ParsedDoc, SourceView, str_offset};
-use crate::util::word_at;
+use crate::util::{strip_variable_sigil, utf16_code_units, word_at};
 use crate::walk::collect_var_refs_in_scope;
+
+fn zero_width_location(uri: &Url, line: u32) -> Location {
+    let pos = Position { line, character: 0 };
+    Location {
+        uri: uri.clone(),
+        range: Range {
+            start: pos,
+            end: pos,
+        },
+    }
+}
 
 /// Find the definition of the symbol under `position`.
 /// Searches the current document first, then `other_docs` for cross-file resolution.
@@ -65,7 +76,7 @@ pub fn find_declaration_range(_source: &str, doc: &ParsedDoc, name: &str) -> Opt
 
 fn scan_statements(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], word: &str) -> Option<Range> {
     // Strip a leading `$` so that `$name` matches property names stored without `$`.
-    let bare = word.strip_prefix('$').unwrap_or(word);
+    let bare = strip_variable_sigil(word);
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) if f.name == word => {
@@ -174,69 +185,29 @@ pub fn find_in_indexes(
         std::sync::Arc<crate::file_index::FileIndex>,
     )],
 ) -> Option<Location> {
-    let bare = name.strip_prefix('$').unwrap_or(name);
+    let bare = strip_variable_sigil(name);
     for (uri, idx) in indexes {
         // Check top-level functions.
         for f in &idx.functions {
             if f.name.as_ref() == bare || f.name.as_ref() == name {
-                let pos = tower_lsp::lsp_types::Position {
-                    line: f.start_line,
-                    character: 0,
-                };
-                return Some(Location {
-                    uri: uri.clone(),
-                    range: Range {
-                        start: pos,
-                        end: pos,
-                    },
-                });
+                return Some(zero_width_location(uri, f.start_line));
             }
         }
         // Check classes / interfaces / traits / enums and their members.
         for cls in &idx.classes {
             if cls.name.as_ref() == bare || cls.name.as_ref() == name {
-                let pos = tower_lsp::lsp_types::Position {
-                    line: cls.start_line,
-                    character: 0,
-                };
-                return Some(Location {
-                    uri: uri.clone(),
-                    range: Range {
-                        start: pos,
-                        end: pos,
-                    },
-                });
+                return Some(zero_width_location(uri, cls.start_line));
             }
             // Methods.
             for m in &cls.methods {
                 if m.name.as_ref() == name {
-                    let pos = tower_lsp::lsp_types::Position {
-                        line: m.start_line,
-                        character: 0,
-                    };
-                    return Some(Location {
-                        uri: uri.clone(),
-                        range: Range {
-                            start: pos,
-                            end: pos,
-                        },
-                    });
+                    return Some(zero_width_location(uri, m.start_line));
                 }
             }
             // Properties (stored without `$`).
             for p in &cls.properties {
                 if p.name.as_ref() == bare {
-                    let pos = tower_lsp::lsp_types::Position {
-                        line: p.start_line,
-                        character: 0,
-                    };
-                    return Some(Location {
-                        uri: uri.clone(),
-                        range: Range {
-                            start: pos,
-                            end: pos,
-                        },
-                    });
+                    return Some(zero_width_location(uri, p.start_line));
                 }
             }
             // Class constants.
@@ -339,7 +310,7 @@ fn _name_range_from_offset(sv: SourceView<'_>, name: &str) -> Range {
         start,
         end: Position {
             line: start.line,
-            character: start.character + name.chars().map(|c| c.len_utf16() as u32).sum::<u32>(),
+            character: start.character + utf16_code_units(name),
         },
     }
 }
