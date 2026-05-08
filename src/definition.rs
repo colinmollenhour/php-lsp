@@ -4,7 +4,7 @@ use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{ParsedDoc, SourceView, str_offset};
-use crate::util::{strip_variable_sigil, utf16_code_units, word_at};
+use crate::util::{strip_variable_sigil, utf16_code_units, word_at_position};
 use crate::walk::collect_var_refs_in_scope;
 
 fn zero_width_location(uri: &Url, line: u32) -> Location {
@@ -27,7 +27,7 @@ pub fn goto_definition(
     other_docs: &[(Url, Arc<ParsedDoc>)],
     position: Position,
 ) -> Option<Location> {
-    let word = word_at(source, position)?;
+    let word = word_at_position(source, position)?;
 
     // For $variable, find the first occurrence in scope (= the definition/assignment).
     let sv = doc.view();

@@ -14,7 +14,7 @@ pub fn selection_ranges(doc: &ParsedDoc, positions: &[Position]) -> Vec<Selectio
     positions
         .iter()
         .map(|pos| {
-            let byte_off = position_to_byte(sv, *pos);
+            let byte_off = sv.byte_of_position(*pos);
             build_chain(sv, &doc.program().stmts, byte_off, fr)
         })
         .collect()
@@ -56,31 +56,6 @@ fn file_range(sv: SourceView<'_>) -> Range {
             character: last_char,
         },
     }
-}
-
-/// O(log lines) UTF-16 `Position` → byte offset, via the precomputed
-/// `line_starts` table. Scans only the characters on the target line.
-fn position_to_byte(sv: SourceView<'_>, pos: Position) -> u32 {
-    let source = sv.source();
-    let line_starts = sv.line_starts();
-    let line_idx = pos.line as usize;
-    let line_start = line_starts.get(line_idx).copied().unwrap_or(0) as usize;
-    let line_end = line_starts
-        .get(line_idx + 1)
-        .map(|&s| (s as usize).saturating_sub(1))
-        .unwrap_or(source.len());
-    let raw = &source[line_start..line_end.min(source.len())];
-    let line = raw.strip_suffix('\r').unwrap_or(raw);
-    let mut col_utf16: u32 = 0;
-    let mut byte_in_line: usize = 0;
-    for ch in line.chars() {
-        if col_utf16 >= pos.character {
-            break;
-        }
-        col_utf16 += ch.len_utf16() as u32;
-        byte_in_line += ch.len_utf8();
-    }
-    (line_start + byte_in_line) as u32
 }
 
 /// Build the innermost-to-outermost chain for a cursor position.

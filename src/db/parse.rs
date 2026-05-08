@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use salsa::{Database, Update};
+use salsa::Database;
 
 use crate::ast::ParsedDoc;
 use crate::db::input::SourceFile;
@@ -32,21 +32,10 @@ impl ParsedArc {
     }
 }
 
-// SAFETY: `maybe_update` writes `new` through `old_pointer` exactly when it
-// returns `true`. The `ptr_eq` short-circuit returns `false` without writing,
-// matching salsa's "no observable change" contract. `ParsedDoc` is already
-// `Send + Sync` (see `ast.rs:98`).
-unsafe impl Update for ParsedArc {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_ref = unsafe { &mut *old_pointer };
-        if Arc::ptr_eq(&old_ref.0, &new_value.0) {
-            false
-        } else {
-            *old_ref = new_value;
-            true
-        }
-    }
-}
+// SAFETY: The `ptr_eq` short-circuit returns `false` without writing, matching
+// salsa's "no observable change" contract. `ParsedDoc` is already `Send + Sync`
+// (see `ast.rs:98`).
+crate::impl_arc_update!(ParsedArc);
 
 /// Parse the file's source text. `no_eq` because `ParsedArc` has no
 /// structural equality — invalidation is driven entirely by input changes,

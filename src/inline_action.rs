@@ -12,12 +12,12 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::util::word_at;
+use crate::util::word_at_position;
 
 pub fn inline_variable_actions(source: &str, range: Range, uri: &Url) -> Vec<CodeActionOrCommand> {
     // Determine the variable name under cursor (or at start of selection).
     let cursor = range.start;
-    let var_name = match word_at(source, cursor) {
+    let var_name = match word_at_position(source, cursor) {
         Some(w) if w.starts_with('$') => w,
         _ => return vec![],
     };

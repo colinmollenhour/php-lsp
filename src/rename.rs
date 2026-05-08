@@ -30,8 +30,8 @@ pub fn rename(word: &str, new_name: &str, all_docs: &[(Url, Arc<ParsedDoc>)]) ->
 /// Returns the range of the word at `position` if it's a renameable symbol.
 /// Used for `textDocument/prepareRename`.
 pub fn prepare_rename(source: &str, position: Position) -> Option<Range> {
-    use crate::util::word_at;
-    let word = word_at(source, position)?;
+    use crate::util::word_at_position;
+    let word = word_at_position(source, position)?;
     if word.contains('\\') {
         return None;
     }

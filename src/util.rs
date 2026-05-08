@@ -382,9 +382,9 @@ fn char_range_for_word(line: &str, char_offset: usize) -> Option<(usize, usize)>
     }
 }
 
-pub(crate) fn word_at(source: &str, position: Position) -> Option<String> {
+pub(crate) fn word_at_position(source: &str, position: Position) -> Option<String> {
     // Use split('\n') rather than lines() so that a trailing newline produces a
-    // final empty entry — lines() silently drops it, causing word_at to return
+    // final empty entry — lines() silently drops it, causing word_at_position to return
     // None for any cursor on the last line of a normally-saved PHP file.
     let raw = source.split('\n').nth(position.line as usize)?;
     let line = raw.strip_suffix('\r').unwrap_or(raw);
@@ -396,7 +396,7 @@ pub(crate) fn word_at(source: &str, position: Position) -> Option<String> {
 }
 
 /// Return the LSP `Range` of the word (identifier) under the cursor.
-/// Uses the same word-boundary rules as `word_at`.
+/// Uses the same word-boundary rules as `word_at_position`.
 pub(crate) fn word_range_at(source: &str, position: Position) -> Option<Range> {
     let raw = source.split('\n').nth(position.line as usize)?;
     let line = raw.strip_suffix('\r').unwrap_or(raw);
@@ -536,11 +536,11 @@ mod tests {
             line: 1,
             character: 6,
         }; // "strlen" on line 1
-        let w = word_at(src, pos);
+        let w = word_at_position(src, pos);
         assert_eq!(
             w.as_deref(),
             Some("strlen"),
-            "word_at must work on lines before the trailing newline"
+            "word_at_position must work on lines before the trailing newline"
         );
         // Position on the final empty line produced by the trailing newline.
         let last_line = Position {
@@ -548,7 +548,7 @@ mod tests {
             character: 0,
         };
         // Should return None (empty line), but must not panic.
-        let _ = word_at(src, last_line);
+        let _ = word_at_position(src, last_line);
     }
 
     #[test]
@@ -558,11 +558,11 @@ mod tests {
             line: 1,
             character: 9,
         }; // "foo"
-        let w = word_at(src, pos);
+        let w = word_at_position(src, pos);
         assert_eq!(
             w.as_deref(),
             Some("foo"),
-            "word_at must handle CRLF line endings"
+            "word_at_position must handle CRLF line endings"
         );
     }
 

@@ -75,7 +75,7 @@ use crate::type_hierarchy::{
     prepare_type_hierarchy_from_workspace, subtypes_of_from_workspace, supertypes_of_from_workspace,
 };
 use crate::use_import::{build_use_import_edit, find_fqn_for_class};
-use crate::util::word_at;
+use crate::util::word_at_position;
 
 /// Per-category diagnostic toggle flags.
 /// The master `enabled` switch defaults to `true`. Individual category flags
@@ -1476,7 +1476,7 @@ impl LanguageServer for Backend {
         // method defined in `$var`'s class hierarchy, not the first `method`
         // found in any indexed file (which would return a wrong class).
         if let Some(line_text) = source.lines().nth(position.line as usize)
-            && let Some(word) = crate::util::word_at(&source, position)
+            && let Some(word) = crate::util::word_at_position(&source, position)
             && let Some(receiver) = crate::hover::extract_receiver_var_before_cursor(
                 line_text,
                 position.character as usize,
@@ -1521,7 +1521,7 @@ impl LanguageServer for Backend {
 
         // Cross-file: use FileIndex (no disk I/O for background files).
         let other_indexes = self.docs.other_indexes(uri);
-        if let Some(word) = crate::util::word_at(&source, position)
+        if let Some(word) = crate::util::word_at_position(&source, position)
             && let Some(loc) = find_in_indexes(&word, &other_indexes)
         {
             let refined = self
@@ -1538,7 +1538,7 @@ impl LanguageServer for Backend {
         }
 
         // PSR-4 fallback: only useful for fully-qualified names (contain `\`)
-        if let Some(word) = word_at(&source, position)
+        if let Some(word) = word_at_position(&source, position)
             && word.contains('\\')
             && let Some(loc) = self.psr4_goto(&word).await
         {
@@ -1552,7 +1552,7 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let source = self.get_open_text(uri).unwrap_or_default();
-        let word = match word_at(&source, position) {
+        let word = match word_at_position(&source, position) {
             Some(w) => w,
             None => return Ok(None),
         };
@@ -1712,7 +1712,7 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let source = self.get_open_text(uri).unwrap_or_default();
-        let word = match word_at(&source, position) {
+        let word = match word_at_position(&source, position) {
             Some(w) => w,
             None => return Ok(None),
         };
@@ -1770,7 +1770,7 @@ impl LanguageServer for Backend {
         // file is never opened.  Also try the alias-resolved name so that
         // `use Foo as Bar` works even when Foo is only in the index.
         let all_indexes = self.docs.all_indexes();
-        if let Some(word) = crate::util::word_at(&source, position) {
+        if let Some(word) = crate::util::word_at_position(&source, position) {
             // Try the literal word first.
             if let Some(h) = class_hover_from_index(&word, &all_indexes) {
                 return Ok(Some(h));
@@ -1979,7 +1979,7 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let source = self.get_open_text(uri).unwrap_or_default();
-        let word = match word_at(&source, position) {
+        let word = match word_at_position(&source, position) {
             Some(w) => w,
             None => return Ok(None),
         };
@@ -2038,7 +2038,7 @@ impl LanguageServer for Backend {
         // Need the word at the cursor to know if this is a variable rename
         // (`$foo`) — the wordPattern we send back must require/forbid `$`
         // accordingly so that linked-mode typing produces valid PHP.
-        let word = match crate::util::word_at(&source, position) {
+        let word = match crate::util::word_at_position(&source, position) {
             Some(w) => w,
             None => return Ok(None),
         };
@@ -2121,7 +2121,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         let source = self.get_open_text(uri).unwrap_or_default();
         let imports = self.file_imports(uri);
-        let word = crate::util::word_at(&source, position).unwrap_or_default();
+        let word = crate::util::word_at_position(&source, position).unwrap_or_default();
         let fqn = imports.get(&word).map(|s| s.as_str());
         // First pass: open-file ParsedDocs give accurate character positions.
         let open_docs = self.docs.docs_for(&self.open_urls());
@@ -3040,7 +3040,7 @@ fn range_within(inner: Range, outer: Range) -> bool {
     start_ok && end_ok
 }
 
-fn position_to_offset(source: &str, position: Position) -> Option<u32> {
+fn position_to_byte_offset(source: &str, position: Position) -> Option<u32> {
     let mut byte_offset = 0usize;
     for (idx, line) in source.split('\n').enumerate() {
         if idx as u32 == position.line {
@@ -3067,7 +3067,7 @@ fn position_to_offset(source: &str, position: Position) -> Option<u32> {
 /// so that method *declarations* (`public function add() {}`) are classified as
 /// `SymbolKind::Method` rather than falling through to `SymbolKind::Function`.
 fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Position) -> bool {
-    let Some(cursor) = position_to_offset(source, position) else {
+    let Some(cursor) = position_to_byte_offset(source, position) else {
         return false;
     };
 
@@ -3143,7 +3143,7 @@ fn cursor_is_on_property_decl(
     stmts: &[Stmt<'_, '_>],
     position: Position,
 ) -> Option<String> {
-    let cursor = position_to_offset(source, position)?;
+    let cursor = position_to_byte_offset(source, position)?;
 
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32) -> Option<String> {
         for stmt in stmts {
@@ -3197,7 +3197,7 @@ fn class_name_at_construct_decl(
     stmts: &[Stmt<'_, '_>],
     position: Position,
 ) -> Option<String> {
-    let cursor = position_to_offset(source, position)?;
+    let cursor = position_to_byte_offset(source, position)?;
 
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32, ns_prefix: &str) -> Option<String> {
         let mut current_ns = ns_prefix.to_owned();
@@ -3259,7 +3259,7 @@ fn promoted_property_at_cursor(
     stmts: &[Stmt<'_, '_>],
     position: Position,
 ) -> Option<String> {
-    let cursor = position_to_offset(source, position)?;
+    let cursor = position_to_byte_offset(source, position)?;
 
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32) -> Option<String> {
         for stmt in stmts {
@@ -4017,14 +4017,14 @@ mod tests {
         );
     }
 
-    // ── position_to_offset ───────────────────────────────────────────────────
+    // ── position_to_byte_offset ──────────────────────────────────────────────
 
     #[test]
-    fn position_to_offset_first_line() {
+    fn position_to_byte_offset_first_line() {
         let src = "<?php\nfoo();";
         // Character 0 → byte 0.
         assert_eq!(
-            position_to_offset(
+            position_to_byte_offset(
                 src,
                 Position {
                     line: 0,
@@ -4035,7 +4035,7 @@ mod tests {
         );
         // Character 4 → byte 4 (last char 'p' of "<?php").
         assert_eq!(
-            position_to_offset(
+            position_to_byte_offset(
                 src,
                 Position {
                     line: 0,
@@ -4046,7 +4046,7 @@ mod tests {
         );
         // Character 5 is past the end of "<?php" (5 chars) — clamps to line_content.len().
         assert_eq!(
-            position_to_offset(
+            position_to_byte_offset(
                 src,
                 Position {
                     line: 0,
@@ -4058,11 +4058,11 @@ mod tests {
     }
 
     #[test]
-    fn position_to_offset_second_line() {
+    fn position_to_byte_offset_second_line() {
         let src = "<?php\nfoo();";
         // Start of line 1 is byte 6 (after "<?php\n").
         assert_eq!(
-            position_to_offset(
+            position_to_byte_offset(
                 src,
                 Position {
                     line: 1,
@@ -4073,7 +4073,7 @@ mod tests {
         );
         // "foo" ends at character 3 → byte 9.
         assert_eq!(
-            position_to_offset(
+            position_to_byte_offset(
                 src,
                 Position {
                     line: 1,
@@ -4085,11 +4085,11 @@ mod tests {
     }
 
     #[test]
-    fn position_to_offset_line_boundary_returns_none() {
+    fn position_to_byte_offset_line_boundary_returns_none() {
         // A source with exactly one line has only line 0; line 1 must return None.
         let src = "<?php";
         assert_eq!(
-            position_to_offset(
+            position_to_byte_offset(
                 src,
                 Position {
                     line: 1,
@@ -4099,7 +4099,7 @@ mod tests {
             None
         );
         assert_eq!(
-            position_to_offset(
+            position_to_byte_offset(
                 src,
                 Position {
                     line: 5,

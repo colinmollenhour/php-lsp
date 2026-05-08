@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use salsa::{Database, Update};
+use salsa::Database;
 
 use crate::ast::MethodReturnsMap;
 use crate::db::input::SourceFile;
@@ -26,17 +26,7 @@ impl MethodReturnsArc {
 }
 
 // SAFETY: identical contract to `ParsedArc::maybe_update`.
-unsafe impl Update for MethodReturnsArc {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_ref = unsafe { &mut *old_pointer };
-        if Arc::ptr_eq(&old_ref.0, &new_value.0) {
-            false
-        } else {
-            *old_ref = new_value;
-            true
-        }
-    }
-}
+crate::impl_arc_update!(MethodReturnsArc);
 
 #[salsa::tracked(no_eq)]
 pub fn method_returns(db: &dyn Database, file: SourceFile) -> MethodReturnsArc {

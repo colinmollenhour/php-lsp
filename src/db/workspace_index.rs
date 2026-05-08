@@ -24,7 +24,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use salsa::{Database, Update};
+use salsa::Database;
 use tower_lsp::lsp_types::Url;
 
 use crate::db::index::file_index;
@@ -112,17 +112,7 @@ impl WorkspaceIndexArc {
 
 // SAFETY: same contract as other `*Arc` newtypes — ptr_eq is sufficient because
 // every rebuild allocates a fresh `Arc`.
-unsafe impl Update for WorkspaceIndexArc {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_ref = unsafe { &mut *old_pointer };
-        if Arc::ptr_eq(&old_ref.0, &new_value.0) {
-            false
-        } else {
-            *old_ref = new_value;
-            true
-        }
-    }
-}
+crate::impl_arc_update!(WorkspaceIndexArc);
 
 /// Build the aggregate workspace index.
 ///

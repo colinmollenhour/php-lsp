@@ -12,7 +12,6 @@
 use std::sync::Arc;
 
 use mir_issues::Issue;
-use salsa::Update;
 
 use crate::db::analysis::LspDatabase;
 use crate::db::class_issues::class_issues;
@@ -33,17 +32,7 @@ impl IssuesArc {
 }
 
 // SAFETY: identical contract to `ParsedArc::maybe_update`.
-unsafe impl Update for IssuesArc {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_ref = unsafe { &mut *old_pointer };
-        if Arc::ptr_eq(&old_ref.0, &new_value.0) {
-            false
-        } else {
-            *old_ref = new_value;
-            true
-        }
-    }
-}
+crate::impl_arc_update!(IssuesArc);
 
 /// Run Pass-2 (body analysis) on a single file against the workspace codebase
 /// and return the raw issue list with `suppressed` entries already dropped.
