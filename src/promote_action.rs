@@ -68,6 +68,12 @@ fn collect_promote<'a>(
 ) {
     for stmt in stmts {
         match &stmt.kind {
+            // Note: Only handles braced namespaces (namespace Foo { ... }).
+            // Unbraced namespaces (namespace Foo;) don't nest statements, so promotion
+            // works for classes in unbraced namespaces at the top level.
+            // However, classes in unbraced namespaces after namespace declarations
+            // would require tracking namespace context across statements, which isn't
+            // done here. This is a known limitation.
             StmtKind::Class(c) => {
                 let class_start = sv.position_of(stmt.span.start).line;
                 let class_end = sv.position_of(stmt.span.end).line;

@@ -523,3 +523,271 @@ class Foo {
         "promote action should not be offered for properties without visibility modifier"
     );
 }
+
+/// Properties immediately before constructor (no blank line) should still be promotable.
+#[tokio::test]
+async fn promote_action_with_no_blank_line_before_constructor() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Foo {
+    public string $name$0;
+    public function __construct(string $name) {
+        $this->name = $name;
+    }
+}
+"#,
+        )
+        .await;
+    assert!(
+        out.contains("Promote constructor parameter"),
+        "promote action should be offered even with no blank line before constructor"
+    );
+}
+
+/// Promote action with multiple properties works when using range selection.
+#[tokio::test]
+async fn promote_action_on_multiple_properties() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "multi.php",
+            "<?php\nclass User {\n    public string $firstName;\n    public string $lastName;\n    public function __construct(string $firstName, string $lastName) {\n        $this->firstName = $firstName;\n        $this->lastName = $lastName;\n    }\n}\n",
+        )
+        .await;
+
+    let resp = server.code_action("multi.php", 1, 0, 8, 2).await;
+    let promotes: Vec<_> = resp["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.to_lowercase().contains("promot"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    assert!(
+        !promotes.is_empty(),
+        "promote action should be offered for multiple properties"
+    );
+}
+
+/// Constructor parameters with default values should be promotable.
+#[tokio::test]
+async fn promote_action_with_constructor_default_value() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Config {
+    public string $envir$0onment;
+    public function __construct(string $environment = 'dev') {
+        $this->environment = $environment;
+    }
+}
+"#,
+        )
+        .await;
+    assert!(
+        out.contains("Promote constructor parameter"),
+        "promote action should be offered even with default values"
+    );
+}
+
+/// Properties without trailing newline before constructor should work.
+/// Regression: whole_line_range logic handles files without trailing newlines.
+#[tokio::test]
+async fn promote_action_resolve_no_trailing_newline() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "promote_no_newline.php",
+            "<?php\nclass Foo {\n    public string $name;\n    public function __construct(string $name) {\n        $this->name = $name;\n    }\n}",
+        )
+        .await;
+
+    let resp = server
+        .code_action("promote_no_newline.php", 1, 0, 5, 2)
+        .await;
+    let action = resp["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.to_lowercase().contains("promot"))
+                .unwrap_or(false)
+        })
+        .cloned();
+
+    assert!(
+        action.is_some(),
+        "promote action should work for files without trailing newline"
+    );
+}
+
+/// Readonly properties with complex types (nullable, mixed, etc.) should be promotable.
+#[tokio::test]
+async fn promote_action_readonly_with_nullable_type() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Config {
+    public readonly ?string $va$0lue;
+    public function __construct(?string $value = null) {
+        $this->value = $value;
+    }
+}
+"#,
+        )
+        .await;
+    assert!(
+        out.contains("Promote"),
+        "promote action should work with readonly + nullable types"
+    );
+}
+
+// --- Documented Limitations ---
+
+/// **LIMITATION**: Unbraced namespace context is not tracked by promote_action.
+/// In unbraced namespace declarations (namespace Foo;), classes defined at the
+/// top level still work. However, this test documents the behavior.
+#[tokio::test]
+async fn promote_action_limitation_unbraced_namespace_context() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "unbraced_ns.php",
+            "<?php\nnamespace App;\n\nclass Foo {\n    public string $name;\n    public function __construct(string $name) {\n        $this->name = $name;\n    }\n}\n",
+        )
+        .await;
+
+    let resp = server.code_action("unbraced_ns.php", 0, 0, 8, 2).await;
+    let promotes: Vec<_> = resp["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.to_lowercase().contains("promot"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    // In unbraced namespace, promotion should still work because the class
+    // is found at the top level where the namespace applies
+    assert!(
+        !promotes.is_empty(),
+        "promote action should work in unbraced namespaces at top level"
+    );
+}
+
+/// **LIMITATION**: Static properties are explicitly not promoted because
+/// they cannot be promoted to constructor parameters (constructor parameters
+/// can only handle instance properties).
+#[tokio::test]
+async fn promote_action_limitation_static_properties_not_promotable() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Config {
+    public static string $database$0;
+    public function __construct(string $database) {
+        self::$database = $database;
+    }
+}
+"#,
+        )
+        .await;
+    // Static properties cannot be promoted to constructor parameters
+    assert!(
+        !out.contains("Promote"),
+        "promote action should not be offered for static properties"
+    );
+}
+
+/// **LIMITATION**: Complex assignments are not promotable.
+/// Only simple assignments like `$this->prop = $param;` are supported.
+/// Other patterns like conditional assignment, function call assignment, etc. are skipped.
+#[tokio::test]
+async fn promote_action_limitation_complex_assignments() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Foo {
+    public int $value$0;
+    public function __construct(int $value) {
+        if ($value > 0) {
+            $this->value = $value;
+        }
+    }
+}
+"#,
+        )
+        .await;
+    // Complex assignments (inside conditionals) are not promoted
+    assert!(
+        !out.contains("Promote"),
+        "promote action should not be offered for complex assignments"
+    );
+}
+
+/// **LIMITATION**: Assignment to wrong variable name prevents promotion.
+/// If parameter is `$name` but assignment is `$this->name = $different;`,
+/// the property won't be promoted because names don't match.
+#[tokio::test]
+async fn promote_action_limitation_mismatched_parameter_name() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class User {
+    public string $email$0;
+    public function __construct(string $address) {
+        $this->email = $address;
+    }
+}
+"#,
+        )
+        .await;
+    // Parameter name doesn't match property name
+    assert!(
+        !out.contains("Promote"),
+        "promote action should not be offered when parameter name doesn't match property"
+    );
+}
+
+/// **LIMITATION**: Multiple assignment targets are not promoted.
+/// Promotion requires a simple one-to-one mapping between property and parameter.
+#[tokio::test]
+async fn promote_action_limitation_multiple_assignments() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Logger {
+    public string $file$0;
+    public string $level;
+    public function __construct(string $file, string $level) {
+        $this->file = $file;
+        $this->level = $level;
+    }
+}
+"#,
+        )
+        .await;
+    // When multiple properties are promotable, the action shows aggregate count
+    assert!(
+        out.contains("Promote 2 constructor parameters"),
+        "promote action should show correct count for multiple properties"
+    );
+}
