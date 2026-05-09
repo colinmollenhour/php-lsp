@@ -153,6 +153,18 @@ fn collect_implementations(
                     });
                 }
             }
+            StmtKind::Interface(i) => {
+                let extends_match = i
+                    .extends
+                    .iter()
+                    .any(|base| name_matches(base.to_string_repr().as_ref(), word, fqn));
+                if extends_match {
+                    out.push(Location {
+                        uri: uri.clone(),
+                        range: sv.name_range(&i.name.to_string()),
+                    });
+                }
+            }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
                     collect_implementations(inner, word, fqn, sv, uri, out);

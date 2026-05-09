@@ -538,6 +538,15 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
             }
         }
         StmtKind::Block(stmts) => collect_stmts(sv, stmts, out),
+        StmtKind::Switch(s) => {
+            collect_expr(sv, &s.expr, out);
+            for case in s.cases.iter() {
+                if let Some(v) = &case.value {
+                    collect_expr(sv, v, out);
+                }
+                collect_stmts(sv, &case.body, out);
+            }
+        }
         _ => {}
     }
 }
@@ -727,6 +736,17 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
                 push_type_hint(out, sv, rt);
             }
             collect_expr(sv, af.body, out);
+        }
+        ExprKind::Match(m) => {
+            collect_expr(sv, m.subject, out);
+            for arm in m.arms.iter() {
+                if let Some(conds) = &arm.conditions {
+                    for c in conds.iter() {
+                        collect_expr(sv, c, out);
+                    }
+                }
+                collect_expr(sv, &arm.body, out);
+            }
         }
         // ── Variables ─────────────────────────────────────────────────────────
         ExprKind::Variable(_) => {
