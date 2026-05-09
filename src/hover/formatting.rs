@@ -1,0 +1,323 @@
+use php_ast::{Param, Visibility};
+use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind};
+
+use crate::ast::format_type_hint;
+use crate::util::{is_php_builtin, php_doc_url};
+
+/// Format an expression literal value.
+pub(crate) fn format_expr_literal(expr: &php_ast::Expr<'_, '_>) -> Option<String> {
+    use php_ast::ExprKind;
+    match &expr.kind {
+        ExprKind::Int(n) => Some(n.to_string()),
+        ExprKind::Float(f) => Some(f.to_string()),
+        ExprKind::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
+        ExprKind::String(s) => Some(format!("'{}'", s)),
+        _ => None,
+    }
+}
+
+/// Format a class/interface/enum constant declaration for hover display.
+pub(crate) fn format_class_const(c: &php_ast::ClassConstDecl<'_, '_>) -> String {
+    use php_ast::ExprKind;
+    let type_str = c
+        .type_hint
+        .as_ref()
+        .map(|t| format!("{} ", format_type_hint(t)))
+        .or_else(|| match &c.value.kind {
+            ExprKind::Int(_) => Some("int ".to_string()),
+            ExprKind::String(_) => Some("string ".to_string()),
+            ExprKind::Float(_) => Some("float ".to_string()),
+            ExprKind::Bool(_) => Some("bool ".to_string()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let value_str = format_expr_literal(&c.value)
+        .map(|v| format!(" = {v}"))
+        .unwrap_or_default();
+    format!("const {}{}{}", type_str, c.name, value_str)
+}
+
+pub fn format_params_str(params: &[Param<'_, '_>]) -> String {
+    format_params(params)
+}
+
+pub(crate) fn format_params(params: &[Param<'_, '_>]) -> String {
+    params
+        .iter()
+        .map(|p| {
+            let mut s = String::new();
+            if p.by_ref {
+                s.push('&');
+            }
+            if let Some(t) = &p.type_hint {
+                s.push_str(&format!("{} ", format_type_hint(t)));
+            }
+            if p.variadic {
+                s.push_str("...");
+            }
+            s.push_str(&format!("${}", p.name));
+            if let Some(default) = &p.default {
+                s.push_str(&format!(" = {}", format_default_value(default)));
+            }
+            s
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Format a default parameter value for display in signatures.
+pub(crate) fn format_default_value(expr: &php_ast::Expr<'_, '_>) -> String {
+    use php_ast::ExprKind;
+    match &expr.kind {
+        ExprKind::Int(n) => n.to_string(),
+        ExprKind::Float(f) => f.to_string(),
+        ExprKind::String(s) => format!("'{}'", s),
+        ExprKind::Bool(b) => {
+            if *b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }
+        ExprKind::Null => "null".to_string(),
+        ExprKind::Array(items) => {
+            if items.is_empty() {
+                "[]".to_string()
+            } else {
+                "[...]".to_string()
+            }
+        }
+        _ => "...".to_string(),
+    }
+}
+
+pub(crate) fn wrap_php(sig: &str) -> String {
+    format!("```php\n{}\n```", sig)
+}
+
+fn visibility_str(v: &Visibility) -> &'static str {
+    match v {
+        Visibility::Public => "public",
+        Visibility::Protected => "protected",
+        Visibility::Private => "private",
+    }
+}
+
+pub(crate) fn format_method_prefix(
+    visibility: Option<&Visibility>,
+    is_static: bool,
+    is_abstract: bool,
+    is_final: bool,
+) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if let Some(v) = visibility {
+        parts.push(visibility_str(v));
+    }
+    if is_abstract {
+        parts.push("abstract");
+    }
+    if is_final {
+        parts.push("final");
+    }
+    if is_static {
+        parts.push("static");
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        parts.join(" ") + " "
+    }
+}
+
+pub(crate) fn format_prop_prefix(
+    visibility: Option<&Visibility>,
+    is_static: bool,
+    is_readonly: bool,
+) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if let Some(v) = visibility {
+        parts.push(visibility_str(v));
+    }
+    if is_static {
+        parts.push("static");
+    }
+    if is_readonly {
+        parts.push("readonly");
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        parts.join(" ") + " "
+    }
+}
+
+/// Return a function/method signature string from a `FileIndex` slice.
+pub fn signature_for_symbol_from_index(
+    name: &str,
+    indexes: &[(
+        tower_lsp::lsp_types::Url,
+        std::sync::Arc<crate::file_index::FileIndex>,
+    )],
+) -> Option<String> {
+    for (_, idx) in indexes {
+        for f in &idx.functions {
+            if f.name.as_ref() == name {
+                let params_str = f
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let mut s = String::new();
+                        if let Some(t) = &p.type_hint {
+                            s.push_str(&format!("{} ", t));
+                        }
+                        if p.variadic {
+                            s.push_str("...");
+                        }
+                        s.push_str(&format!("${}", p.name));
+                        s
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret = f
+                    .return_type
+                    .as_deref()
+                    .map(|r| format!(": {}", r))
+                    .unwrap_or_default();
+                return Some(format!("function {}({}){}", name, params_str, ret));
+            }
+        }
+        for cls in &idx.classes {
+            for m in &cls.methods {
+                if m.name.as_ref() == name {
+                    let params_str = m
+                        .params
+                        .iter()
+                        .map(|p| {
+                            let mut s = String::new();
+                            if let Some(t) = &p.type_hint {
+                                s.push_str(&format!("{} ", t));
+                            }
+                            if p.variadic {
+                                s.push_str("...");
+                            }
+                            s.push_str(&format!("${}", p.name));
+                            s
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let ret = m
+                        .return_type
+                        .as_deref()
+                        .map(|r| format!(": {}", r))
+                        .unwrap_or_default();
+                    return Some(format!("function {}({}){}", name, params_str, ret));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Return hover documentation for a symbol from a `FileIndex` slice.
+pub fn docs_for_symbol_from_index(
+    name: &str,
+    indexes: &[(
+        tower_lsp::lsp_types::Url,
+        std::sync::Arc<crate::file_index::FileIndex>,
+    )],
+) -> Option<String> {
+    if let Some(sig) = signature_for_symbol_from_index(name, indexes) {
+        let mut value = wrap_php(&sig);
+        for (_, idx) in indexes {
+            for f in &idx.functions {
+                if f.name.as_ref() == name {
+                    if let Some(raw) = &f.doc {
+                        let db = crate::docblock::parse_docblock(raw);
+                        let md = db.to_markdown();
+                        if !md.is_empty() {
+                            value.push_str("\n\n---\n\n");
+                            value.push_str(&md);
+                        }
+                    }
+                    break;
+                }
+            }
+            for cls in &idx.classes {
+                for m in &cls.methods {
+                    if m.name.as_ref() == name {
+                        if let Some(raw) = &m.doc {
+                            let db = crate::docblock::parse_docblock(raw);
+                            let md = db.to_markdown();
+                            if !md.is_empty() {
+                                value.push_str("\n\n---\n\n");
+                                value.push_str(&md);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        if is_php_builtin(name) {
+            value.push_str(&format!(
+                "\n\n[php.net documentation]({})",
+                php_doc_url(name)
+            ));
+        }
+        return Some(value);
+    }
+    if is_php_builtin(name) {
+        return Some(format!(
+            "```php\nfunction {}()\n```\n\n[php.net documentation]({})",
+            name,
+            php_doc_url(name)
+        ));
+    }
+    None
+}
+
+/// Build a hover for a class/interface/trait/enum found by short name in the workspace index.
+pub fn class_hover_from_index(
+    word: &str,
+    indexes: &[(
+        tower_lsp::lsp_types::Url,
+        std::sync::Arc<crate::file_index::FileIndex>,
+    )],
+) -> Option<Hover> {
+    use crate::file_index::ClassKind;
+
+    for (_, idx) in indexes {
+        for cls in &idx.classes {
+            if cls.name.as_ref() == word || cls.fqn.as_ref().trim_start_matches('\\') == word {
+                let kw = match cls.kind {
+                    ClassKind::Interface => "interface",
+                    ClassKind::Trait => "trait",
+                    ClassKind::Enum => "enum",
+                    ClassKind::Class => {
+                        if cls.is_abstract {
+                            "abstract class"
+                        } else {
+                            "class"
+                        }
+                    }
+                };
+                let mut sig = format!("{} {}", kw, &cls.name.to_string());
+                if let Some(parent) = &cls.parent {
+                    sig.push_str(&format!(" extends {}", parent));
+                }
+                if !cls.implements.is_empty() {
+                    let list: Vec<&str> = cls.implements.iter().map(|s| s.as_ref()).collect();
+                    sig.push_str(&format!(" implements {}", list.join(", ")));
+                }
+                return Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: wrap_php(&sig),
+                    }),
+                    range: None,
+                });
+            }
+        }
+    }
+    None
+}
