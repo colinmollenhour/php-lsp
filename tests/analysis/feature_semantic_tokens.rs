@@ -912,3 +912,67 @@ async fn semantic_tokens_enum_mixed_members() {
         5:30 len=4 type=type mods=0b0"#]]
     .assert_eq(&out);
 }
+
+/// Verify switch statements tokenize test expr, case values, and body variables.
+#[tokio::test]
+async fn semantic_tokens_switch_statement() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "switch.php",
+            "<?php\n$status = 1;\nswitch ($status) {\n    case 0:\n        echo \"off\";\n        break;\n    default:\n        echo \"on\";\n}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("switch.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=7 type=variable mods=0b0
+        1:10 len=1 type=number mods=0b0
+        2:8 len=7 type=variable mods=0b0
+        3:9 len=1 type=number mods=0b0
+        4:13 len=5 type=string mods=0b0
+        7:13 len=4 type=string mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify match expressions tokenize subject, arm conditions, and body variables.
+#[tokio::test]
+async fn semantic_tokens_match_expression() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "match.php",
+            "<?php\n$code = 200;\n$result = match ($code) {\n    200, 201 => \"ok\",\n    default => \"error\"\n};\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("match.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=5 type=variable mods=0b0
+        1:8 len=3 type=number mods=0b0
+        2:0 len=7 type=variable mods=0b0
+        2:17 len=5 type=variable mods=0b0
+        3:4 len=3 type=number mods=0b0
+        3:9 len=3 type=number mods=0b0
+        3:16 len=4 type=string mods=0b0
+        4:15 len=7 type=string mods=0b0"#]]
+    .assert_eq(&out);
+}

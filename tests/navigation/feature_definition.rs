@@ -808,6 +808,40 @@ class Concret$0e { public function action(): void {} }
 }
 
 #[tokio::test]
+async fn implementation_interface_extends_single() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Animal$0 {}
+interface Dog extends Animal {}
+"#,
+        )
+        .await;
+    expect![[r#"
+        main.php:2:10-2:13"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_interface_extends_multiple() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Animal$0 {}
+interface Dog extends Animal {}
+interface Cat extends Animal {}
+"#,
+        )
+        .await;
+    expect![[r#"
+        main.php:2:10-2:13
+        main.php:3:10-3:13"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
 async fn definition_trait_use_resolves_to_trait_decl() {
     let mut s = TestServer::new().await;
     s.check_definition_annotated(
