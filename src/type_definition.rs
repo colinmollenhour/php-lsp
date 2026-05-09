@@ -30,16 +30,28 @@ pub fn goto_type_definition(
         param_type_for(&doc.program().stmts, &word)?
     };
 
-    for (uri, other_doc) in all_docs {
-        let other_sv = other_doc.view();
-        if let Some(range) = find_class_range(other_sv, &other_doc.program().stmts, &class_name) {
-            return Some(Location {
-                uri: uri.clone(),
-                range,
-            });
+    for candidate in type_candidates(&class_name) {
+        for (uri, other_doc) in all_docs {
+            let other_sv = other_doc.view();
+            if let Some(range) = find_class_range(other_sv, &other_doc.program().stmts, candidate) {
+                return Some(Location {
+                    uri: uri.clone(),
+                    range,
+                });
+            }
         }
     }
     None
+}
+
+/// Decompose a formatted type hint into searchable class-name candidates.
+/// `"?Foo"` → `["Foo"]`, `"Foo|Bar"` → `["Foo", "Bar"]`, `"Foo&Bar"` → `["Foo", "Bar"]`.
+fn type_candidates(type_hint: &str) -> Vec<&str> {
+    let hint = type_hint.strip_prefix('?').unwrap_or(type_hint);
+    hint.split(['|', '&'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// Look up the declared type hint for a parameter named `word` in any function/method.
@@ -217,35 +229,36 @@ pub fn goto_type_definition_from_index(
     };
 
     // First pass: look for exact FQN match (high priority)
-    for (uri, idx) in indexes {
-        for cls in &idx.classes {
-            if cls.name.as_ref() == class_name {
-                return Some(Location {
-                    uri: uri.clone(),
-                    range: line_range(cls.start_line),
-                });
+    for candidate in type_candidates(&class_name) {
+        for (uri, idx) in indexes {
+            for cls in &idx.classes {
+                if cls.name.as_ref() == candidate {
+                    return Some(Location {
+                        uri: uri.clone(),
+                        range: line_range(cls.start_line),
+                    });
+                }
             }
         }
     }
 
     // Second pass: look for short name match (lower priority, may be ambiguous)
-    let cn_short = class_name
-        .rsplit('\\')
-        .next()
-        .unwrap_or(class_name.as_str());
-    for (uri, idx) in indexes {
-        for cls in &idx.classes {
-            let short = cls
-                .name
-                .as_ref()
-                .rsplit('\\')
-                .next()
-                .unwrap_or(cls.name.as_ref());
-            if short == cn_short {
-                return Some(Location {
-                    uri: uri.clone(),
-                    range: line_range(cls.start_line),
-                });
+    for candidate in type_candidates(&class_name) {
+        let cn_short = candidate.rsplit('\\').next().unwrap_or(candidate);
+        for (uri, idx) in indexes {
+            for cls in &idx.classes {
+                let short = cls
+                    .name
+                    .as_ref()
+                    .rsplit('\\')
+                    .next()
+                    .unwrap_or(cls.name.as_ref());
+                if short == cn_short {
+                    return Some(Location {
+                        uri: uri.clone(),
+                        range: line_range(cls.start_line),
+                    });
+                }
             }
         }
     }
