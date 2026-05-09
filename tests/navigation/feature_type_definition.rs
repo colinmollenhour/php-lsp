@@ -187,8 +187,10 @@ function process(Admin|User $u$0): void {}
 "#,
         )
         .await;
-    // Union types are not currently supported by the implementation
-    expect!["<none>"].assert_eq(&out);
+    // Union types return the first matching type in the union
+    expect![[r#"
+        main.php:1:6-1:11"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -306,8 +308,7 @@ class Service {
     .assert_eq(&out);
 }
 
-/// **LIMITATION**: Union types (PHP 8.0+) are not supported.
-/// Returns <none> when type hint is a union like `Admin|User`.
+/// Union types (PHP 8.0+) return the first matching type in the union.
 #[tokio::test]
 async fn type_definition_limitation_union_types_not_supported() {
     let mut s = TestServer::new().await;
@@ -320,11 +321,15 @@ function authenticate(Admin|User $a$0): void {}
 "#,
         )
         .await;
-    // Union types are explicitly not supported
-    expect!["<none>"].assert_eq(&out);
+    // Union types return the first matching type
+    expect![[r#"
+        main.php:1:6-1:11"#]]
+    .assert_eq(&out);
 }
 
-/// **LIMITATION**: Intersection types (PHP 8.1+) are not supported.
+/// **LIMITATION**: Intersection types (PHP 8.1+) are not currently supported.
+/// TypeMap does not properly handle parameters with intersection types on variable cursors.
+/// Unqualified type names in intersections may also not be automatically qualified with namespace context.
 #[tokio::test]
 async fn type_definition_limitation_intersection_types_not_supported() {
     let mut s = TestServer::new().await;
@@ -337,7 +342,7 @@ function process(Readable&Writable $rw$0): void {}
 "#,
         )
         .await;
-    // Intersection types are not supported
+    // Intersection types are not yet supported
     expect!["<none>"].assert_eq(&out);
 }
 
