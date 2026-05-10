@@ -160,20 +160,34 @@ fn issue_passes_filter(issue: &mir_issues::Issue, cfg: &DiagnosticsConfig) -> bo
             cfg.undefined_functions
         }
         IssueKind::UndefinedClass { .. } => cfg.undefined_classes,
+        IssueKind::TooFewArguments { .. }
+        | IssueKind::TooManyArguments { .. }
+        | IssueKind::InvalidPassByReference { .. }
+        | IssueKind::InvalidNamedArgument { .. } => cfg.arity_errors,
         // InvalidArgument covers both arity errors and type mismatches in mir-analyzer;
         // show it if either toggle is on.
-        IssueKind::InvalidArgument { .. } => cfg.arity_errors || cfg.type_errors,
+        IssueKind::InvalidArgument { .. } | IssueKind::PossiblyInvalidArgument { .. } => {
+            cfg.arity_errors || cfg.type_errors
+        }
         IssueKind::InvalidReturnType { .. }
         | IssueKind::NullMethodCall { .. }
         | IssueKind::NullPropertyFetch { .. }
+        | IssueKind::NullArrayAccess
+        | IssueKind::NullArgument { .. }
+        | IssueKind::PossiblyNullMethodCall { .. }
+        | IssueKind::PossiblyNullPropertyFetch { .. }
+        | IssueKind::PossiblyNullArrayAccess
+        | IssueKind::PossiblyNullArgument { .. }
         | IssueKind::NullableReturnStatement { .. }
         | IssueKind::InvalidPropertyAssignment { .. }
-        | IssueKind::InvalidOperand { .. } => cfg.type_errors,
+        | IssueKind::InvalidOperand { .. }
+        | IssueKind::InvalidCast { .. }
+        | IssueKind::AbstractInstantiation { .. }
+        | IssueKind::MixedClone => cfg.type_errors,
         IssueKind::DeprecatedCall { .. }
         | IssueKind::DeprecatedMethodCall { .. }
         | IssueKind::DeprecatedMethod { .. }
         | IssueKind::DeprecatedClass { .. } => cfg.deprecated_calls,
-        IssueKind::InvalidNamedArgument { .. } => cfg.arity_errors,
         IssueKind::CircularInheritance { .. } => cfg.type_errors,
         _ => true,
     }
