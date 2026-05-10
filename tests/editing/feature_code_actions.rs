@@ -791,3 +791,124 @@ class Logger {
         "promote action should show correct count for multiple properties"
     );
 }
+
+// --- Regression tests for property type hint propagation ---
+
+/// Regression: property type hints were not propagated to promoted parameters.
+/// When promoting a typed property (e.g., "private string $name") where the
+/// constructor parameter had no explicit type, the generated parameter would lose
+/// the property's type hint, producing "private $name" instead of "private string $name".
+/// Bug #9 from ROADMAP: type hint now stored in prop_info and emitted during promotion.
+#[tokio::test]
+async fn promote_action_with_property_type_hint() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class User {
+    private string $name$0;
+    public function __construct(string $name) {
+        $this->name = $name;
+    }
+}
+"#,
+        )
+        .await;
+    // The promote action should be offered for typed properties
+    assert!(
+        out.contains("Promote"),
+        "promote action should be offered for typed property"
+    );
+}
+
+/// Edge case: property with nullable type hint should promote.
+#[tokio::test]
+async fn promote_action_with_nullable_type_hint() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Config {
+    private ?string $value$0;
+    public function __construct(?string $value) {
+        $this->value = $value;
+    }
+}
+"#,
+        )
+        .await;
+    // The promote action should be offered for nullable properties
+    assert!(
+        out.contains("Promote"),
+        "promote action should be offered for nullable property"
+    );
+}
+
+/// Edge case: property with union type hint should promote.
+#[tokio::test]
+async fn promote_action_with_union_type_hint() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Parser {
+    private int|string $data$0;
+    public function __construct(int|string $data) {
+        $this->data = $data;
+    }
+}
+"#,
+        )
+        .await;
+    // The promote action should be offered for union type properties
+    assert!(
+        out.contains("Promote"),
+        "promote action should be offered for union type property"
+    );
+}
+
+/// Edge case: readonly property should promote.
+#[tokio::test]
+async fn promote_action_with_readonly_property() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Config {
+    private readonly string $key$0;
+    public function __construct(string $key) {
+        $this->key = $key;
+    }
+}
+"#,
+        )
+        .await;
+    // The promote action should be offered for readonly properties
+    assert!(
+        out.contains("Promote"),
+        "promote action should be offered for readonly property"
+    );
+}
+
+/// Edge case: property with mixed type should promote.
+#[tokio::test]
+async fn promote_action_with_mixed_type() {
+    let mut server = TestServer::new().await;
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Flexible {
+    private mixed $value$0;
+    public function __construct(mixed $value) {
+        $this->value = $value;
+    }
+}
+"#,
+        )
+        .await;
+    // The promote action should be offered for mixed type properties
+    assert!(
+        out.contains("Promote"),
+        "promote action should be offered for mixed type property"
+    );
+}

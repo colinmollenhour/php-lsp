@@ -976,3 +976,126 @@ async fn semantic_tokens_match_expression() {
         4:15 len=7 type=string mods=0b0"#]]
     .assert_eq(&out);
 }
+
+/// Regression: foreach key/value variables were not being tokenized.
+/// Previously, collect_stmt for StmtKind::Foreach only tokenized f.expr and f.body,
+/// leaving $k and $v without TT_VARIABLE tokens.
+/// Bug #6 from ROADMAP: foreach key/value now collected.
+#[tokio::test]
+async fn semantic_tokens_foreach_key_value_variables() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "foreach.php",
+            "<?php\n$items = [1, 2, 3];\nforeach ($items as $k => $v) {\n    echo $k . $v;\n}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("foreach.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=6 type=variable mods=0b0
+        1:10 len=1 type=number mods=0b0
+        1:13 len=1 type=number mods=0b0
+        1:16 len=1 type=number mods=0b0
+        2:9 len=6 type=variable mods=0b0
+        2:19 len=2 type=variable mods=0b0
+        2:25 len=2 type=variable mods=0b0
+        3:9 len=2 type=variable mods=0b0
+        3:14 len=2 type=variable mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: foreach with only value variable (no key).
+#[tokio::test]
+async fn semantic_tokens_foreach_value_only() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "foreach_val.php",
+            "<?php\n$data = ['a', 'b'];\nforeach ($data as $item) {\n    echo $item;\n}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("foreach_val.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=5 type=variable mods=0b0
+        1:9 len=3 type=string mods=0b0
+        1:14 len=3 type=string mods=0b0
+        2:9 len=5 type=variable mods=0b0
+        2:18 len=5 type=variable mods=0b0
+        3:9 len=5 type=variable mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: nested foreach with key/value variables.
+#[tokio::test]
+async fn semantic_tokens_nested_foreach() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "nested_foreach.php",
+            "<?php\n$matrix = [[1, 2], [3, 4]];\nforeach ($matrix as $row) {\n    foreach ($row as $k => $v) {\n        echo $k . $v;\n    }\n}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("nested_foreach.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // Both $row (outer) and $k, $v (inner) must be tokenized as variables
+    assert!(out.contains("type=variable"));
+    assert!(out.matches("type=variable").count() >= 5); // $matrix, $row, $row, $k, $v, $k, $v
+}
+
+/// Edge case: foreach with reference binding should tokenize the variable.
+#[tokio::test]
+async fn semantic_tokens_foreach_with_reference() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "foreach_ref.php",
+            "<?php\n$items = [1, 2, 3];\nforeach ($items as &$item) {\n    $item *= 2;\n}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("foreach_ref.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    // $items and $item (with reference binding) should both be tokenized
+    assert!(
+        out.contains("type=variable"),
+        "Should contain variable tokens, got:\n{}",
+        out
+    );
+}

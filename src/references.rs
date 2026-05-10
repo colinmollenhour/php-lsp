@@ -67,7 +67,7 @@ pub fn find_references_with_target(
         word,
         all_docs,
         include_declaration,
-        false,
+        true,
         kind,
         Some(target_fqn),
     )
