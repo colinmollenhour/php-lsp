@@ -4,12 +4,19 @@
 //! `did_change`, workspace scan) go through the host. `Analysis` is a read-only
 //! view used by request handlers.
 
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use mir_analyzer::PhpVersion;
 use mir_analyzer::db::MirDb;
 use mir_codebase::storage::StubSlice;
 use salsa::{Database, Storage};
+
+/// One stubs-only `MirDb` per `PhpVersion`, built once per process lifetime.
+/// Cloning this is O(number of stubs), which is still far cheaper than
+/// re-parsing ~90 K lines of PHP from source on every `cached_mir_db` miss.
+static BUILTIN_STUBS: LazyLock<Mutex<HashMap<PhpVersion, MirDb>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Cache for the workspace-wide populated `MirDb`. Built once per
 /// `(slices_arc, php_version)` pair and reused across every salsa query that
@@ -56,8 +63,19 @@ impl LspDatabase for RootDatabase {
         {
             return cached_db.clone();
         }
-        let mut fresh = MirDb::default();
-        mir_analyzer::stubs::load_stubs_for_version(&mut fresh, php_version);
+
+        // Fetch (or build once) the stubs-only MirDb for this PHP version.
+        // Parsing PHP stubs from source takes ~50-200 ms; caching the result
+        // globally avoids that cost on every workspace-edit cache miss.
+        let mut stubs_cache = BUILTIN_STUBS.lock().unwrap();
+        stubs_cache.entry(php_version).or_insert_with(|| {
+            let mut stubs_db = MirDb::default();
+            mir_analyzer::stubs::load_stubs_for_version(&mut stubs_db, php_version);
+            stubs_db
+        });
+        let mut fresh = stubs_cache[&php_version].clone();
+        drop(stubs_cache);
+
         for slice in slices.iter() {
             fresh.ingest_stub_slice(slice);
         }

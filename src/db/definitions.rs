@@ -1,9 +1,8 @@
 //! `file_definitions` salsa query — runs `DefinitionCollector::collect_slice`
 //! under salsa memoization, producing a pure `StubSlice` value per file.
 //!
-//! This is Phase C step 1: the per-file Pass-1 definitions become a
-//! tracked query. Phase C step 2 will add a `codebase(Workspace)`
-//! aggregator that folds all slices via `mir_codebase::codebase_from_parts`.
+//! The `codebase(Workspace)` aggregator in `db::codebase` folds all per-file
+//! slices and ingests them via `MirDb::ingest_stub_slice`.
 
 use std::sync::Arc;
 
