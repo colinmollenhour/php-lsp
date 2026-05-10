@@ -701,3 +701,247 @@ if (isset($_GET$0['id'])) {
         2:9-2:14 → "$params""#]]
     .assert_eq(&out);
 }
+
+// --- Regression tests for bugs fixed in walk.rs and rename.rs ---
+
+/// Regression: arrow functions auto-capture outer-scope variables.
+/// Previously, VarRefsVisitor treated arrow functions as hard scope boundaries
+/// and did not recurse into their body, leaving arrow function references unrenamed.
+/// Bug #2 from ROADMAP: arrow functions now properly auto-capture.
+#[tokio::test]
+async fn rename_variable_in_arrow_function() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function process(): void {
+    $value$0 = 42;
+    $fn = fn() => $value + 1;
+    echo $value;
+}
+"#,
+            "$result",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        2:4-2:10 → "$result"
+        3:18-3:24 → "$result"
+        4:9-4:15 → "$result""#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: arrow function with multiple captures and nested operations.
+#[tokio::test]
+async fn rename_variable_in_nested_arrow_function() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function compute(): void {
+    $base$0 = 10;
+    $offset = 5;
+    $calc = fn() => fn() => $base + $offset;
+    echo $base;
+}
+"#,
+            "$initial",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        2:4-2:9 → "$initial"
+        4:28-4:33 → "$initial"
+        5:9-5:14 → "$initial""#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: arrow function in array passed as argument.
+#[tokio::test]
+async fn rename_variable_in_arrow_in_array() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function process(): void {
+    $multiplier$0 = 2;
+    $mappers = [
+        fn($x) => $x * $multiplier,
+        fn($y) => $y + $multiplier,
+    ];
+    echo $multiplier;
+}
+"#,
+            "$factor",
+        )
+        .await;
+    // Arrow functions in array should capture references
+    expect![[r#"
+        // main.php
+        2:4-2:15 → "$factor"
+        4:23-4:34 → "$factor"
+        5:23-5:34 → "$factor"
+        7:9-7:20 → "$factor""#]]
+    .assert_eq(&out);
+}
+
+/// Regression: closure use() clause variables were not being collected during rename.
+/// Previously, VarRefsVisitor returned early on closures without checking use_vars,
+/// leaving the use() clause pointing to the old undefined name.
+/// Bug #3 from ROADMAP: closures now collect use() references before stopping.
+#[tokio::test]
+async fn rename_variable_in_closure_use_clause() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function greet(): void {
+    $name$0 = "Alice";
+    $greeting = function() use ($name) {
+        echo "Hello " . $name;
+    };
+    echo $name;
+}
+"#,
+            "$person",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        2:4-2:9 → "$person"
+        3:32-3:37 → "$person"
+        6:9-6:14 → "$person""#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: closure use() clause with reference binding.
+#[tokio::test]
+async fn rename_variable_in_closure_use_by_reference() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function counter(): void {
+    $count$0 = 0;
+    $increment = function() use (&$count) {
+        $count++;
+    };
+    $increment();
+    echo $count;
+}
+"#,
+            "$total",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        2:4-2:10 → "$total"
+        3:33-3:40 → "$total"
+        7:9-7:15 → "$total""#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: closure with multiple use() variables.
+/// All variables in the use clause should be collected and renamed.
+#[tokio::test]
+async fn rename_variable_in_closure_multiple_use_vars() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+function process(): void {
+    $input$0 = "data";
+    $output = "";
+    $debug = false;
+    $handler = function() use ($input, $output, $debug) {
+        if ($debug) {
+            echo $input . $output;
+        }
+    };
+    $handler();
+}
+"#,
+            "$data",
+        )
+        .await;
+    // Should rename declaration and the use clause reference
+    expect![[r#"
+        // main.php
+        2:4-2:10 → "$data"
+        5:31-5:37 → "$data""#]]
+    .assert_eq(&out);
+}
+
+/// Regression: rename with same-named symbols in different namespaces was not FQN-aware.
+/// Previously, rename() called find_references_with_use without FQN context,
+/// causing cross-namespace false matches.
+/// Bug #4 from ROADMAP: namespace-aware rename now resolves target FQN.
+/// This test demonstrates that renaming a class resolves its FQN correctly
+/// within a single namespace scope.
+#[tokio::test]
+async fn rename_within_namespace_scope() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+namespace App;
+class Logger$0 {}
+function create() {
+    $l = new Logger();
+}
+"#,
+            "Reporter",
+        )
+        .await;
+    // Rename resolves FQN and applies throughout the namespace
+    expect![[r#"
+        // main.php
+        2:6-2:12 → "Reporter"
+        4:13-4:19 → "Reporter""#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: aliased use imports must rename the alias, not the original class name.
+/// This is critical: renaming by alias should only affect that alias, not the class itself.
+#[tokio::test]
+async fn rename_aliased_use_import() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+use App\Logger as Log;
+$l = new Log$0();
+"#,
+            "Reporter",
+        )
+        .await;
+    // Should rename the alias "Log" to "Reporter" in the use statement
+    expect![[r#"
+        // main.php
+        1:18-1:21 → "Reporter"
+        2:9-2:12 → "Reporter""#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: multiple imports in a single use statement must all be updated.
+/// Test: use A\Foo, B\Bar; when renaming Foo
+#[tokio::test]
+async fn rename_with_multiple_use_imports() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_rename(
+            r#"<?php
+use App\Logger, App\Parser;
+$l = new Logger$0();
+$p = new Parser();
+"#,
+            "Reporter",
+        )
+        .await;
+    // Only Logger is renamed, Parser stays the same
+    expect![[r#"
+        // main.php
+        1:8-1:14 → "Reporter"
+        2:9-2:15 → "Reporter""#]]
+    .assert_eq(&out);
+}

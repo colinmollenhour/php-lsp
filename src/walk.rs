@@ -86,15 +86,28 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
             StmtKind::Use(u) if self.include_use => {
                 for use_item in u.uses.iter() {
                     let fqn = use_item.name.to_string_repr().into_owned();
-                    let alias_match = use_item.alias.map(|a| a == self.word).unwrap_or(false);
-                    let last_seg = fqn.rsplit('\\').next().unwrap_or(&fqn);
-                    if alias_match || last_seg == self.word {
-                        let name_span = use_item.name.span();
-                        let offset = (fqn.len() - last_seg.len()) as u32;
-                        self.out.push(Span {
-                            start: name_span.start + offset,
-                            end: name_span.start + fqn.len() as u32,
-                        });
+                    if let Some(alias) = use_item.alias {
+                        // If there's an alias and it matches, emit the alias span (not the FQN)
+                        if alias == self.word {
+                            // Find the position of the alias in the source
+                            if let Some(offset) = str_offset(self.source, alias) {
+                                self.out.push(Span {
+                                    start: offset,
+                                    end: offset + alias.len() as u32,
+                                });
+                            }
+                        }
+                    } else {
+                        // No alias: check if the last segment of FQN matches
+                        let last_seg = fqn.rsplit('\\').next().unwrap_or(&fqn);
+                        if last_seg == self.word {
+                            let name_span = use_item.name.span();
+                            let offset = (fqn.len() - last_seg.len()) as u32;
+                            self.out.push(Span {
+                                start: name_span.start + offset,
+                                end: name_span.start + fqn.len() as u32,
+                            });
+                        }
                     }
                 }
             }

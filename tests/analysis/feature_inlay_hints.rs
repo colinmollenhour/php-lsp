@@ -344,3 +344,157 @@ async fn inlay_hints_respects_lsp_half_open_range_semantics() {
     let out = render_inlay_hints(&resp);
     expect![[r#"2:2 x:"#]].assert_eq(&out);
 }
+
+/// Regression: method hint collisions when multiple classes define methods with same name.
+/// Previously, method hints were keyed by bare method_name, so when two classes both
+/// defined process() with different signatures, the wrong hint was shown.
+/// Bug #8 from ROADMAP: method hints now keyed by "ClassName::methodName".
+#[tokio::test]
+async fn inlay_hints_method_name_collision() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"//- /caller.php
+<?php
+$processor = new DataProcessor();
+$processor->process(1, 2);
+
+//- /DataProcessor.php
+<?php
+class DataProcessor {
+    public function process(int $x, int $y): int {
+        return $x + $y;
+    }
+}
+"#,
+        )
+        .await;
+    // Should show parameter hints for DataProcessor::process
+    expect![[r#"
+        2:20 x:
+        2:23 y:"#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: two methods with same name but different parameter counts.
+#[tokio::test]
+async fn inlay_hints_method_different_signatures() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"//- /main.php
+<?php
+$filter = new TextFilter();
+$filter->apply("input", "lowercase");
+
+//- /TextFilter.php
+<?php
+class TextFilter {
+    public function apply(string $text, string $mode): string {
+        return $mode === "lowercase" ? strtolower($text) : strtoupper($text);
+    }
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:15 text:
+        2:24 mode:"#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: inherited method should show parent's parameter hints, not overridden version.
+#[tokio::test]
+async fn inlay_hints_inherited_method_parameters() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"//- /main.php
+<?php
+$child = new ChildClass();
+$child->compute(10, 20);
+
+//- /Parent.php
+<?php
+class ParentClass {
+    public function compute(int $a, int $b): int {
+        return $a + $b;
+    }
+}
+
+//- /Child.php
+<?php
+class ChildClass extends ParentClass {
+    // No override, should inherit parent's signature
+}
+"#,
+        )
+        .await;
+    // Should show parent's parameter names (int $a, int $b)
+    expect![[r#"
+        2:16 a:
+        2:20 b:"#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: static method with numeric parameters.
+#[tokio::test]
+async fn inlay_hints_static_method_with_math() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"//- /main.php
+<?php
+$result = MathHelper::add(5, 3);
+
+//- /MathHelper.php
+<?php
+class MathHelper {
+    public static function add(int $a, int $b): int {
+        return $a + $b;
+    }
+}
+"#,
+        )
+        .await;
+    // Static method hints should work the same as instance methods
+    expect![[r#"
+        1:26 a:
+        1:29 b:
+        1:31 : int"#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: abstract method inherited by concrete class.
+#[tokio::test]
+async fn inlay_hints_abstract_method_implementation() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"//- /main.php
+<?php
+$handler = new ConcreteHandler();
+$handler->process("test", 123);
+
+//- /Handler.php
+<?php
+abstract class AbstractHandler {
+    abstract public function process(string $input, int $code): void;
+}
+
+//- /ConcreteHandler.php
+<?php
+class ConcreteHandler extends AbstractHandler {
+    public function process(string $input, int $code): void {
+        // implementation
+    }
+}
+"#,
+        )
+        .await;
+    // Should show abstract method's parameter names from parent
+    expect![[r#"
+        2:18 input:
+        2:26 code:"#]]
+    .assert_eq(&out);
+}
