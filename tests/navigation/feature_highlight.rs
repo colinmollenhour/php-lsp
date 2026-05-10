@@ -39,23 +39,6 @@ $g->hello();
     .await;
 }
 
-/// Function declaration and its two call sites — all three must be highlighted.
-#[tokio::test]
-async fn highlight_function_declaration_and_calls() {
-    let mut s = TestServer::new().await;
-    s.check_highlight_annotated(
-        r#"<?php
-function r$0un(): void {}
-//       ^^^ ref
-run();
-// ^^^ ref
-run();
-// ^^^ ref
-"#,
-    )
-    .await;
-}
-
 /// Highlights of a variable used as both param and body ref inside an enum
 /// method — both occurrences are on the same line so we assert by count.
 #[tokio::test]
@@ -114,5 +97,200 @@ enum Status {
     assert!(
         lines.iter().all(|&l| l == 3),
         "outer $arg (line 1) must not appear: {lines:?}"
+    );
+}
+
+#[tokio::test]
+async fn highlight_cursor_on_string_literal_returns_empty() {
+    let mut s = TestServer::new().await;
+    let opened = s
+        .open_fixture(
+            r#"<?php
+echo 'hel$0lo';
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+    let resp = s.document_highlight(&c.path, c.line, c.character).await;
+    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
+    let result = &resp["result"];
+    if let Some(highlights) = result.as_array() {
+        assert_eq!(
+            highlights.len(),
+            0,
+            "cursor on string literal should return no highlights"
+        );
+    } else {
+        assert!(
+            result.is_null(),
+            "expected null or empty array for string literal, got: {result:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn highlight_variable_assignment_and_read_in_scope() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+function foo() {
+    $x$0 = 1;
+//  ^^ write
+    echo $x;
+//       ^^ read
+}
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn highlight_variable_does_not_cross_function_scope() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+function foo() {
+    $x$0 = 1;
+//  ^^ ref
+}
+function bar() {
+    $x = 2;
+}
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn highlight_class_name_decl_and_instantiation() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+class Fo$0o {}
+//    ^^^ ref
+$x = new Foo();
+//       ^^^ ref
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn highlight_range_spans_full_word_width() {
+    let mut s = TestServer::new().await;
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function gree$0t() {}
+greet();
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+    let resp = s.document_highlight(&c.path, c.line, c.character).await;
+    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
+    let highlights = resp["result"].as_array().expect("array");
+    assert!(!highlights.is_empty(), "should have highlights");
+    let word_len = "greet".chars().map(|ch| ch.len_utf16() as u32).sum::<u32>();
+    for highlight in highlights {
+        let start_char = highlight["range"]["start"]["character"]
+            .as_u64()
+            .unwrap_or(0) as u32;
+        let end_char = highlight["range"]["end"]["character"].as_u64().unwrap_or(0) as u32;
+        let range_len = end_char - start_char;
+        assert_eq!(
+            range_len, word_len,
+            "highlight width should match word length: {range_len} != {word_len}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn highlight_cursor_beyond_line_end_returns_empty() {
+    let mut s = TestServer::new().await;
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function greet() {}$0
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+    let resp = s.document_highlight(&c.path, c.line, c.character).await;
+    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
+    let result = &resp["result"];
+    if let Some(highlights) = result.as_array() {
+        assert_eq!(
+            highlights.len(),
+            0,
+            "cursor beyond line end should return no highlights"
+        );
+    } else {
+        assert!(
+            result.is_null(),
+            "expected null or empty array when cursor is beyond line end, got: {result:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn highlight_static_method_call() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+class Calc {
+    public static function add$0() { return 1 + 2; }
+    //                       ^^^ ref
+}
+Calc::add();
+//     ^^^ ref
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn highlight_this_variable() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+class Foo {
+    public function bar() {
+        $th$0is->baz();
+//      ^^^^^ read
+        $this->qux();
+//      ^^^^^ read
+    }
+}
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn highlight_symbol_inside_string_not_highlighted() {
+    let mut s = TestServer::new().await;
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function foo$0() {}
+foo();
+echo 'call foo here';
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+    let resp = s.document_highlight(&c.path, c.line, c.character).await;
+    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
+    let highlights = resp["result"].as_array().expect("array");
+    assert_eq!(
+        highlights.len(),
+        2,
+        "should highlight decl + call, not the string"
+    );
+    let lines = lines_of(highlights);
+    assert!(
+        !lines.contains(&3),
+        "line 3 (string literal) should not be highlighted: {lines:?}"
     );
 }

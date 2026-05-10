@@ -269,3 +269,203 @@ async fn range_formatting_entire_file_range() {
         }
     }
 }
+
+/// Newline trigger after opening brace must indent the new line.
+#[tokio::test]
+async fn on_type_formatting_newline_indents_after_open_brace() {
+    let mut server = TestServer::new().await;
+    server
+        .open("otfmt_nl1.php", "<?php\nif (true) {\n\n}")
+        .await;
+
+    let resp = server.on_type_formatting("otfmt_nl1.php", 2, 0, "\n").await;
+
+    assert!(
+        resp["error"].is_null(),
+        "onTypeFormatting error: {:?}",
+        resp
+    );
+    let edits = resp["result"]
+        .as_array()
+        .expect("newline trigger must produce edits");
+    assert_eq!(
+        edits.len(),
+        1,
+        "expected exactly one indent edit for newline after brace"
+    );
+    assert_eq!(
+        edits[0]["newText"].as_str().unwrap(),
+        "    ",
+        "newline should produce 4-space indent"
+    );
+}
+
+/// Newline trigger on an indented line copies the base indent.
+#[tokio::test]
+async fn on_type_formatting_newline_copies_base_indent() {
+    let mut server = TestServer::new().await;
+    server.open("otfmt_nl2.php", "<?php\n    $x = 1;\n").await;
+
+    let resp = server.on_type_formatting("otfmt_nl2.php", 2, 0, "\n").await;
+
+    assert!(
+        resp["error"].is_null(),
+        "onTypeFormatting error: {:?}",
+        resp
+    );
+    let edits = resp["result"]
+        .as_array()
+        .expect("newline trigger must produce edits");
+    assert_eq!(
+        edits.len(),
+        1,
+        "expected exactly one indent edit for newline"
+    );
+    assert_eq!(
+        edits[0]["newText"].as_str().unwrap(),
+        "    ",
+        "newline should copy the 4-space base indent"
+    );
+}
+
+/// Newline trigger with tab indentation (insertSpaces: false).
+#[tokio::test]
+async fn on_type_formatting_newline_uses_tabs() {
+    let mut server = TestServer::new().await;
+    server
+        .open("otfmt_nl_tabs.php", "<?php\nif (true) {\n\n}")
+        .await;
+
+    let resp = server
+        .on_type_formatting_with_options("otfmt_nl_tabs.php", 2, 0, "\n", 4, false)
+        .await;
+
+    assert!(
+        resp["error"].is_null(),
+        "onTypeFormatting error: {:?}",
+        resp
+    );
+    let edits = resp["result"]
+        .as_array()
+        .expect("newline trigger with tabs must produce edits");
+    assert_eq!(edits.len(), 1, "expected exactly one edit");
+    assert_eq!(
+        edits[0]["newText"].as_str().unwrap(),
+        "\t",
+        "newline with insertSpaces=false should produce tab indent"
+    );
+}
+
+/// Newline at top level (line 0) produces no edits.
+#[tokio::test]
+async fn on_type_formatting_newline_at_top_level_no_edit() {
+    let mut server = TestServer::new().await;
+    server.open("otfmt_nl_toplevel.php", "<?php\n").await;
+
+    let resp = server
+        .on_type_formatting("otfmt_nl_toplevel.php", 1, 0, "\n")
+        .await;
+
+    assert!(
+        resp["error"].is_null(),
+        "onTypeFormatting error: {:?}",
+        resp
+    );
+    let result = &resp["result"];
+    assert!(
+        result.is_null(),
+        "newline at top level should produce no edit; got: {:?}",
+        result
+    );
+}
+
+/// Newline when the line already has correct indent produces no edits.
+#[tokio::test]
+async fn on_type_formatting_newline_no_edit_when_already_correct() {
+    let mut server = TestServer::new().await;
+    server
+        .open("otfmt_nl_correct.php", "<?php\nif (true) {\n    ")
+        .await;
+
+    let resp = server
+        .on_type_formatting("otfmt_nl_correct.php", 2, 4, "\n")
+        .await;
+
+    assert!(
+        resp["error"].is_null(),
+        "onTypeFormatting error: {:?}",
+        resp
+    );
+    let result = &resp["result"];
+    assert!(
+        result.is_null(),
+        "no edit needed when indent is already correct; got: {:?}",
+        result
+    );
+}
+
+/// Range formatting on a code snippet that doesn't start with <?php
+/// exercises the header injection and stripping path.
+#[tokio::test]
+async fn range_formatting_non_php_tagged_snippet() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "rfmt_no_opener.php",
+            "<?php\nif (true)\n{\n    echo 'hello';\n}\n",
+        )
+        .await;
+
+    // Format lines 2-4 (the if body, without <?php header)
+    let resp = server
+        .range_formatting("rfmt_no_opener.php", 2, 0, 4, 0)
+        .await;
+
+    assert!(resp["error"].is_null(), "rangeFormatting error: {:?}", resp);
+    // Result is either null (no formatter) or edits within the range
+    match resp["result"].as_array() {
+        None => assert!(
+            resp["result"].is_null(),
+            "expected null (no formatter) or TextEdit array, got: {:?}",
+            resp["result"]
+        ),
+        Some(_edits) => {
+            // Formatter was available and produced edits
+            // We can't assert exact content since it depends on the tool, but we can verify no panic
+        }
+    }
+}
+
+/// Range formatting must not produce edits outside the requested range.
+#[tokio::test]
+async fn range_formatting_returns_no_edits_outside_requested_range() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "rfmt_bounded.php",
+            "<?php\nfunction ugly( $x ){return $x;}\nfunction pretty() { return 1; }\n",
+        )
+        .await;
+
+    // Format only line 1 (the first function)
+    let resp = server
+        .range_formatting("rfmt_bounded.php", 1, 0, 1, 37)
+        .await;
+
+    assert!(resp["error"].is_null(), "rangeFormatting error: {:?}", resp);
+    match resp["result"].as_array() {
+        None => {
+            // No formatter available
+        }
+        Some(edits) => {
+            for edit in edits {
+                let start_line = edit["range"]["start"]["line"].as_u64().unwrap_or(0);
+                let end_line = edit["range"]["end"]["line"].as_u64().unwrap_or(0);
+                assert!(
+                    start_line == 1 && end_line == 1,
+                    "all edits should be on line 1; got edit on lines {start_line}-{end_line}"
+                );
+            }
+        }
+    }
+}

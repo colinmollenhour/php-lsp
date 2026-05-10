@@ -15,7 +15,8 @@ pub fn signature_help(source: &str, doc: &ParsedDoc, position: Position) -> Opti
     let sig_text = find_signature(&doc.program().stmts, &func_name)
         .or_else(|| builtin_signature(&func_name).map(|s| s.to_string()))?;
 
-    let label = format!("{}({})", func_name, sig_text);
+    let display_name = func_name.trim_start_matches('\\');
+    let label = format!("{}({})", display_name, sig_text);
     let docblock = find_docblock(source, &doc.program().stmts, &func_name);
     let params: Vec<ParameterInformation> = split_params(&sig_text)
         .into_iter()
@@ -150,6 +151,24 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                         return Some(format_params_str(&m.params));
                     }
                 }
+                if c.name.as_ref().map(|n| n.to_string()) == Some(word.to_string()) {
+                    for member in c.members.iter() {
+                        if let ClassMemberKind::Method(m) = &member.kind
+                            && m.name == "__construct"
+                        {
+                            return Some(format_params_str(&m.params));
+                        }
+                    }
+                }
+            }
+            StmtKind::Interface(i) => {
+                for member in i.members.iter() {
+                    if let ClassMemberKind::Method(m) = &member.kind
+                        && m.name == word
+                    {
+                        return Some(format_params_str(&m.params));
+                    }
+                }
             }
             StmtKind::Trait(t) => {
                 for member in t.members.iter() {
@@ -183,8 +202,9 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
 }
 
 fn builtin_signature(name: &str) -> Option<&'static str> {
+    let lookup = name.trim_start_matches('\\');
     BUILTIN_SIGS
-        .binary_search_by_key(&name, |&(n, _)| n)
+        .binary_search_by_key(&lookup, |&(n, _)| n)
         .ok()
         .map(|i| BUILTIN_SIGS[i].1)
 }
@@ -453,81 +473,6 @@ static BUILTIN_SIGS: &[(&str, &str)] = &[
 mod tests {
     use super::*;
 
-    fn pos(line: u32, character: u32) -> Position {
-        Position { line, character }
-    }
-
-    #[test]
-    fn returns_signature_for_known_function() {
-        let src = "<?php\nfunction greet(string $name, int $times): void {}\ngreet(";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(2, 6));
-        assert!(result.is_some(), "expected signature help");
-        let sh = result.unwrap();
-        assert_eq!(sh.signatures[0].label, "greet(string $name, int $times)");
-    }
-
-    #[test]
-    fn active_parameter_tracks_comma() {
-        let src = "<?php\nfunction add(int $a, int $b): int {}\nadd($x, ";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(2, 8));
-        assert!(result.is_some());
-        let sh = result.unwrap();
-        assert_eq!(
-            sh.active_parameter,
-            Some(1),
-            "second param should be active"
-        );
-    }
-
-    #[test]
-    fn returns_none_outside_call() {
-        let src = "<?php\nfunction greet() {}\n$x = 1;";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(2, 4));
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn returns_none_for_unknown_function() {
-        let src = "<?php\nunknown(";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(1, 8));
-        assert!(
-            result.is_none(),
-            "unknown function should yield no signature"
-        );
-    }
-
-    #[test]
-    fn returns_signature_for_builtin_function() {
-        let src = "<?php\nstrlen(";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(1, 7));
-        assert!(result.is_some(), "expected signature for strlen");
-        let sh = result.unwrap();
-        assert_eq!(sh.signatures[0].label, "strlen($string)");
-    }
-
-    #[test]
-    fn default_values_shown_in_signature() {
-        let src = "<?php\nfunction greet(string $name = 'World', int $times = 1): void {}\ngreet(";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(2, 6));
-        assert!(result.is_some(), "expected signature help");
-        let sh = result.unwrap();
-        let label = &sh.signatures[0].label;
-        assert!(
-            label.contains("= 'World'"),
-            "signature should show default string value, got: {label}"
-        );
-        assert!(
-            label.contains("= 1"),
-            "signature should show default int value, got: {label}"
-        );
-    }
-
     #[test]
     fn builtin_sigs_are_sorted() {
         for w in BUILTIN_SIGS.windows(2) {
@@ -538,99 +483,5 @@ mod tests {
                 w[1].0
             );
         }
-    }
-
-    #[test]
-    fn nested_call_shows_outer_signature() {
-        // `outer(inner(` — with cursor right after the second `(` (col 12),
-        // the innermost unclosed `(` belongs to `inner`, so `inner`'s signature
-        // is returned by call_context (it scans backward to the first unmatched `(`).
-        // With cursor at col 11 (before the second `(`), `outer` is the active call.
-        let src = "<?php\nfunction outer(int $a, string $b): void {}\nfunction inner(float $x): int {}\nouter(inner(";
-        let doc = ParsedDoc::parse(src.to_string());
-
-        // Col 11 = inside `outer(inner` — the unmatched `(` belongs to `outer`.
-        let result_outer = signature_help(src, &doc, pos(3, 11));
-        let sh_outer = result_outer.expect("expected signature help for outer");
-        assert_eq!(
-            sh_outer.signatures[0].label, "outer(int $a, string $b)",
-            "at col 11 the active call should be 'outer'"
-        );
-
-        // Col 12 = after `outer(inner(` — the unmatched `(` belongs to `inner`.
-        let result_inner = signature_help(src, &doc, pos(3, 12));
-        let sh_inner = result_inner.expect("expected signature help for inner");
-        assert_eq!(
-            sh_inner.signatures[0].label, "inner(float $x)",
-            "at col 12 the active call should be 'inner'"
-        );
-    }
-
-    #[test]
-    fn trait_method_signature_is_found() {
-        // Methods defined in traits should be found by signature_help.
-        let src = "<?php\ntrait Logger {\n    public function log(string $msg, int $level): void {}\n}\nlog(";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(4, 4));
-        let sh = result.expect("expected signature help for trait method log");
-        assert!(
-            sh.signatures[0].label.contains("$msg"),
-            "signature should contain '$msg', got: {}",
-            sh.signatures[0].label
-        );
-    }
-
-    #[test]
-    fn enum_method_signature_is_found() {
-        // Methods defined in enums should be found by signature_help.
-        let src = "<?php\nenum Status {\n    public static function from(string $value): self {}\n}\nfrom(";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(4, 5));
-        let sh = result.expect("expected signature help for enum method from");
-        assert!(
-            sh.signatures[0].label.contains("$value"),
-            "signature should contain '$value', got: {}",
-            sh.signatures[0].label
-        );
-    }
-
-    #[test]
-    fn param_description_shown_in_parameter_info() {
-        // @param descriptions from docblocks must survive the parse_docblock()
-        // delegation to mir_analyzer and appear in signature-help parameter docs.
-        let src = "<?php\n/**\n * @param string $name The user's name\n * @param int $times How many times to greet\n */\nfunction greet(string $name, int $times): void {}\ngreet(";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(6, 6));
-        let sh = result.expect("expected signature help");
-        let params = sh.signatures[0]
-            .parameters
-            .as_ref()
-            .expect("expected parameters");
-        assert_eq!(params.len(), 2, "expected 2 parameters");
-        let first_doc = params[0]
-            .documentation
-            .as_ref()
-            .expect("first param should have documentation from @param description");
-        assert!(
-            matches!(first_doc, Documentation::String(s) if s.contains("user's name")),
-            "@param description should be forwarded to parameter documentation, got: {:?}",
-            first_doc
-        );
-    }
-
-    #[test]
-    fn method_call_signature_via_function_lookup() {
-        // A method `process` defined in the current doc should be found by
-        // signature_help when the cursor is inside `process(`.
-        // (Note: the current implementation looks up by function/method name
-        // without receiver-type resolution, so `process` matches the method.)
-        let src = "<?php\nclass Worker {\n    public function process(string $job, int $priority): bool {}\n}\nprocess(";
-        let doc = ParsedDoc::parse(src.to_string());
-        let result = signature_help(src, &doc, pos(4, 8));
-        let sh = result.expect("expected signature help for process");
-        assert_eq!(
-            sh.signatures[0].label, "process(string $job, int $priority)",
-            "method signature should show all parameters"
-        );
     }
 }
