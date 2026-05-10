@@ -114,3 +114,180 @@ ping($0);
         .await;
     expect!["▶ ping()"].assert_eq(&out);
 }
+
+#[tokio::test]
+async fn signature_help_outside_call_returns_no_signature() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+function greet(string $name): string { return $name; }
+$x = 1$0;
+"#,
+        )
+        .await;
+    expect!["<no signature>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_unknown_function_returns_no_signature() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+unknown($0);
+"#,
+        )
+        .await;
+    expect!["<no signature>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_builtin_strlen() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+strlen($0);
+"#,
+        )
+        .await;
+    expect!["▶ strlen($string)  @param0"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_default_param_values_shown() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+function greet(string $name = 'World', int $count = 1): string { return $name; }
+greet($0);
+"#,
+        )
+        .await;
+    expect!["▶ greet(string $name = 'World', int $count = 1)  @param0"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_nested_call_outer() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+function inner(int $x): int { return $x; }
+function outer(int $a, int $b): void {}
+outer(inner(1), $0);
+"#,
+        )
+        .await;
+    expect!["▶ outer(int $a, int $b)  @param1"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_trait_method() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+trait Logger {
+    public function log(string $msg, int $level): void {}
+}
+log($0);
+"#,
+        )
+        .await;
+    expect!["▶ log(string $msg, int $level)  @param0"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_enum_method() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+enum Status {
+    public static function from(string $value): self {}
+}
+from($0);
+"#,
+        )
+        .await;
+    expect!["▶ from(string $value)  @param0"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_param_doc_from_docblock() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+/**
+ * @param string $name The user's name
+ * @param int $times How many times to greet
+ */
+function greet(string $name, int $times): void {}
+greet($0);
+"#,
+        )
+        .await;
+    expect!["▶ greet(string $name, int $times)  @param0"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_interface_method() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+interface Logger {
+    public function log(string $msg, int $level): void;
+}
+log($0);
+"#,
+        )
+        .await;
+    expect!["▶ log(string $msg, int $level)  @param0"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_fqn_builtin_call() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+\strlen($0);
+"#,
+        )
+        .await;
+    expect!["▶ strlen($string)  @param0"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_constructor_new_expression() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+class Greeter {
+    public function __construct(string $name, int $times = 1) {}
+}
+new Greeter($0);
+"#,
+        )
+        .await;
+    expect!["▶ Greeter(string $name, int $times = 1)  @param0"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn signature_help_builtin_variadic_sprintf() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"<?php
+sprintf('%d %s %d', 1, 'x', $0);
+"#,
+        )
+        .await;
+    expect!["▶ sprintf($format, ...$values)  @param1"].assert_eq(&out);
+}

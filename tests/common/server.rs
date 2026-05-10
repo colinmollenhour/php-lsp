@@ -782,6 +782,19 @@ impl TestServer {
         character: u32,
         ch: &str,
     ) -> Value {
+        self.on_type_formatting_with_options(path, line, character, ch, 4, true)
+            .await
+    }
+
+    pub async fn on_type_formatting_with_options(
+        &mut self,
+        path: &str,
+        line: u32,
+        character: u32,
+        ch: &str,
+        tab_size: u32,
+        insert_spaces: bool,
+    ) -> Value {
         let uri = self.uri(path);
         self.client
             .request(
@@ -790,7 +803,7 @@ impl TestServer {
                     "textDocument": { "uri": uri },
                     "position": { "line": line, "character": character },
                     "ch": ch,
-                    "options": { "tabSize": 4, "insertSpaces": true },
+                    "options": { "tabSize": tab_size, "insertSpaces": insert_spaces },
                 }),
             )
             .await
