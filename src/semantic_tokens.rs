@@ -526,6 +526,10 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
         }
         StmtKind::Foreach(f) => {
             collect_expr(sv, &f.expr, out);
+            if let Some(key) = &f.key {
+                collect_expr(sv, key, out);
+            }
+            collect_expr(sv, &f.value, out);
             collect_stmt(sv, f.body, out);
         }
         StmtKind::TryCatch(t) => {

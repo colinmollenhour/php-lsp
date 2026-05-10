@@ -54,6 +54,8 @@ struct Promotion {
     visibility: &'static str,
     /// Whether to also insert `readonly `.
     is_readonly: bool,
+    /// Property type hint string (e.g., "string", "?int").
+    type_hint: Option<String>,
     /// Assignment statement span — used to remove the whole line.
     assign_span_start: u32,
     assign_span_end: u32,
@@ -98,9 +100,10 @@ fn collect_promote<'a>(
                     None => continue,
                 };
 
-                // Build a map from property name -> (member span start, member span end, visibility, is_readonly)
+                // Build a map from property name -> (member span start, member span end, visibility, is_readonly, type_hint)
                 // Only include non-static properties that have a visibility modifier.
-                let mut prop_info: HashMap<String, (u32, u32, &'static str, bool)> = HashMap::new();
+                let mut prop_info: HashMap<String, (u32, u32, &'static str, bool, Option<String>)> =
+                    HashMap::new();
                 for member in c.members.iter() {
                     if let ClassMemberKind::Property(p) = &member.kind
                         && !p.is_static
@@ -111,9 +114,19 @@ fn collect_promote<'a>(
                             Some(Visibility::Protected) => "protected",
                             _ => "public",
                         };
+                        let type_hint = p
+                            .type_hint
+                            .as_ref()
+                            .map(|t| crate::ast::format_type_hint(t));
                         prop_info.insert(
                             p.name.to_string(),
-                            (member.span.start, member.span.end, vis, p.is_readonly),
+                            (
+                                member.span.start,
+                                member.span.end,
+                                vis,
+                                p.is_readonly,
+                                type_hint,
+                            ),
                         );
                     }
                 }
@@ -136,9 +149,9 @@ fn collect_promote<'a>(
                     let param_name = param.name;
 
                     // Check if there's a matching property.
-                    let (prop_start, prop_end, vis, is_readonly) =
+                    let (prop_start, prop_end, vis, is_readonly, type_hint) =
                         match prop_info.get(param_name.to_string().as_str()) {
-                            Some(info) => *info,
+                            Some(info) => info.clone(),
                             None => continue,
                         };
 
@@ -156,6 +169,7 @@ fn collect_promote<'a>(
                         param_span_start: param.span.start,
                         visibility: vis,
                         is_readonly,
+                        type_hint,
                         assign_span_start: assign_start,
                         assign_span_end: assign_end,
                     });
@@ -230,12 +244,13 @@ fn build_action(
             new_text: String::new(),
         });
 
-        // 2. Insert `visibility ` (and optionally `readonly `) before the param.
+        // 2. Insert `visibility [type_hint] [readonly] ` before the param.
         let insert_pos = sv.position_of(p.param_span_start);
-        let prefix = if p.is_readonly {
-            format!("{} readonly ", p.visibility)
-        } else {
-            format!("{} ", p.visibility)
+        let prefix = match (&p.type_hint, p.is_readonly) {
+            (Some(th), true) => format!("{} {} readonly ", p.visibility, th),
+            (Some(th), false) => format!("{} {} ", p.visibility, th),
+            (None, true) => format!("{} readonly ", p.visibility),
+            (None, false) => format!("{} ", p.visibility),
         };
         edits.push(TextEdit {
             range: Range {

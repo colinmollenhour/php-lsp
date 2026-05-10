@@ -411,6 +411,11 @@ impl<'arena, 'src> Visitor<'arena, 'src> for CallCollector<'_> {
                     self.out.push((name.to_string(), s.method.span));
                 }
             }
+            ExprKind::New(n) => {
+                if let ExprKind::Identifier(class_name) = &n.class.kind {
+                    self.out.push((class_name.to_string(), n.class.span));
+                }
+            }
             _ => {}
         }
         walk_expr(self, expr)

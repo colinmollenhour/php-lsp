@@ -1333,7 +1333,17 @@ impl LanguageServer for Backend {
             Ok(Some(rename_property(&word, &params.new_name, &all_docs)))
         } else {
             let all_docs = self.docs.all_docs_for_scan();
-            Ok(Some(rename(&word, &params.new_name, &all_docs)))
+            let doc_opt = self.get_doc(uri);
+            let target_fqn: Option<String> = doc_opt.as_ref().map(|doc| {
+                let imports = self.file_imports(uri);
+                crate::moniker::resolve_fqn(doc, &word, &imports)
+            });
+            Ok(Some(rename(
+                &word,
+                &params.new_name,
+                &all_docs,
+                target_fqn.as_deref(),
+            )))
         }
     }
 
