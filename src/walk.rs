@@ -186,8 +186,18 @@ impl<'arena, 'src> Visitor<'arena, 'src> for VarRefsVisitor<'_> {
                 }
                 ControlFlow::Continue(())
             }
-            // Stop at expression-level scope boundaries.
-            ExprKind::Closure(_) | ExprKind::ArrowFunction(_) => ControlFlow::Continue(()),
+            // Closures are scope boundaries, but arrow functions auto-capture outer variables.
+            ExprKind::Closure(c) => {
+                // Before stopping, collect variables from the closure's use($x) clause.
+                for use_var in c.use_vars.iter() {
+                    if use_var.name == self.var_name {
+                        self.out.push(use_var.span);
+                    }
+                }
+                ControlFlow::Continue(())
+            }
+            // Arrow functions auto-capture and should be traversed.
+            ExprKind::ArrowFunction(_) => walk_expr(self, expr),
             _ => walk_expr(self, expr),
         }
     }

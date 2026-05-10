@@ -475,7 +475,19 @@ pub fn hover_at(
             } else if class_name == "parent" {
                 // Find the enclosing class, then its parent
                 crate::type_map::enclosing_class_at(source, doc, position)
-                    .and_then(|enc| find_parent_class_name(&doc.program().stmts, &enc))
+                    .and_then(|enc| {
+                        find_parent_class_name(&doc.program().stmts, &enc).or_else(|| {
+                            // Fallback: search other documents if not found in current doc
+                            for (_, other_doc, _) in other_docs.iter() {
+                                if let Some(parent) =
+                                    find_parent_class_name(&other_doc.program().stmts, &enc)
+                                {
+                                    return Some(parent);
+                                }
+                            }
+                            None
+                        })
+                    })
                     .unwrap_or(class_name.clone())
             } else {
                 class_name.clone()

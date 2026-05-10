@@ -10,8 +10,18 @@ use crate::walk::{collect_var_refs_in_scope, property_refs_in_stmts};
 
 /// Compute a WorkspaceEdit that renames every occurrence of `word` to `new_name`
 /// across all open documents (including the declaration site).
-pub fn rename(word: &str, new_name: &str, all_docs: &[(Url, Arc<ParsedDoc>)]) -> WorkspaceEdit {
-    let locations = find_references_with_use(word, all_docs, true);
+pub fn rename(
+    word: &str,
+    new_name: &str,
+    all_docs: &[(Url, Arc<ParsedDoc>)],
+    target_fqn: Option<&str>,
+) -> WorkspaceEdit {
+    use crate::references::find_references_with_target;
+
+    let locations = match target_fqn {
+        Some(fqn) => find_references_with_target(word, all_docs, true, None, fqn),
+        None => find_references_with_use(word, all_docs, true),
+    };
 
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     for loc in locations {

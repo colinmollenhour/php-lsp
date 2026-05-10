@@ -11,6 +11,7 @@ use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint};
 use crate::file_index::FileIndex;
 use crate::type_map::TypeMap;
 
+#[derive(Clone)]
 struct FuncDef {
     params: Vec<String>,
     /// Whether the last parameter is variadic (`...$name`).
@@ -82,29 +83,28 @@ fn collect_defs_from_workspace(
         for class in &idx.classes {
             for method in &class.methods {
                 let method_name = method.name.to_string();
-                if map.contains_key(&method_name) {
-                    continue;
-                }
                 let params: Vec<String> =
                     method.params.iter().map(|p| p.name.to_string()).collect();
                 let variadic_last = method.params.last().map(|p| p.variadic).unwrap_or(false);
+                let func_def = FuncDef {
+                    params: params.clone(),
+                    variadic_last,
+                    return_type: method.return_type.as_ref().map(|r| r.to_string()),
+                };
+                // Register with qualified key "ClassName::methodName" for unambiguous lookup
+                let cn = class.name.as_ref();
+                let qualified = format!("{}::{}", cn, method_name);
+                map.insert(qualified, func_def.clone());
                 // Also register __construct under the class name so `new ClassName(...)` gets hints.
                 if method_name == "__construct" {
-                    map.entry(class.name.to_string())
-                        .or_insert_with(|| FuncDef {
-                            params: params.clone(),
-                            variadic_last,
-                            return_type: None,
-                        });
-                }
-                map.insert(
-                    method_name,
-                    FuncDef {
-                        params,
+                    map.entry(cn.to_string()).or_insert_with(|| FuncDef {
+                        params: params.clone(),
                         variadic_last,
-                        return_type: method.return_type.as_ref().map(|r| r.to_string()),
-                    },
-                );
+                        return_type: None,
+                    });
+                }
+                // Register with short name as fallback for backwards compatibility
+                map.entry(method_name).or_insert(func_def);
             }
         }
     }
@@ -137,6 +137,16 @@ fn collect_defs_stmts(stmts: &[Stmt<'_, '_>], map: &mut HashMap<String, FuncDef>
                     if let ClassMemberKind::Method(m) = &member.kind {
                         let (params, variadic_last) = params_from_list(&m.params);
                         let return_type = m.return_type.as_ref().map(|t| format_type_hint(t));
+                        let func_def = FuncDef {
+                            params: params.clone(),
+                            variadic_last,
+                            return_type: return_type.clone(),
+                        };
+                        // Register with qualified key "ClassName::methodName" for unambiguous lookup
+                        if let Some(cn) = c.name {
+                            let qualified = format!("{}::{}", cn, m.name);
+                            map.insert(qualified, func_def.clone());
+                        }
                         // Register __construct under the class name so `new ClassName(...)` gets hints.
                         if m.name == "__construct"
                             && let Some(class_name) = c.name
@@ -150,14 +160,7 @@ fn collect_defs_stmts(stmts: &[Stmt<'_, '_>], map: &mut HashMap<String, FuncDef>
                                 },
                             );
                         }
-                        map.insert(
-                            m.name.to_string(),
-                            FuncDef {
-                                params,
-                                variadic_last,
-                                return_type,
-                            },
-                        );
+                        map.insert(m.name.to_string(), func_def);
                     }
                 }
             }
@@ -166,14 +169,15 @@ fn collect_defs_stmts(stmts: &[Stmt<'_, '_>], map: &mut HashMap<String, FuncDef>
                     if let ClassMemberKind::Method(m) = &member.kind {
                         let (params, variadic_last) = params_from_list(&m.params);
                         let return_type = m.return_type.as_ref().map(|t| format_type_hint(t));
-                        map.insert(
-                            m.name.to_string(),
-                            FuncDef {
-                                params,
-                                variadic_last,
-                                return_type,
-                            },
-                        );
+                        let func_def = FuncDef {
+                            params,
+                            variadic_last,
+                            return_type,
+                        };
+                        // Register with qualified key for unambiguous lookup
+                        let qualified = format!("{}::{}", t.name, m.name);
+                        map.insert(qualified, func_def.clone());
+                        map.insert(m.name.to_string(), func_def);
                     }
                 }
             }
@@ -182,14 +186,15 @@ fn collect_defs_stmts(stmts: &[Stmt<'_, '_>], map: &mut HashMap<String, FuncDef>
                     if let EnumMemberKind::Method(m) = &member.kind {
                         let (params, variadic_last) = params_from_list(&m.params);
                         let return_type = m.return_type.as_ref().map(|t| format_type_hint(t));
-                        map.insert(
-                            m.name.to_string(),
-                            FuncDef {
-                                params,
-                                variadic_last,
-                                return_type,
-                            },
-                        );
+                        let func_def = FuncDef {
+                            params,
+                            variadic_last,
+                            return_type,
+                        };
+                        // Register with qualified key for unambiguous lookup
+                        let qualified = format!("{}::{}", e.name, m.name);
+                        map.insert(qualified, func_def.clone());
+                        map.insert(m.name.to_string(), func_def);
                     }
                 }
             }
