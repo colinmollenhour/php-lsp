@@ -128,16 +128,14 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
                     });
                 }
             }
-            ClassMemberKind::ClassConst(cc) => {
-                if cc.name == self.word {
-                    let name_str = cc.name.to_string();
-                    let start = str_offset_in_range(self.source, member.span, &name_str)
-                        .unwrap_or_else(|| str_offset(self.source, &name_str).unwrap_or(0));
-                    self.out.push(Span {
-                        start,
-                        end: start + name_str.len() as u32,
-                    });
-                }
+            ClassMemberKind::ClassConst(cc) if cc.name == self.word => {
+                let name_str = cc.name.to_string();
+                let start = str_offset_in_range(self.source, member.span, &name_str)
+                    .unwrap_or_else(|| str_offset(self.source, &name_str).unwrap_or(0));
+                self.out.push(Span {
+                    start,
+                    end: start + name_str.len() as u32,
+                });
             }
             _ => {}
         }
@@ -588,10 +586,8 @@ impl<'arena, 'src> Visitor<'arena, 'src> for MethodRefsVisitor<'_> {
                     self.out.push(m.method.span);
                 }
             }
-            ExprKind::StaticMethodCall(s) => {
-                if s.method.name_str() == Some(self.name) {
-                    self.out.push(s.method.span);
-                }
+            ExprKind::StaticMethodCall(s) if s.method.name_str() == Some(self.name) => {
+                self.out.push(s.method.span);
             }
             _ => {}
         }

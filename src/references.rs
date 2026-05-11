@@ -495,14 +495,12 @@ fn collect_declaration_spans(
 
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Function(f) => {
-                if want_free && f.name == word {
-                    out.push(declaration_name_span(
-                        source,
-                        &f.name.to_string(),
-                        stmt.span,
-                    ));
-                }
+            StmtKind::Function(f) if want_free && f.name == word => {
+                out.push(declaration_name_span(
+                    source,
+                    &f.name.to_string(),
+                    stmt.span,
+                ));
             }
             StmtKind::Class(c) => {
                 if want_type
