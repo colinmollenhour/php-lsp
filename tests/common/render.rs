@@ -1047,45 +1047,72 @@ pub(crate) fn assert_highlights_match(
         panic!("{label} request errored: {err}");
     }
     let locs = resp["result"].as_array().cloned().unwrap_or_default();
-    let actual: Vec<(u32, u32, u32, u32)> = locs
+    let actual: Vec<(u32, u32, u32, u32, Option<u32>)> = locs
         .iter()
         .map(|l| {
             let r = &l["range"];
+            let kind = l["kind"].as_u64().map(|k| k as u32);
             (
                 r["start"]["line"].as_u64().unwrap_or(0) as u32,
                 r["start"]["character"].as_u64().unwrap_or(0) as u32,
                 r["end"]["line"].as_u64().unwrap_or(0) as u32,
                 r["end"]["character"].as_u64().unwrap_or(0) as u32,
+                kind,
             )
         })
         .collect();
-    let expected_ranges: Vec<(u32, u32, u32, u32)> = expected
+    let expected_with_tags: Vec<_> = expected
         .iter()
         .filter(|(p, _, _)| p == cursor_path)
-        .map(|(_, r, _)| *r)
         .collect();
     let mut matched = vec![false; actual.len()];
     let mut missing = Vec::new();
-    for er in &expected_ranges {
+    let mut kind_mismatches = Vec::new();
+    for (ep, er, tag) in &expected_with_tags {
         let hit = actual
             .iter()
             .enumerate()
-            .position(|(i, ar)| !matched[i] && ranges_overlap_same_line(er, ar));
+            .position(|(i, (al, ac, el, ec, _))| {
+                !matched[i] && ranges_overlap_same_line(er, &(*al, *ac, *el, *ec))
+            });
         match hit {
-            Some(i) => matched[i] = true,
-            None => missing.push(*er),
+            Some(i) => {
+                matched[i] = true;
+                // Validate kind if the tag is "read" or "write"
+                let expected_kind = match tag.as_str() {
+                    "read" => Some(2),  // DocumentHighlightKind::READ
+                    "write" => Some(3), // DocumentHighlightKind::WRITE
+                    _ => None,          // "ref" or other tags don't enforce kind
+                };
+                if let Some(ek) = expected_kind {
+                    if actual[i].4 != Some(ek) {
+                        kind_mismatches.push((
+                            format!("{ep}:{:?}", er),
+                            tag.clone(),
+                            expected_kind,
+                            actual[i].4,
+                        ));
+                    }
+                }
+            }
+            None => missing.push((ep.clone(), *er, tag.clone())),
         }
     }
     let extras: Vec<_> = actual
         .iter()
         .enumerate()
         .filter(|(i, _)| !matched[*i])
-        .map(|(_, v)| *v)
+        .map(|(_, (l, c, el, ec, _))| (*l, *c, *el, *ec))
         .collect();
-    if !missing.is_empty() || !extras.is_empty() {
-        panic!(
-            "{label} mismatch\nexpected (missing): {missing:#?}\nactual (unmatched): {extras:#?}\nfull: {resp}"
+    if !missing.is_empty() || !extras.is_empty() || !kind_mismatches.is_empty() {
+        let mut msg = format!(
+            "{label} mismatch\nexpected (missing): {missing:#?}\nactual (unmatched): {extras:#?}"
         );
+        if !kind_mismatches.is_empty() {
+            msg.push_str(&format!("\nkind mismatches: {kind_mismatches:#?}"));
+        }
+        msg.push_str(&format!("\nfull: {resp}"));
+        panic!("{msg}");
     }
 }
 

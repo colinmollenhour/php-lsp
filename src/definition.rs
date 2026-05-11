@@ -36,7 +36,7 @@ pub fn goto_definition(
         let byte_off = sv.byte_of_position(position) as usize;
         let mut spans = Vec::new();
         collect_var_refs_in_scope(&doc.program().stmts, bare, byte_off, &mut spans);
-        if let Some(span) = spans.into_iter().min_by_key(|s| s.start) {
+        if let Some((span, _)) = spans.into_iter().min_by_key(|(s, _)| s.start) {
             return Some(Location {
                 uri: uri.clone(),
                 range: Range {

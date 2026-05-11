@@ -194,7 +194,7 @@ pub fn rename_variable(
     let mut seen = std::collections::HashSet::new();
     let mut edits: Vec<TextEdit> = spans
         .into_iter()
-        .filter_map(|span| {
+        .filter_map(|(span, _)| {
             let start = sv.position_of(span.start);
             let end = sv.position_of(span.end);
             seen.insert((start.line, start.character))
