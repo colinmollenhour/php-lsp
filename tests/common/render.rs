@@ -488,7 +488,6 @@ pub(crate) fn render_folding_ranges(resp: &Value) -> String {
 /// Verify the LSP-spec invariant: for every chain in a
 /// `textDocument/selectionRange` response, every parent range fully
 /// contains its child. Panics with a descriptive message otherwise.
-#[track_caller]
 pub fn assert_selection_range_invariant(resp: &Value) {
     let Some(arr) = resp["result"].as_array() else {
         return;
@@ -565,7 +564,6 @@ pub(crate) fn render_selection_range(resp: &Value) -> String {
 /// must cover the *same text*, since linked-mode typing replicates one
 /// edit across all of them. This re-extracts each range's content from
 /// `source` and asserts they all match.
-#[track_caller]
 pub fn assert_linked_editing_ranges_share_text(resp: &Value, source: &str) {
     let result = &resp["result"];
     if result.is_null() {
@@ -934,7 +932,6 @@ pub(crate) fn collect_navigation_annotations(
     out
 }
 
-#[track_caller]
 pub(crate) fn assert_locations_match(
     resp: &Value,
     expected: &[(String, (u32, u32, u32, u32), String)],
@@ -1036,7 +1033,6 @@ fn ranges_overlap_same_line(
     }
 }
 
-#[track_caller]
 pub(crate) fn assert_highlights_match(
     resp: &Value,
     expected: &[(String, (u32, u32, u32, u32), String)],

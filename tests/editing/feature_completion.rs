@@ -642,7 +642,7 @@ greet(na$0
     let c = opened.cursor();
 
     let comp = server.completion(&c.path, c.line, c.character).await;
-    let items: Vec<_> = match &comp["result"] {
+    let _items: Vec<_> = match &comp["result"] {
         v if v.is_array() => v.as_array().unwrap().to_vec(),
         v if v["items"].is_array() => v["items"].as_array().unwrap().to_vec(),
         _ => vec![],
