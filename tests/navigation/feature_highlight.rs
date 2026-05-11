@@ -151,10 +151,28 @@ async fn highlight_variable_does_not_cross_function_scope() {
         r#"<?php
 function foo() {
     $x$0 = 1;
-//  ^^ ref
+//  ^^ write
 }
 function bar() {
     $x = 2;
+}
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn highlight_variable_compound_assignment() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+function foo() {
+    $x$0 = 1;
+//  ^^ write
+    $x .= '!';
+//  ^^ write
+    echo $x;
+//       ^^ read
 }
 "#,
     )
@@ -247,6 +265,143 @@ Calc::add();
 "#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn highlight_class_constant_decl_and_reference() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+class Foo {
+    const BA$0R = 1;
+    //    ^^^ ref
+}
+echo Foo::BAR;
+//        ^^^ ref
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn highlight_variable_increment_operators() {
+    let mut s = TestServer::new().await;
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function foo() {
+    $x$0++;
+    ++$x;
+    --$x;
+    $x--;
+}
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+    let resp = s.document_highlight(&c.path, c.line, c.character).await;
+    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
+    let highlights = resp["result"].as_array().expect("array");
+    assert_eq!(
+        highlights.len(),
+        4,
+        "expected 4 highlights (all increment/decrement positions): {highlights:?}"
+    );
+}
+
+#[tokio::test]
+async fn highlight_foreach_key_binding_and_use() {
+    let mut s = TestServer::new().await;
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function foo($arr) {
+    foreach ($arr as $k$0ey => $value) {
+        echo $key;
+    }
+}
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+    let resp = s.document_highlight(&c.path, c.line, c.character).await;
+    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
+    let highlights = resp["result"].as_array().expect("array");
+    assert_eq!(
+        highlights.len(),
+        2,
+        "expected 2 highlights (binding + usage): {highlights:?}"
+    );
+}
+
+#[tokio::test]
+async fn highlight_foreach_value_binding_and_use() {
+    let mut s = TestServer::new().await;
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function foo($arr) {
+    foreach ($arr as $v$0alue) {
+        echo $value;
+    }
+}
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+    let resp = s.document_highlight(&c.path, c.line, c.character).await;
+    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
+    let highlights = resp["result"].as_array().expect("array");
+    assert_eq!(
+        highlights.len(),
+        2,
+        "expected 2 highlights (binding + usage): {highlights:?}"
+    );
+}
+
+#[tokio::test]
+async fn highlight_function_parameter() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+function foo($n$0ame) {
+//              ^^^^ write
+    echo $name;
+//       ^^^^^ read
+}
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn highlight_class_constant_multiple_refs() {
+    let mut s = TestServer::new().await;
+    let opened = s
+        .open_fixture(
+            r#"<?php
+class Status {
+    const AC$0TIVE = 1;
+    const INACTIVE = 0;
+
+    public function check() {
+        if ($this->value === Status::ACTIVE) {
+            return Status::ACTIVE;
+        }
+    }
+}
+"#,
+        )
+        .await;
+    let c = opened.cursor();
+    let resp = s.document_highlight(&c.path, c.line, c.character).await;
+    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
+    let highlights = resp["result"].as_array().expect("array");
+    assert_eq!(
+        highlights.len(),
+        3,
+        "expected 3 highlights (decl + 2 refs): {highlights:?}"
+    );
 }
 
 #[tokio::test]

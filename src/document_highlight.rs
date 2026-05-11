@@ -19,13 +19,27 @@ pub fn document_highlights(
     };
 
     let word_utf16_len: u32 = word.chars().map(|c| c.len_utf16() as u32).sum();
-    let mut spans = Vec::new();
     let sv = doc.view();
 
     if word.starts_with('$') {
         let bare = word.trim_start_matches('$');
         let byte_off = sv.byte_of_position(position) as usize;
-        collect_var_refs_in_scope(&doc.program().stmts, bare, byte_off, &mut spans);
+        let mut var_spans = Vec::new();
+        collect_var_refs_in_scope(&doc.program().stmts, bare, byte_off, &mut var_spans);
+        var_spans
+            .into_iter()
+            .map(|(span, kind)| {
+                let start = sv.position_of(span.start);
+                let end = Position {
+                    line: start.line,
+                    character: start.character + word_utf16_len,
+                };
+                DocumentHighlight {
+                    range: Range { start, end },
+                    kind: Some(kind),
+                }
+            })
+            .collect()
     } else {
         // Use `doc.source()` (the string the AST was parsed from), not the
         // caller's `source`. `refs_in_stmts` resolves AST name slices via
@@ -34,20 +48,21 @@ pub fn document_highlights(
         // search that returns the *first* textual occurrence — including
         // hits inside comments and string literals — instead of the actual
         // AST node location.
+        let mut spans = Vec::new();
         refs_in_stmts(doc.source(), &doc.program().stmts, &word, &mut spans);
+        spans
+            .into_iter()
+            .map(|span| {
+                let start = sv.position_of(span.start);
+                let end = Position {
+                    line: start.line,
+                    character: start.character + word_utf16_len,
+                };
+                DocumentHighlight {
+                    range: Range { start, end },
+                    kind: Some(DocumentHighlightKind::TEXT),
+                }
+            })
+            .collect()
     }
-    spans
-        .into_iter()
-        .map(|span| {
-            let start = sv.position_of(span.start);
-            let end = Position {
-                line: start.line,
-                character: start.character + word_utf16_len,
-            };
-            DocumentHighlight {
-                range: Range { start, end },
-                kind: Some(DocumentHighlightKind::TEXT),
-            }
-        })
-        .collect()
 }

@@ -4,12 +4,13 @@ use std::ops::ControlFlow;
 
 use php_ast::{
     CatchClause, ClassMember, ClassMemberKind, EnumMember, EnumMemberKind, Expr, ExprKind, Name,
-    NamespaceBody, Span, Stmt, StmtKind, TypeHint, TypeHintKind,
+    NamespaceBody, Span, Stmt, StmtKind, TypeHint, TypeHintKind, UnaryPostfixOp, UnaryPrefixOp,
     visitor::{
         Visitor, walk_catch_clause, walk_class_member, walk_enum_member, walk_expr, walk_stmt,
         walk_type_hint,
     },
 };
+use tower_lsp::lsp_types::DocumentHighlightKind;
 
 use crate::ast::{str_offset, str_offset_in_range};
 
@@ -117,16 +118,28 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
     }
 
     fn visit_class_member(&mut self, member: &ClassMember<'arena, 'src>) -> ControlFlow<()> {
-        if let ClassMemberKind::Method(m) = &member.kind {
-            // For class members, we don't have a statement span, so we'll search the entire source
-            // This is used during general reference walking and will be deduplicated if needed
-            let start = str_offset(self.source, &m.name.to_string()).unwrap_or(0);
-            if m.name == self.word {
-                self.out.push(Span {
-                    start,
-                    end: start + m.name.to_string().len() as u32,
-                });
+        match &member.kind {
+            ClassMemberKind::Method(m) => {
+                let start = str_offset(self.source, &m.name.to_string()).unwrap_or(0);
+                if m.name == self.word {
+                    self.out.push(Span {
+                        start,
+                        end: start + m.name.to_string().len() as u32,
+                    });
+                }
             }
+            ClassMemberKind::ClassConst(cc) => {
+                if cc.name == self.word {
+                    let name_str = cc.name.to_string();
+                    let start = str_offset_in_range(self.source, member.span, &name_str)
+                        .unwrap_or_else(|| str_offset(self.source, &name_str).unwrap_or(0));
+                    self.out.push(Span {
+                        start,
+                        end: start + name_str.len() as u32,
+                    });
+                }
+            }
+            _ => {}
         }
         walk_class_member(self, member)
     }
@@ -161,7 +174,11 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
 /// `ExprKind::Variable` within `stmts`. Stops at nested function/closure/arrow-function
 /// scope boundaries so that `$x` in an inner function is not conflated with `$x` in
 /// the outer function.
-pub fn var_refs_in_stmts(stmts: &[Stmt<'_, '_>], var_name: &str, out: &mut Vec<Span>) {
+pub fn var_refs_in_stmts(
+    stmts: &[Stmt<'_, '_>],
+    var_name: &str,
+    out: &mut Vec<(Span, DocumentHighlightKind)>,
+) {
     let mut v = VarRefsVisitor {
         var_name,
         out: Vec::new(),
@@ -174,7 +191,7 @@ pub fn var_refs_in_stmts(stmts: &[Stmt<'_, '_>], var_name: &str, out: &mut Vec<S
 
 struct VarRefsVisitor<'a> {
     var_name: &'a str,
-    out: Vec<Span>,
+    out: Vec<(Span, DocumentHighlightKind)>,
 }
 
 impl<'arena, 'src> Visitor<'arena, 'src> for VarRefsVisitor<'_> {
@@ -186,6 +203,24 @@ impl<'arena, 'src> Visitor<'arena, 'src> for VarRefsVisitor<'_> {
             | StmtKind::Trait(_)
             | StmtKind::Enum(_)
             | StmtKind::Interface(_) => ControlFlow::Continue(()),
+            StmtKind::Foreach(f) => {
+                // foreach key/value are write positions (being assigned)
+                if let Some(key) = &f.key
+                    && let ExprKind::Variable(name) = &key.kind
+                    && name.as_str() == self.var_name
+                {
+                    self.out.push((key.span, DocumentHighlightKind::WRITE));
+                }
+                if let ExprKind::Variable(name) = &f.value.kind
+                    && name.as_str() == self.var_name
+                {
+                    self.out.push((f.value.span, DocumentHighlightKind::WRITE));
+                }
+                // Walk the rest of the foreach
+                let _ = self.visit_expr(&f.expr);
+                let _ = self.visit_stmt(f.body);
+                ControlFlow::Continue(())
+            }
             _ => walk_stmt(self, stmt),
         }
     }
@@ -195,16 +230,57 @@ impl<'arena, 'src> Visitor<'arena, 'src> for VarRefsVisitor<'_> {
             // Collect matching variable references.
             ExprKind::Variable(name) => {
                 if name.as_str() == self.var_name {
-                    self.out.push(expr.span);
+                    self.out.push((expr.span, DocumentHighlightKind::READ));
                 }
                 ControlFlow::Continue(())
+            }
+            // Assignment: target is WRITE, value is READ
+            ExprKind::Assign(a) => {
+                // Visit target with WRITE kind
+                if let ExprKind::Variable(name) = &a.target.kind {
+                    if name.as_str() == self.var_name {
+                        self.out.push((a.target.span, DocumentHighlightKind::WRITE));
+                    }
+                } else {
+                    let _ = self.visit_expr(a.target);
+                }
+                // Visit value with READ kind (default)
+                let _ = self.visit_expr(a.value);
+                ControlFlow::Continue(())
+            }
+            // Pre/post increment/decrement are both read and write, but mark as WRITE
+            ExprKind::UnaryPrefix(u) => {
+                if matches!(
+                    u.op,
+                    UnaryPrefixOp::PreIncrement | UnaryPrefixOp::PreDecrement
+                ) && let ExprKind::Variable(name) = &u.operand.kind
+                    && name.as_str() == self.var_name
+                {
+                    self.out
+                        .push((u.operand.span, DocumentHighlightKind::WRITE));
+                    return ControlFlow::Continue(());
+                }
+                walk_expr(self, expr)
+            }
+            ExprKind::UnaryPostfix(u) => {
+                if matches!(
+                    u.op,
+                    UnaryPostfixOp::PostIncrement | UnaryPostfixOp::PostDecrement
+                ) && let ExprKind::Variable(name) = &u.operand.kind
+                    && name.as_str() == self.var_name
+                {
+                    self.out
+                        .push((u.operand.span, DocumentHighlightKind::WRITE));
+                    return ControlFlow::Continue(());
+                }
+                walk_expr(self, expr)
             }
             // Closures are scope boundaries, but arrow functions auto-capture outer variables.
             ExprKind::Closure(c) => {
                 // Before stopping, collect variables from the closure's use($x) clause.
                 for use_var in c.use_vars.iter() {
                     if use_var.name == self.var_name {
-                        self.out.push(use_var.span);
+                        self.out.push((use_var.span, DocumentHighlightKind::READ));
                     }
                 }
                 ControlFlow::Continue(())
@@ -224,7 +300,7 @@ pub fn collect_var_refs_in_scope(
     stmts: &[Stmt<'_, '_>],
     var_name: &str,
     byte_off: usize,
-    out: &mut Vec<Span>,
+    out: &mut Vec<(Span, DocumentHighlightKind)>,
 ) {
     for stmt in stmts {
         if collect_in_fn_at(stmt, var_name, byte_off, out) {
@@ -241,7 +317,7 @@ fn collect_in_fn_at(
     stmt: &Stmt<'_, '_>,
     var_name: &str,
     byte_off: usize,
-    out: &mut Vec<Span>,
+    out: &mut Vec<(Span, DocumentHighlightKind)>,
 ) -> bool {
     match &stmt.kind {
         StmtKind::Function(f) => {
@@ -257,7 +333,7 @@ fn collect_in_fn_at(
             // This is the enclosing function — collect param + body refs.
             for p in f.params.iter() {
                 if p.name == var_name {
-                    out.push(p.span);
+                    out.push((p.span, DocumentHighlightKind::WRITE));
                 }
             }
             var_refs_in_stmts(&f.body, var_name, out);
@@ -280,7 +356,7 @@ fn collect_in_fn_at(
                     }
                     for p in m.params.iter() {
                         if p.name == var_name {
-                            out.push(p.span);
+                            out.push((p.span, DocumentHighlightKind::WRITE));
                         }
                     }
                     return true;
@@ -305,7 +381,7 @@ fn collect_in_fn_at(
                     }
                     for p in m.params.iter() {
                         if p.name == var_name {
-                            out.push(p.span);
+                            out.push((p.span, DocumentHighlightKind::WRITE));
                         }
                     }
                     return true;
@@ -328,7 +404,7 @@ fn collect_in_fn_at(
                         }
                         for p in m.params.iter() {
                             if p.name == var_name {
-                                out.push(p.span);
+                                out.push((p.span, DocumentHighlightKind::WRITE));
                             }
                         }
                         var_refs_in_stmts(body, var_name, out);
@@ -355,7 +431,7 @@ fn collect_in_fn_at(
                     }
                     for p in m.params.iter() {
                         if p.name == var_name {
-                            out.push(p.span);
+                            out.push((p.span, DocumentHighlightKind::WRITE));
                         }
                     }
                     return true;
