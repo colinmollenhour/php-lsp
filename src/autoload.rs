@@ -73,7 +73,7 @@ impl Psr4Map {
 
         // Longest-prefix-first so most-specific match wins
         let mut entries: Vec<_> = map.into_iter().collect();
-        entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.0.len()));
 
         Psr4Map { entries }
     }
@@ -81,7 +81,7 @@ impl Psr4Map {
     /// Merge another map's entries into this one, maintaining longest-prefix-first order.
     pub fn extend(&mut self, other: Psr4Map) {
         self.entries.extend(other.entries);
-        self.entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        self.entries.sort_by_key(|e| std::cmp::Reverse(e.0.len()));
     }
 
     /// Reverse of `resolve`: given a file path, return the PSR-4 fully-qualified
