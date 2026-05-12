@@ -92,19 +92,21 @@ fn scan_statements(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], word: &str) -> Op
                 for member in c.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) if m.name == word => {
-                            return Some(sv.name_range(&m.name.to_string()));
+                            return Some(sv.name_range_in_span(&m.name.to_string(), member.span));
                         }
                         ClassMemberKind::ClassConst(cc) if cc.name == word => {
-                            return Some(sv.name_range(&cc.name.to_string()));
+                            return Some(sv.name_range_in_span(&cc.name.to_string(), member.span));
                         }
                         ClassMemberKind::Property(p) if p.name == bare => {
-                            return Some(sv.name_range(&p.name.to_string()));
+                            return Some(sv.name_range_in_span(&p.name.to_string(), member.span));
                         }
                         // Constructor-promoted parameters act as property declarations.
                         ClassMemberKind::Method(m) if m.name == "__construct" => {
                             for p in m.params.iter() {
                                 if p.visibility.is_some() && p.name == bare {
-                                    return Some(sv.name_range(&p.name.to_string()));
+                                    return Some(
+                                        sv.name_range_in_span(&p.name.to_string(), p.span),
+                                    );
                                 }
                             }
                         }

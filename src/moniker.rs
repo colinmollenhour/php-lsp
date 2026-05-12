@@ -128,6 +128,7 @@ fn walk_for_member(
                         word,
                         &current_ns,
                         &class_name_str,
+                        member.span,
                     ) {
                         return Some(id);
                     }
@@ -146,6 +147,7 @@ fn walk_for_member(
                         word,
                         &current_ns,
                         &interface_name,
+                        member.span,
                     ) {
                         return Some(id);
                     }
@@ -164,6 +166,7 @@ fn walk_for_member(
                         word,
                         &current_ns,
                         &trait_name,
+                        member.span,
                     ) {
                         return Some(id);
                     }
@@ -175,18 +178,28 @@ fn walk_for_member(
                 }
                 for member in e.members.iter() {
                     let id = match &member.kind {
-                        EnumMemberKind::Method(m) if m.name == word => {
-                            cursor_on_name(source, cursor_byte, &m.name.to_string())
-                                .then(|| format!("{current_ns}{}::{}", e.name, &m.name.to_string()))
-                        }
-                        EnumMemberKind::Case(c) if c.name == word => {
-                            cursor_on_name(source, cursor_byte, &c.name.to_string())
-                                .then(|| format!("{current_ns}{}::{}", e.name, &c.name.to_string()))
-                        }
+                        EnumMemberKind::Method(m) if m.name == word => cursor_on_name_in_span(
+                            source,
+                            cursor_byte,
+                            &m.name.to_string(),
+                            member.span,
+                        )
+                        .then(|| format!("{current_ns}{}::{}", e.name, &m.name.to_string())),
+                        EnumMemberKind::Case(c) if c.name == word => cursor_on_name_in_span(
+                            source,
+                            cursor_byte,
+                            &c.name.to_string(),
+                            member.span,
+                        )
+                        .then(|| format!("{current_ns}{}::{}", e.name, &c.name.to_string())),
                         EnumMemberKind::ClassConst(cc) if cc.name == word => {
-                            cursor_on_name(source, cursor_byte, &cc.name.to_string()).then(|| {
-                                format!("{current_ns}{}::{}", e.name, &cc.name.to_string())
-                            })
+                            cursor_on_name_in_span(
+                                source,
+                                cursor_byte,
+                                &cc.name.to_string(),
+                                member.span,
+                            )
+                            .then(|| format!("{current_ns}{}::{}", e.name, &cc.name.to_string()))
                         }
                         _ => None,
                     };
@@ -208,25 +221,53 @@ fn match_class_member(
     word: &str,
     ns_prefix: &str,
     class_name: &str,
+    member_span: php_ast::Span,
 ) -> Option<String> {
     match kind {
         ClassMemberKind::Method(m) if m.name == word => {
-            cursor_on_name(source, cursor_byte, &m.name.to_string())
+            cursor_on_name_in_span(source, cursor_byte, &m.name.to_string(), member_span)
                 .then(|| format!("{ns_prefix}{class_name}::{}", &m.name.to_string()))
         }
         ClassMemberKind::Property(p) if p.name == word => {
-            cursor_on_name(source, cursor_byte, &p.name.to_string())
+            cursor_on_name_in_span(source, cursor_byte, &p.name.to_string(), member_span)
                 .then(|| format!("{ns_prefix}{class_name}::${}", p.name))
         }
         ClassMemberKind::ClassConst(c) if c.name == word => {
-            cursor_on_name(source, cursor_byte, &c.name.to_string())
+            cursor_on_name_in_span(source, cursor_byte, &c.name.to_string(), member_span)
                 .then(|| format!("{ns_prefix}{class_name}::{}", &c.name.to_string()))
         }
         _ => None,
     }
 }
 
+/// Variant of [`cursor_on_name`] that searches for the name within
+/// `member_span` rather than the whole file. Avoids the global-`str_offset`
+/// bug where two classes with same-named members both map to the first one.
 #[inline]
+fn cursor_on_name_in_span(
+    source: &str,
+    cursor_byte: u32,
+    name: &str,
+    member_span: php_ast::Span,
+) -> bool {
+    let s = member_span.start as usize;
+    let e = (member_span.end as usize).min(source.len());
+    let Some(slice) = source.get(s..e) else {
+        return false;
+    };
+    let Some(off) = slice.find(name) else {
+        return false;
+    };
+    let start = member_span.start + off as u32;
+    let end = start + name.len() as u32;
+    // Inclusive on the right boundary so that a cursor positioned right
+    // after the name (e.g. between `bar` and `(`) — a common "just typed
+    // the name" position — still resolves.
+    cursor_byte >= start && cursor_byte <= end
+}
+
+#[inline]
+#[allow(dead_code)]
 fn cursor_on_name(source: &str, cursor_byte: u32, name: &str) -> bool {
     let start = str_offset(source, name).unwrap_or(0);
     let end = start + name.len() as u32;

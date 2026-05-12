@@ -259,6 +259,26 @@ impl<'a> SourceView<'a> {
             end: self.position_of(start + name.len() as u32),
         }
     }
+
+    /// Like [`name_range`], but searches for `name` *within* `span` instead
+    /// of the whole source. Needed when the same name appears in earlier
+    /// docblock comments / other declarations — a global search would
+    /// otherwise point at the first textual occurrence, not the AST node
+    /// the caller actually meant.
+    pub fn name_range_in_span(self, name: &str, span: php_ast::Span) -> Range {
+        let s = span.start as usize;
+        let e = (span.end as usize).min(self.source.len());
+        let start = self
+            .source
+            .get(s..e)
+            .and_then(|slice| slice.find(name))
+            .map(|off| span.start + off as u32)
+            .unwrap_or_else(|| str_offset(self.source, name).unwrap_or(0));
+        Range {
+            start: self.position_of(start),
+            end: self.position_of(start + name.len() as u32),
+        }
+    }
 }
 
 /// Convert a byte offset into `source` to an LSP `Position` (0-based line/char).
