@@ -119,14 +119,17 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
 
     fn visit_class_member(&mut self, member: &ClassMember<'arena, 'src>) -> ControlFlow<()> {
         match &member.kind {
-            ClassMemberKind::Method(m) => {
-                let start = str_offset(self.source, &m.name.to_string()).unwrap_or(0);
-                if m.name == self.word {
-                    self.out.push(Span {
-                        start,
-                        end: start + m.name.to_string().len() as u32,
-                    });
-                }
+            ClassMemberKind::Method(m) if m.name == self.word => {
+                let name_str = m.name.to_string();
+                // Scope the name search to this member's own span — a
+                // global `str_offset` returns the first occurrence in
+                // the file, so when two classes share a method name
+                // both methods would resolve to the same range.
+                let start = str_offset_in_range(self.source, member.span, &name_str).unwrap_or(0);
+                self.out.push(Span {
+                    start,
+                    end: start + name_str.len() as u32,
+                });
             }
             ClassMemberKind::ClassConst(cc) if cc.name == self.word => {
                 let name_str = cc.name.to_string();

@@ -4,14 +4,21 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 fn collect_names(resp: &Value) -> Vec<String> {
-    resp["result"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|it| it["name"].as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default()
+    fn walk(out: &mut Vec<String>, items: &[Value]) {
+        for it in items {
+            if let Some(name) = it["name"].as_str() {
+                out.push(name.to_string());
+            }
+            if let Some(children) = it["children"].as_array() {
+                walk(out, children);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(arr) = resp["result"].as_array() {
+        walk(&mut out, arr);
+    }
+    out
 }
 
 // ── Fast tests (no-vendor fixture, run by default) ─────────────────────
@@ -59,8 +66,16 @@ mod symbols {
             .iter()
             .filter_map(|it| it["name"].as_str().map(|s| s.to_string()))
             .collect();
-        assert!(names.contains("Blog"), "expected Blog in {names:?}");
-        assert!(names.contains("BlogController"), "expected BlogController");
+        // The symfony-demo fixture has no class literally named "Blog";
+        // verify the prefix query surfaces the `Blog*` family.
+        assert!(
+            names.contains("BlogController"),
+            "expected BlogController in {names:?}"
+        );
+        assert!(
+            names.contains("BlogSearchComponent"),
+            "expected BlogSearchComponent in {names:?}"
+        );
     }
 
     #[tokio::test]

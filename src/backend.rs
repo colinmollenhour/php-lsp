@@ -207,7 +207,7 @@ impl Backend {
 ///   (mir doesn't track property refs at the session-API level), or
 /// - the required FQN piece isn't available.
 fn build_mir_symbol(
-    _word: &str,
+    word: &str,
     kind: Option<crate::references::SymbolKind>,
     target_fqn: Option<&str>,
 ) -> Option<mir_analyzer::Symbol> {
@@ -220,13 +220,12 @@ fn build_mir_symbol(
         Some(SymbolKind::Class) => {
             target_fqn.map(|fqn| mir_analyzer::Symbol::Class(StdArc::from(fqn)))
         }
-        // Methods deliberately skipped: mir's session.references_to for
-        // `Symbol::Method` widens matches in ways the AST walker does not
-        // (it can return free-function refs that share the method name when
-        // the receiver type can't be resolved). The AST walker is more
-        // precise for methods today — revisit when mir's index narrows
-        // method matches strictly by `(class, name)` pair.
-        Some(SymbolKind::Method) => None,
+        Some(SymbolKind::Method) => target_fqn.map(|owning| mir_analyzer::Symbol::Method {
+            class: StdArc::from(owning),
+            // PHP method dispatch is case-insensitive — Symbol::method
+            // normalizes the name. The constructor function does this for us.
+            name: StdArc::from(word.to_ascii_lowercase()),
+        }),
         Some(SymbolKind::Property) | None => None,
     }
 }
@@ -1348,21 +1347,88 @@ impl LanguageServer for Backend {
                 }
             });
 
-            // AST walker is the workspace-wide source of truth: it scans
-            // every indexed file (open or not) for the symbol's short name
-            // with namespace + kind disambiguation. Reliable for all kinds.
-            let mut locations = match target_fqn.as_deref() {
-                Some(t) => {
-                    find_references_with_target(&word, &all_docs, include_declaration, kind, t)
+            // Method refs need type-aware filtering: `$mailer->process()`
+            // and `$queue->process()` share a name, but only the one whose
+            // receiver type matches the cursor's owning class is a real ref.
+            // Mir's session.references_to is type-aware; use it as the
+            // primary source for Method+target_fqn. The AST walker is only
+            // used to add the declaration span (sessions return call sites).
+            let session_method_refs: Option<Vec<Location>> =
+                if matches!(kind, Some(SymbolKind::Method))
+                    && let Some(sym) = build_mir_symbol(&word, kind, target_fqn.as_deref())
+                {
+                    let raw = self.docs.session_references_to(&sym);
+                    let session_locs: Vec<Location> = raw
+                        .into_iter()
+                        .filter_map(|(file, line, col_start, col_end)| {
+                            let uri_parsed = Url::parse(&file).ok()?;
+                            Some(Location {
+                                uri: uri_parsed,
+                                range: tower_lsp::lsp_types::Range {
+                                    start: tower_lsp::lsp_types::Position {
+                                        line,
+                                        character: col_start,
+                                    },
+                                    end: tower_lsp::lsp_types::Position {
+                                        line,
+                                        character: col_end,
+                                    },
+                                },
+                            })
+                        })
+                        .collect();
+                    Some(session_locs)
+                } else {
+                    None
+                };
+
+            let mut locations = if let Some(session_locs) =
+                session_method_refs.filter(|l| !l.is_empty())
+            {
+                // Use session results as the call-site source. Push the
+                // cursor's own method-name span as the declaration so the
+                // `include_declaration=true` case still surfaces the decl —
+                // the cursor is verified by `cursor_is_on_method_decl`
+                // upstream, so this maps to the right method in files with
+                // more than one same-named method.
+                let mut combined = session_locs;
+                if include_declaration {
+                    let end = Position {
+                        line: position.line,
+                        character: position.character + word.len() as u32,
+                    };
+                    combined.push(Location {
+                        uri: uri.clone(),
+                        range: Range {
+                            start: position,
+                            end,
+                        },
+                    });
+                    let mut seen = std::collections::HashSet::new();
+                    combined.retain(|loc| {
+                        seen.insert((
+                            loc.uri.to_string(),
+                            loc.range.start.line,
+                            loc.range.start.character,
+                            loc.range.end.character,
+                        ))
+                    });
                 }
-                None => find_references(&word, &all_docs, include_declaration, kind),
+                combined
+            } else {
+                match target_fqn.as_deref() {
+                    Some(t) => {
+                        find_references_with_target(&word, &all_docs, include_declaration, kind, t)
+                    }
+                    None => find_references(&word, &all_docs, include_declaration, kind),
+                }
             };
 
-            // Augment with session-backed refs when we can build a
-            // `mir_analyzer::Symbol` from the cursor info. The session sees
-            // type-resolved method calls and similar semantic refs that the
-            // AST walker would miss. De-duplicates by (uri, line, range).
-            if let Some(sym) = build_mir_symbol(&word, kind, target_fqn.as_deref()) {
+            // For Class / Function kinds: AST walker is authoritative; augment
+            // with session refs to catch type-resolved sites the walker misses.
+            if !matches!(kind, Some(SymbolKind::Method))
+                && let Some(sym) = build_mir_symbol(&word, kind, target_fqn.as_deref())
+            {
                 let extra = self.docs.session_references_to(&sym);
                 if !extra.is_empty() {
                     let mut seen: std::collections::HashSet<(String, u32, u32, u32)> = locations
@@ -2800,14 +2866,29 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
         return false;
     };
 
+    // Locate `name` within `member_span` rather than searching the whole
+    // source — the global `str_offset` returns the first occurrence in the
+    // file, which causes a method named `status` to also match a property
+    // named `$status` (cursor on the `$status` declaration falsely tests
+    // positive for "on method decl").
+    fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
+        let s = member_span.start as usize;
+        let e = (member_span.end as usize).min(source.len());
+        source
+            .get(s..e)?
+            .find(name)
+            .map(|off| member_span.start + off as u32)
+    }
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32) -> bool {
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Class(c) => {
                     for member in c.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind {
-                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
-                            let end = start + m.name.to_string().len() as u32;
+                            let name = m.name.to_string();
+                            let start =
+                                name_offset_in_member(source, member.span, &name).unwrap_or(0);
+                            let end = start + name.len() as u32;
                             if cursor >= start && cursor < end {
                                 return true;
                             }
@@ -2817,8 +2898,10 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                 StmtKind::Interface(i) => {
                     for member in i.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind {
-                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
-                            let end = start + m.name.to_string().len() as u32;
+                            let name = m.name.to_string();
+                            let start =
+                                name_offset_in_member(source, member.span, &name).unwrap_or(0);
+                            let end = start + name.len() as u32;
                             if cursor >= start && cursor < end {
                                 return true;
                             }
@@ -2828,8 +2911,10 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                 StmtKind::Trait(t) => {
                     for member in t.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind {
-                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
-                            let end = start + m.name.to_string().len() as u32;
+                            let name = m.name.to_string();
+                            let start =
+                                name_offset_in_member(source, member.span, &name).unwrap_or(0);
+                            let end = start + name.len() as u32;
                             if cursor >= start && cursor < end {
                                 return true;
                             }
@@ -2839,8 +2924,10 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                 StmtKind::Enum(e) => {
                     for member in e.members.iter() {
                         if let EnumMemberKind::Method(m) = &member.kind {
-                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
-                            let end = start + m.name.to_string().len() as u32;
+                            let name = m.name.to_string();
+                            let start =
+                                name_offset_in_member(source, member.span, &name).unwrap_or(0);
+                            let end = start + name.len() as u32;
                             if cursor >= start && cursor < end {
                                 return true;
                             }
@@ -2874,16 +2961,26 @@ fn cursor_is_on_property_decl(
 ) -> Option<String> {
     let cursor = position_to_byte_offset(source, position)?;
 
+    fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
+        let s = member_span.start as usize;
+        let e = (member_span.end as usize).min(source.len());
+        source
+            .get(s..e)?
+            .find(name)
+            .map(|off| member_span.start + off as u32)
+    }
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32) -> Option<String> {
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Class(c) => {
                     for member in c.members.iter() {
                         if let ClassMemberKind::Property(p) = &member.kind {
-                            let start = str_offset(source, &p.name.to_string()).unwrap_or(0);
-                            let end = start + p.name.to_string().len() as u32;
+                            let name = p.name.to_string();
+                            let start =
+                                name_offset_in_member(source, member.span, &name).unwrap_or(0);
+                            let end = start + name.len() as u32;
                             if cursor >= start && cursor < end {
-                                return Some(p.name.to_string());
+                                return Some(name);
                             }
                         }
                     }
@@ -2891,10 +2988,12 @@ fn cursor_is_on_property_decl(
                 StmtKind::Trait(t) => {
                     for member in t.members.iter() {
                         if let ClassMemberKind::Property(p) = &member.kind {
-                            let start = str_offset(source, &p.name.to_string()).unwrap_or(0);
-                            let end = start + p.name.to_string().len() as u32;
+                            let name = p.name.to_string();
+                            let start =
+                                name_offset_in_member(source, member.span, &name).unwrap_or(0);
+                            let end = start + name.len() as u32;
                             if cursor >= start && cursor < end {
-                                return Some(p.name.to_string());
+                                return Some(name);
                             }
                         }
                     }
@@ -2928,6 +3027,14 @@ fn class_name_at_construct_decl(
 ) -> Option<String> {
     let cursor = position_to_byte_offset(source, position)?;
 
+    fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
+        let s = member_span.start as usize;
+        let e = (member_span.end as usize).min(source.len());
+        source
+            .get(s..e)?
+            .find(name)
+            .map(|off| member_span.start + off as u32)
+    }
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32, ns_prefix: &str) -> Option<String> {
         let mut current_ns = ns_prefix.to_owned();
         for stmt in stmts {
@@ -2937,8 +3044,16 @@ fn class_name_at_construct_decl(
                         if let ClassMemberKind::Method(m) = &member.kind
                             && m.name == "__construct"
                         {
-                            let start = str_offset(source, &m.name.to_string()).unwrap_or(0);
-                            let end = start + m.name.to_string().len() as u32;
+                            // Scope the name search to this member's own span:
+                            // a global `str_offset` returns the FIRST
+                            // `__construct` in the file, so when two classes
+                            // both define `__construct` every cursor lands on
+                            // the first one regardless of which class the
+                            // cursor is actually inside.
+                            let name = m.name.to_string();
+                            let start =
+                                name_offset_in_member(source, member.span, &name).unwrap_or(0);
+                            let end = start + name.len() as u32;
                             if cursor >= start && cursor < end {
                                 let short = c.name?;
                                 return Some(if current_ns.is_empty() {

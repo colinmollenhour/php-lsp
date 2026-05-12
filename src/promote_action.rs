@@ -54,7 +54,9 @@ struct Promotion {
     visibility: &'static str,
     /// Whether to also insert `readonly `.
     is_readonly: bool,
-    /// Property type hint string (e.g., "string", "?int").
+    /// Property type hint string (e.g., "string", "?int"). `None` here when
+    /// the constructor parameter already declares a type — emitting the
+    /// property's type in that case would produce `private string string $x`.
     type_hint: Option<String>,
     /// Assignment statement span — used to remove the whole line.
     assign_span_start: u32,
@@ -163,13 +165,22 @@ fn collect_promote<'a>(
                         None => continue,
                     };
 
+                    // If the constructor param already declares a type, don't
+                    // re-emit the property's type — `private string string $x`
+                    // is a parse error.
+                    let effective_type_hint = if param.type_hint.is_some() {
+                        None
+                    } else {
+                        type_hint
+                    };
+
                     promotions.push(Promotion {
                         prop_span_start: prop_start,
                         prop_span_end: prop_end,
                         param_span_start: param.span.start,
                         visibility: vis,
                         is_readonly,
-                        type_hint,
+                        type_hint: effective_type_hint,
                         assign_span_start: assign_start,
                         assign_span_end: assign_end,
                     });

@@ -231,6 +231,7 @@ use Acme\Core\Entity\NonexistentUser;
 class UserController {
     public function __construct(
         private NonexistentUser $user,
+        //      ^^^^^^^^^^^^^^^ error: Class Acme\Core\Entity\NonexistentUser does not exist
     ) {}
 }
 "#,

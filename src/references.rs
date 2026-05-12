@@ -63,11 +63,17 @@ pub fn find_references_with_target(
     kind: Option<SymbolKind>,
     target_fqn: &str,
 ) -> Vec<Location> {
+    // Default: include `use` statement spans so callers that pass
+    // `kind=None` (notably the rename handler) get their use-import edits.
+    // For typed kinds we want the kind-specific walker (so a Method search
+    // doesn't pick up free functions sharing the name); the general walker
+    // would falsely widen those results.
+    let include_use = kind.is_none();
     find_references_inner(
         word,
         all_docs,
         include_declaration,
-        true,
+        include_use,
         kind,
         Some(target_fqn),
     )
@@ -513,10 +519,15 @@ fn collect_declaration_spans(
                     for member in c.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) if want_method && m.name == word => {
+                                // Scope the name search to the member span,
+                                // not the whole class — otherwise a class
+                                // named the same as one of its members
+                                // (`class get { function get() {} }`) resolves
+                                // both decls to the class name's position.
                                 out.push(declaration_name_span(
                                     source,
                                     &m.name.to_string(),
-                                    stmt.span,
+                                    member.span,
                                 ));
                             }
                             ClassMemberKind::Method(m)
@@ -528,7 +539,7 @@ fn collect_declaration_spans(
                                         out.push(declaration_name_span(
                                             source,
                                             &p.name.to_string(),
-                                            stmt.span,
+                                            p.span,
                                         ));
                                     }
                                 }
@@ -537,7 +548,7 @@ fn collect_declaration_spans(
                                 out.push(declaration_name_span(
                                     source,
                                     &p.name.to_string(),
-                                    stmt.span,
+                                    member.span,
                                 ));
                             }
                             _ => {}
@@ -561,7 +572,7 @@ fn collect_declaration_spans(
                             out.push(declaration_name_span(
                                 source,
                                 &m.name.to_string(),
-                                stmt.span,
+                                member.span,
                             ));
                         }
                     }

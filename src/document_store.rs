@@ -323,6 +323,13 @@ impl DocumentStore {
         self.source_files.remove(uri);
         self.text_cache.remove(uri);
         self.parsed_cache.remove(uri);
+        // Also evict the file from the `AnalysisSession`'s internal state so
+        // workspace symbol queries don't keep returning the deleted file's
+        // declarations. Cheap when the session hasn't ingested this file.
+        let guard = self.analysis_session.lock().unwrap();
+        if let Some((_, session)) = guard.as_ref() {
+            session.invalidate_file(uri.as_str());
+        }
     }
 
     // ── B4b salsa-backed accessors ─────────────────────────────────────────

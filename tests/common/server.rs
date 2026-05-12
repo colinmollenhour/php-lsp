@@ -286,11 +286,13 @@ impl TestServer {
         let start = std::time::Instant::now();
         loop {
             let resp = self.workspace_symbols(query).await;
-            if resp["result"]
-                .as_array()
-                .map(|a| a.is_empty())
-                .unwrap_or(false)
-            {
+            // The server returns `Some(Vec::new())` if non-empty, `None` if
+            // empty — both serialize to either `[]` or `null`. "Absent" means
+            // either an empty array or a null result.
+            let result = &resp["result"];
+            let absent =
+                result.is_null() || result.as_array().map(|a| a.is_empty()).unwrap_or(false);
+            if absent {
                 return;
             }
             if start.elapsed() > timeout {
