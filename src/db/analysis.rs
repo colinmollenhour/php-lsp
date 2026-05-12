@@ -1,89 +1,25 @@
-//! Database + Analysis/AnalysisHost split (rust-analyzer pattern).
+//! Database + AnalysisHost split (rust-analyzer pattern).
 //!
-//! `AnalysisHost` owns the mutable database; LSP write paths (`did_open`,
-//! `did_change`, workspace scan) go through the host. `Analysis` is a read-only
-//! view used by request handlers.
+//! `AnalysisHost` owns the mutable salsa database; LSP write paths
+//! (`did_open`, `did_change`, workspace scan) go through the host.
+//! Read-only handlers snapshot the db (cheap `Arc<Zalsa>` clone) and run
+//! queries lock-free.
+//!
+//! After the mir 0.22 migration, this module no longer owns the workspace
+//! `MirDb` — that's the responsibility of `mir_analyzer::AnalysisSession`
+//! held by `DocumentStore`. Salsa is for parsed_doc / file_index / method_returns
+//! only.
 
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex};
-
-use mir_analyzer::PhpVersion;
-use mir_analyzer::db::MirDb;
-use mir_codebase::storage::StubSlice;
 use salsa::{Database, Storage};
-
-/// One stubs-only `MirDb` per `PhpVersion`, built once per process lifetime.
-/// Cloning this is O(number of stubs), which is still far cheaper than
-/// re-parsing ~90 K lines of PHP from source on every `cached_mir_db` miss.
-static BUILTIN_STUBS: LazyLock<Mutex<HashMap<PhpVersion, MirDb>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Cache for the workspace-wide populated `MirDb`. Built once per
-/// `(slices_arc, php_version)` pair and reused across every salsa query that
-/// needs MirDb access (`semantic_issues`, `file_refs`, `class_issues`) plus
-/// `Backend::codebase()`.
-///
-/// Without this cache, each salsa query rebuilds the MirDb from scratch
-/// (`load_stubs + ingest × N files`). On a workspace-wide diagnostic pass
-/// after one edit, that's `O(N²)` work because every per-file `semantic_issues`
-/// is invalidated and rebuilds independently. With the cache, the rebuild
-/// happens once per workspace edit; subsequent queries clone (cheap shallow
-/// `Arc<FxHashMap>` clones).
-///
-/// Held inside `Mutex` because `MirDb: Send` but `!Sync` (its salsa storage
-/// contains per-thread `RefCell`s). The `Arc` makes the cache shared across
-/// every snapshot clone of `RootDatabase`.
-type MirDbCache = Arc<Mutex<Option<(Arc<[Arc<StubSlice>]>, PhpVersion, MirDb)>>>;
 
 #[salsa::db]
 #[derive(Default, Clone)]
 pub struct RootDatabase {
     storage: Storage<Self>,
-    mir_db_cache: MirDbCache,
 }
 
 #[salsa::db]
 impl Database for RootDatabase {}
-
-/// Extension trait providing a workspace-wide populated `MirDb` to salsa
-/// queries. Tracked queries that need MirDb access take `&dyn LspDatabase`
-/// instead of `&dyn salsa::Database` so they can hit the shared cache.
-#[salsa::db]
-pub trait LspDatabase: Database {
-    fn cached_mir_db(&self, slices: Arc<[Arc<StubSlice>]>, php_version: PhpVersion) -> MirDb;
-}
-
-#[salsa::db]
-impl LspDatabase for RootDatabase {
-    fn cached_mir_db(&self, slices: Arc<[Arc<StubSlice>]>, php_version: PhpVersion) -> MirDb {
-        let mut cache = self.mir_db_cache.lock().unwrap();
-        if let Some((cached_slices, cached_ver, cached_db)) = cache.as_ref()
-            && Arc::ptr_eq(cached_slices, &slices)
-            && *cached_ver == php_version
-        {
-            return cached_db.clone();
-        }
-
-        // Fetch (or build once) the stubs-only MirDb for this PHP version.
-        // Parsing PHP stubs from source takes ~50-200 ms; caching the result
-        // globally avoids that cost on every workspace-edit cache miss.
-        let mut stubs_cache = BUILTIN_STUBS.lock().unwrap();
-        stubs_cache.entry(php_version).or_insert_with(|| {
-            let mut stubs_db = MirDb::default();
-            mir_analyzer::stubs::load_stubs_for_version(&mut stubs_db, php_version);
-            stubs_db
-        });
-        let mut fresh = stubs_cache[&php_version].clone();
-        drop(stubs_cache);
-
-        for slice in slices.iter() {
-            fresh.ingest_stub_slice(slice);
-        }
-        let out = fresh.clone();
-        *cache = Some((slices, php_version, fresh));
-        out
-    }
-}
 
 /// Owns the mutable salsa database. Backend will hold one of these.
 #[derive(Default)]

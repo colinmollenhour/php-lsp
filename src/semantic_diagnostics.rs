@@ -9,124 +9,47 @@ use crate::ast::{ParsedDoc, SourceView};
 use crate::config::DiagnosticsConfig;
 use crate::diagnostics::PHP_LSP_SOURCE;
 
-/// Run semantic checks on `doc` using the backend's persistent `MirDb`.
-/// The MirDb is updated incrementally: the current file's definitions are
-/// evicted, re-collected into a fresh `StubSlice`, then re-ingested.
+/// Run semantic checks on `doc` against the supplied `AnalysisSession`.
 ///
-/// `php_version` is a version string like `"8.1"` sourced from `LspConfig`.
-/// Parsed to `mir_analyzer::PhpVersion` and forwarded to `StatementsAnalyzer`.
-///
-/// Legacy mutating path — kept for benchmarks (`benches/semantic.rs`) and as
-/// the reference implementation. LSP handlers read issues through the salsa
-/// `semantic_issues` query + `issues_to_diagnostics`.
+/// Replaces the legacy MirDb-mutating path (pre mir 0.22). The session owns
+/// the workspace MirDb internally; this function ingests the current file,
+/// runs Pass 2 via `FileAnalyzer`, and returns LSP diagnostics filtered by
+/// `DiagnosticsConfig`.
 pub fn semantic_diagnostics(
     uri: &Url,
     doc: &ParsedDoc,
-    mir_db: &mut mir_analyzer::db::MirDb,
+    session: &mir_analyzer::AnalysisSession,
     cfg: &DiagnosticsConfig,
-    php_version: Option<&str>,
 ) -> Vec<Diagnostic> {
     if !cfg.enabled {
         return vec![];
     }
-
     let file: std::sync::Arc<str> = std::sync::Arc::from(uri.as_str());
-
-    // Incremental update: evict stale definitions for this file and re-collect.
-    mir_db.remove_file_definitions(&file);
+    session.ingest_file(file.clone(), doc.source_arc());
     let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
-    let (slice, collector_issues) = {
-        let _span = tracing::debug_span!("collect_definitions", file = %uri).entered();
-        let collector = mir_analyzer::collector::DefinitionCollector::new_for_slice(
-            file.clone(),
-            doc.source(),
-            &source_map,
-        );
-        collector.collect_slice(doc.program())
-    };
-    mir_db.ingest_stub_slice(&slice);
-
-    // Pass 2: analyse function/method bodies in the current document using FileAnalyzer.
-    // FileAnalyzer handles all composite types uniformly, including traits.
-    let ver = php_version
-        .and_then(|s| s.parse::<mir_analyzer::PhpVersion>().ok())
-        .unwrap_or(mir_analyzer::PhpVersion::LATEST);
-
-    let mut issue_buffer = mir_issues::IssueBuffer::new();
-    let mut symbols = Vec::new();
-    salsa::attach_allow_change(&*mir_db, || {
-        let mut analyzer = mir_analyzer::stmt::StatementsAnalyzer::new(
-            &*mir_db,
-            file.clone(),
-            doc.source(),
-            &source_map,
-            &mut issue_buffer,
-            &mut symbols,
-            ver,
-            false,
-        );
-        let mut ctx = mir_analyzer::context::Context::new();
-        let _span = tracing::debug_span!("analyze_stmts", file = %uri).entered();
-        analyzer.analyze_stmts(&doc.program().stmts, &mut ctx);
-    });
-
-    collector_issues
+    let analyzer = mir_analyzer::FileAnalyzer::new(session);
+    let analysis = analyzer.analyze(file.clone(), doc.source(), doc.program(), &source_map);
+    let class_issues = session.class_issues_for(std::slice::from_ref(&file));
+    analysis
+        .issues
         .into_iter()
-        .chain(issue_buffer.into_issues())
+        .chain(class_issues)
         .filter(|i| !i.suppressed)
         .filter(|i| issue_passes_filter(i, cfg))
         .map(|i| to_lsp_diagnostic(i, uri))
         .collect()
 }
 
-/// Run semantic body analysis on `doc` assuming the `MirDb` is already
-/// finalized (all definitions ingested).
-///
-/// Unlike [`semantic_diagnostics`], this function does **not** mutate the
-/// MirDb — it skips the `remove_file_definitions` / re-collect cycle. Intended
-/// for workspace diagnostic batch passes where the MirDb is built once upfront
-/// before the loop.
+/// Backward-compat alias kept for benchmarks. mir 0.22's session-based API
+/// no longer distinguishes "rebuild" vs "no-rebuild"; the session always
+/// updates incrementally via `ingest_file`.
 pub fn semantic_diagnostics_no_rebuild(
     uri: &Url,
     doc: &ParsedDoc,
-    mir_db: &mir_analyzer::db::MirDb,
+    session: &mir_analyzer::AnalysisSession,
     cfg: &DiagnosticsConfig,
-    php_version: Option<&str>,
 ) -> Vec<Diagnostic> {
-    if !cfg.enabled {
-        return vec![];
-    }
-
-    let file: std::sync::Arc<str> = std::sync::Arc::from(uri.as_str());
-    let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
-
-    let ver = php_version
-        .and_then(|s| s.parse::<mir_analyzer::PhpVersion>().ok())
-        .unwrap_or(mir_analyzer::PhpVersion::LATEST);
-    let mut issue_buffer = mir_issues::IssueBuffer::new();
-    let mut symbols = Vec::new();
-    salsa::attach_allow_change(mir_db, || {
-        let mut analyzer = mir_analyzer::stmt::StatementsAnalyzer::new(
-            mir_db,
-            file,
-            doc.source(),
-            &source_map,
-            &mut issue_buffer,
-            &mut symbols,
-            ver,
-            false,
-        );
-        let mut ctx = mir_analyzer::context::Context::new();
-        analyzer.analyze_stmts(&doc.program().stmts, &mut ctx);
-    });
-
-    issue_buffer
-        .into_issues()
-        .into_iter()
-        .filter(|i| !i.suppressed)
-        .filter(|i| issue_passes_filter(i, cfg))
-        .map(|i| to_lsp_diagnostic(i, uri))
-        .collect()
+    semantic_diagnostics(uri, doc, session, cfg)
 }
 
 /// Convert pre-computed raw issues (from `db::semantic::semantic_issues`) into
@@ -189,6 +112,13 @@ fn issue_passes_filter(issue: &mir_issues::Issue, cfg: &DiagnosticsConfig) -> bo
         | IssueKind::DeprecatedMethod { .. }
         | IssueKind::DeprecatedClass { .. } => cfg.deprecated_calls,
         IssueKind::CircularInheritance { .. } => cfg.type_errors,
+        // mir 0.22 unused-symbol warnings. Off by default; opt in via
+        // `diagnostics.unusedSymbols` in initializationOptions.
+        IssueKind::UnusedVariable { .. }
+        | IssueKind::UnusedParam { .. }
+        | IssueKind::UnusedMethod { .. }
+        | IssueKind::UnusedProperty { .. }
+        | IssueKind::UnusedFunction { .. } => cfg.unused_symbols,
         _ => true,
     }
 }

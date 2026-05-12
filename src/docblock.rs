@@ -5,7 +5,71 @@
 use std::collections::HashMap;
 
 use mir_analyzer::DocblockParser;
-use php_rs_parser::phpdoc::{self, PhpDocTag};
+use php_rs_parser::phpdoc;
+
+/// Flatten a `phpdoc::PhpDocText` (sequence of text segments + inline tags)
+/// into a single string. Inline tags are rendered as `{@name body}`.
+fn flatten_phpdoc_text(t: &phpdoc::PhpDocText) -> String {
+    let mut s = String::new();
+    for seg in &t.segments {
+        match seg {
+            phpdoc::TextSegment::Text(txt) => s.push_str(txt),
+            phpdoc::TextSegment::InlineTag(it) => {
+                s.push('{');
+                s.push('@');
+                s.push_str(&it.name);
+                if let Some(b) = &it.body {
+                    s.push(' ');
+                    s.push_str(b);
+                }
+                s.push('}');
+            }
+        }
+    }
+    s
+}
+
+/// Parse a `@param Type $name description` body: skip the type hint, find the
+/// `$name` token, take everything after as the description.
+fn parse_param_body(s: &str) -> Option<(String, String)> {
+    let mut iter = s.split_whitespace();
+    let mut name = None;
+    for tok in iter.by_ref() {
+        if let Some(n) = tok.strip_prefix('$') {
+            name = Some(n.to_string());
+            break;
+        }
+    }
+    let desc: Vec<&str> = iter.collect();
+    name.map(|n| (n, desc.join(" ").trim().to_string()))
+}
+
+/// For `@return` / `@throws` bodies: first whitespace-separated token is the
+/// type hint, everything after is the description.
+fn body_after_type_hint(s: &str) -> Option<String> {
+    let trimmed = s.trim_start();
+    let mut split = trimmed.splitn(2, char::is_whitespace);
+    let _type = split.next()?;
+    Some(split.next().unwrap_or("").trim().to_string())
+}
+
+/// For `@var Type [$name] description`: skip the type hint and an optional
+/// `$name`, then take the rest as description.
+fn body_after_type_and_var(s: &str) -> Option<String> {
+    let mut iter = s.split_whitespace();
+    let _type = iter.next()?;
+    let next = iter.next();
+    let rest: Vec<&str> = if let Some(tok) = next {
+        if tok.starts_with('$') {
+            iter.collect()
+        } else {
+            std::iter::once(tok).chain(iter).collect()
+        }
+    } else {
+        Vec::new()
+    };
+    Some(rest.join(" ").trim().to_string())
+}
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Docblock {
@@ -197,39 +261,46 @@ pub fn parse_docblock(raw: &str) -> Docblock {
     let mut var_desc: Option<String> = None;
 
     for tag in &raw_doc.tags {
-        match tag {
-            PhpDocTag::Param {
-                name: Some(n),
-                description: Some(d),
-                ..
-            } => {
-                param_descs.insert(n.trim_start_matches('$').to_string(), d.to_string());
-            }
-            PhpDocTag::Return {
-                description: Some(d),
-                ..
-            } => {
-                return_desc = d.to_string();
-            }
-            PhpDocTag::Throws {
-                type_str: Some(ts),
-                description,
-            } => {
-                let class = ts.split_whitespace().next().unwrap_or("");
-                if !class.is_empty() {
-                    throws_descs.push(
-                        description
-                            .as_ref()
-                            .map(|d| d.to_string())
-                            .unwrap_or_default(),
-                    );
+        let body = tag
+            .body
+            .as_ref()
+            .map(flatten_phpdoc_text)
+            .unwrap_or_default();
+        match tag.name.as_str() {
+            "param" => {
+                // Body shape: "TypeHint $name description". Find the `$name`
+                // token, then take everything after as the description.
+                if let Some((name, desc)) = parse_param_body(&body)
+                    && !desc.is_empty()
+                {
+                    param_descs.insert(name, desc);
                 }
             }
-            PhpDocTag::Var {
-                description: Some(d),
-                ..
-            } => {
-                var_desc = Some(d.to_string());
+            "return" => {
+                // Body shape: "TypeHint description"
+                if let Some(d) = body_after_type_hint(&body)
+                    && !d.is_empty()
+                {
+                    return_desc = d;
+                }
+            }
+            "throws" => {
+                // Body shape: "ClassName description"
+                let mut parts = body.split_whitespace();
+                if let Some(class) = parts.next()
+                    && !class.is_empty()
+                {
+                    let desc = parts.collect::<Vec<_>>().join(" ");
+                    throws_descs.push(desc);
+                }
+            }
+            "var" => {
+                // Body shape: "TypeHint [$name] description"
+                if let Some(d) = body_after_type_and_var(&body)
+                    && !d.is_empty()
+                {
+                    var_desc = Some(d);
+                }
             }
             _ => {}
         }
@@ -269,12 +340,42 @@ pub fn parse_docblock(raw: &str) -> Docblock {
         None
     };
 
-    let templates: Vec<DocTemplate> = mir
-        .templates
+    // mir 0.22's template-bound parsing over-reads (it captures every tag
+    // line after `@template T` as the bound). Parse the @template body
+    // ourselves: "T" → name=T, bound=None; "T of Bound" → name=T,
+    // bound=Some("Bound"); "T as Bound" likewise.
+    let templates: Vec<DocTemplate> = raw_doc
+        .tags
         .iter()
-        .map(|(name, bound, _variance)| DocTemplate {
-            name: name.clone(),
-            bound: bound.as_ref().map(|u| u.to_string()),
+        .filter(|t| {
+            t.name == "template"
+                || t.name == "template-covariant"
+                || t.name == "template-contravariant"
+                || t.name == "psalm-template"
+                || t.name == "phpstan-template"
+        })
+        .filter_map(|t| {
+            // phpdoc-parser 0.11 sometimes leaks subsequent `@tag` lines into
+            // the body of an earlier tag (`@template T` followed by `@param`
+            // shows up as `"T @param T $x @return T"`). Truncate at the
+            // first `@`-prefixed token to recover the real `@template` body.
+            let body_full = t.body.as_ref().map(flatten_phpdoc_text).unwrap_or_default();
+            let body: String = body_full
+                .split_whitespace()
+                .take_while(|tok| !tok.starts_with('@'))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let mut iter = body.split_whitespace();
+            let name = iter.next()?.to_string();
+            // `@template T` → bound=None (unconstrained).
+            // `@template T of Bound` / `@template T as Bound` → bound=Some(Bound).
+            // `@template T Bound` (no keyword) — defensive: still accept Bound.
+            let bound = match iter.next() {
+                Some("of" | "as") => iter.next().map(|s| s.to_string()),
+                Some(other) => Some(other.to_string()),
+                None => None,
+            };
+            Some(DocTemplate { name, bound })
         })
         .collect();
 
@@ -307,12 +408,40 @@ pub fn parse_docblock(raw: &str) -> Docblock {
         })
         .collect();
 
+    // Pull the var type from the raw `@var` body directly: mir 0.22's
+    // `var_type` may swallow the trailing description as part of the type
+    // string. The body's first non-`$` whitespace token is the type hint.
+    let (var_type_from_body, var_name_from_body) = raw_doc
+        .tags
+        .iter()
+        .find(|t| t.name == "var" || t.name == "psalm-var" || t.name == "phpstan-var")
+        .and_then(|t| t.body.as_ref())
+        .map(flatten_phpdoc_text)
+        .map(|body| {
+            let mut ty = None;
+            let mut name = None;
+            for tok in body.split_whitespace() {
+                if let Some(n) = tok.strip_prefix('$') {
+                    if name.is_none() {
+                        name = Some(n.to_string());
+                    }
+                } else if ty.is_none() {
+                    ty = Some(tok.to_string());
+                }
+                if ty.is_some() && name.is_some() {
+                    break;
+                }
+            }
+            (ty, name)
+        })
+        .unwrap_or((None, None));
+
     Docblock {
         description: mir.description.clone(),
         params,
         return_type,
-        var_type: mir.var_type.as_ref().map(|u| u.to_string()),
-        var_name: mir.var_name.clone(),
+        var_type: var_type_from_body.or_else(|| mir.var_type.as_ref().map(|u| u.to_string())),
+        var_name: var_name_from_body.or_else(|| mir.var_name.clone()),
         var_description: var_desc,
         deprecated,
         throws,
@@ -330,7 +459,16 @@ pub fn parse_docblock(raw: &str) -> Docblock {
 /// `node_start` (byte offset). Whitespace between the `*/` and the node is
 /// allowed; non-whitespace text in between disqualifies the block.
 pub fn docblock_before(source: &str, node_start: u32) -> Option<String> {
-    mir_analyzer::parser::find_preceding_docblock(source, node_start)
+    // Find a `/** ... */` block ending immediately before `node_start`,
+    // allowing only whitespace between the closing `*/` and `node_start`.
+    let prefix = source.get(..node_start as usize)?;
+    let trimmed_end = prefix.trim_end();
+    let close = trimmed_end.strip_suffix("*/")?;
+    let open_idx = close.rfind("/**")?;
+    Some(format!(
+        "{}*/",
+        &trimmed_end[open_idx..trimmed_end.len() - 2]
+    ))
 }
 
 /// Walk an AST and return the parsed docblock for the declaration named `word`.

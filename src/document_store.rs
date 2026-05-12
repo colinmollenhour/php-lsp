@@ -75,6 +75,10 @@ pub struct DocumentStore {
     /// so updates from `initialized` (when composer.json is loaded) are
     /// visible here without any additional wiring.
     psr4: Arc<RwLock<Psr4Map>>,
+    /// mir-analyzer's `AnalysisSession` — owns the workspace MirDb, runs
+    /// Pass-2 analysis, and lazy-loads dependencies via PSR-4. Built lazily
+    /// on first use; rebuilt when PHP version changes.
+    analysis_session: Mutex<Option<(mir_analyzer::PhpVersion, Arc<mir_analyzer::AnalysisSession>)>>,
 }
 
 impl Default for DocumentStore {
@@ -100,7 +104,39 @@ impl DocumentStore {
             next_file_id: AtomicU32::new(0),
             workspace,
             psr4: Arc::new(RwLock::new(Psr4Map::empty())),
+            analysis_session: Mutex::new(None),
         }
+    }
+
+    /// Get or build the `AnalysisSession` for the given PHP version. Rebuilds
+    /// when the version changes (e.g. user flipped config). The session owns
+    /// its own salsa db and AnalysisCache; lazy-loads vendor files via the
+    /// shared PSR-4 map.
+    pub fn analysis_session(
+        &self,
+        php_version: mir_analyzer::PhpVersion,
+    ) -> Arc<mir_analyzer::AnalysisSession> {
+        let mut guard = self.analysis_session.lock().unwrap();
+        if let Some((cached_ver, session)) = guard.as_ref()
+            && *cached_ver == php_version
+        {
+            return Arc::clone(session);
+        }
+        // Build a fresh session. Hand it the shared PSR-4 map so it can
+        // lazy-resolve `UndefinedClass` candidates without us having to mirror
+        // every vendor file upfront.
+        let resolver: Arc<dyn mir_analyzer::ClassResolver> =
+            Arc::new(self.psr4.read().unwrap().clone());
+        let session =
+            Arc::new(mir_analyzer::AnalysisSession::new(php_version).with_class_resolver(resolver));
+        session.ensure_essential_stubs_loaded();
+        *guard = Some((php_version, Arc::clone(&session)));
+        session
+    }
+
+    /// Current PHP version tracked by the workspace input.
+    pub fn workspace_php_version(&self) -> mir_analyzer::PhpVersion {
+        self.with_host(|h| self.workspace.php_version(h.db()))
     }
 
     /// Return the `Arc<RwLock<Psr4Map>>` so callers can share it.
@@ -394,34 +430,40 @@ impl DocumentStore {
         self.workspace.set_php_version(host.db_mut()).to(version);
     }
 
-    /// Workspace-wide populated `MirDb`. Aggregates every known file's
-    /// `StubSlice`. Backed by the `RootDatabase`-level `LspDatabase::cached_mir_db`
-    /// cache, so concurrent `Backend` handlers and salsa queries
-    /// (`semantic_issues`, `file_refs`, `class_issues`) all share one populated
-    /// MirDb per workspace edit.
-    pub fn get_codebase_salsa(&self) -> mir_analyzer::db::MirDb {
-        use crate::db::analysis::LspDatabase;
-        self.sync_workspace_files();
-        let ws = self.workspace;
-        self.snapshot_query(move |db| {
-            let php_version = ws.php_version(db);
-            let cb = crate::db::codebase::codebase(db, ws);
-            db.cached_mir_db(cb.0.clone(), php_version)
-        })
+    /// Stub kept for the legacy `RefLookup` closure shape consumed by
+    /// `find_references_codebase_with_target`. Always returns empty; the
+    /// AST walker handles all reference scanning. Session-backed refs go
+    /// through [`Self::session_references_to`] instead.
+    pub fn get_symbol_refs_salsa(&self, _key: &str) -> Vec<(Arc<str>, u32, u16, u16)> {
+        Vec::new()
     }
 
-    /// Salsa-backed reference lookup — drop-in replacement for
-    /// `Codebase::get_reference_locations`. First call per `key` runs
-    /// `file_refs` over every workspace file; subsequent calls hit the
-    /// `symbol_refs` memo.
-    pub fn get_symbol_refs_salsa(&self, key: &str) -> Vec<(Arc<str>, u32, u16, u16)> {
-        self.sync_workspace_files();
-        let ws = self.workspace;
-        let key = key.to_string();
-        self.snapshot_query(move |db| {
-            warm_file_refs_parallel(db, ws);
-            crate::db::refs::symbol_refs(db, ws, key.clone()).0.to_vec()
-        })
+    /// Session-backed workspace reference lookup. Returns `(file, line, col)`
+    /// locations for every occurrence of `symbol` in the files that the
+    /// `AnalysisSession` has ingested so far. The session's reference index
+    /// is built incrementally during `ingest_file`, so refs for files the
+    /// session hasn't seen yet (background-indexed but never opened) won't
+    /// appear here — those are covered by the AST-walker fallback in the
+    /// references handler.
+    ///
+    /// Returns LSP-style 0-based line/column.
+    pub fn session_references_to(
+        &self,
+        symbol: &mir_analyzer::Symbol,
+    ) -> Vec<(Arc<str>, u32, u32, u32)> {
+        let php_version = self.workspace_php_version();
+        let session = self.analysis_session(php_version);
+        session
+            .references_to(symbol)
+            .into_iter()
+            .map(|(file, range)| {
+                // mir uses 1-based lines, 0-based codepoint columns.
+                let line = range.start.line.saturating_sub(1);
+                let col_start = range.start.column;
+                let col_end = range.end.column;
+                (file, line, col_start, col_end)
+            })
+            .collect()
     }
 
     /// Phase J: salsa-memoized aggregate workspace index.
@@ -443,34 +485,10 @@ impl DocumentStore {
         })
     }
 
-    /// Phase L: force `file_refs` to run for every workspace file so that
-    /// subsequent `textDocument/references` / `prepare_rename` / call-hierarchy
-    /// lookups hit the memo instead of paying first-call latency.
-    ///
-    /// Uses parallel warming (`warm_file_refs_parallel`) so all `file_refs`
-    /// complete concurrently; `symbol_refs` then only aggregates memos.
-    pub fn warm_reference_index(&self) {
-        self.sync_workspace_files();
-        let ws = self.workspace;
-        let _ = self.snapshot_query(move |db| {
-            warm_file_refs_parallel(db, ws);
-            crate::db::refs::symbol_refs(db, ws, String::from("__phplsp_warmup__"))
-                .0
-                .clone()
-        });
-    }
-
-    /// Phase K2b: run `file_definitions` for `uri` and return the
-    /// resulting `StubSlice`. Used by the workspace-scan write path to
-    /// persist slices to disk after a cache miss.
-    pub fn slice_for(&self, uri: &Url) -> Option<Arc<mir_codebase::storage::StubSlice>> {
-        let sf = self.source_file(uri)?;
-        Some(
-            self.snapshot_query(move |db| {
-                crate::db::definitions::file_definitions(db, sf).0.clone()
-            }),
-        )
-    }
+    /// No-op after mir 0.22 migration. The session manages its own warm-up
+    /// via `ingest_file` / `analyze_dependents_of`; there's nothing for us
+    /// to pre-warm here.
+    pub fn warm_reference_index(&self) {}
 
     /// Salsa-backed per-file method-return-type map.
     pub fn get_method_returns_salsa(&self, uri: &Url) -> Option<Arc<crate::ast::MethodReturnsMap>> {
@@ -529,20 +547,54 @@ impl DocumentStore {
         }
     }
 
-    /// Phase I: salsa-memoized raw semantic issues for a file. Callers apply
-    /// their own `DiagnosticsConfig` filter via
-    /// [`crate::semantic_diagnostics::issues_to_diagnostics`] — keeping the
-    /// filter outside the query preserves memoization across config toggles.
+    /// Raw semantic issues for a file, computed via mir's session-based
+    /// `FileAnalyzer`. The session lazy-loads dependencies via PSR-4 so the
+    /// LSP no longer needs to mirror vendor up-front. Callers apply their
+    /// own `DiagnosticsConfig` filter via
+    /// [`crate::semantic_diagnostics::issues_to_diagnostics`].
+    #[tracing::instrument(skip_all)]
     pub fn get_semantic_issues_salsa(&self, uri: &Url) -> Option<Arc<[mir_issues::Issue]>> {
-        let sf = self.source_file(uri)?;
-        self.lazy_load_psr4_imports(uri);
-        self.sync_workspace_files();
-        let ws = self.workspace;
-        Some(
-            self.snapshot_query(move |db| {
-                crate::db::semantic::semantic_issues(db, ws, sf).0.clone()
-            }),
-        )
+        // Need the parsed doc for the analyzer.
+        let doc = self.get_doc_salsa(uri)?;
+        let php_version = self.with_host(|h| self.workspace.php_version(h.db()));
+        let session = self.analysis_session(php_version);
+
+        let file: Arc<str> = Arc::from(uri.as_str());
+        let source = doc.source_arc();
+        {
+            let _s = tracing::debug_span!("session.ingest_file").entered();
+            session.ingest_file(file.clone(), source);
+        }
+        // Pre-load every imported class via PSR-4 so Pass-2 doesn't emit
+        // spurious `UndefinedClass` for classes that ARE on disk but haven't
+        // been ingested yet. The session's resolver was supplied at
+        // construction time.
+        {
+            let _s = tracing::debug_span!("session.lazy_load_imports").entered();
+            let imports = crate::references::collect_file_imports(&doc);
+            for fqcn in imports.values() {
+                let _ = session.lazy_load_class(fqcn);
+            }
+        }
+        let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
+        let analysis = {
+            let _s = tracing::debug_span!("FileAnalyzer::analyze").entered();
+            let analyzer = mir_analyzer::FileAnalyzer::new(&session);
+            analyzer.analyze(file.clone(), doc.source(), doc.program(), &source_map)
+        };
+        // Workspace-level class issues for this file (circular inheritance,
+        // override violations, abstract-method gaps).
+        let class_issues = {
+            let _s = tracing::debug_span!("session.class_issues_for").entered();
+            session.class_issues_for(std::slice::from_ref(&file))
+        };
+        let combined: Vec<mir_issues::Issue> = analysis
+            .issues
+            .into_iter()
+            .chain(class_issues.into_iter())
+            .filter(|i| !i.suppressed)
+            .collect();
+        Some(Arc::from(combined))
     }
 
     /// Returns `(uri, doc)` for files currently open in the editor.
@@ -652,27 +704,9 @@ impl DocumentStore {
 /// scratch.  If the revision was not bumped, any file whose task was cancelled
 /// before completion simply has no memo entry and `symbol_refs`'s sequential
 /// loop recomputes it.
-fn warm_file_refs_parallel(
-    db: &crate::db::analysis::RootDatabase,
-    ws: crate::db::input::Workspace,
-) {
-    let files: Vec<_> = ws.files(db).iter().copied().collect();
-    // Pre-clone one snapshot per file before entering the scope.
-    // RootDatabase: Send (ZalsaLocal owns its RefCell; Arc<Zalsa> is Sync),
-    // but RootDatabase: !Sync, so we must avoid sharing &RootDatabase across
-    // threads.  Collecting owned clones first and moving each into its task
-    // requires only Send, not Sync.
-    let snaps: Vec<crate::db::analysis::RootDatabase> = files.iter().map(|_| db.clone()).collect();
-    rayon::scope(move |s| {
-        for (sf, snap) in files.into_iter().zip(snaps) {
-            s.spawn(move |_| {
-                let _ = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
-                    crate::db::refs::file_refs(&snap, ws, sf);
-                }));
-            });
-        }
-    });
-}
+// `warm_file_refs_parallel` removed: the analyzer-side reference index is
+// now owned by `AnalysisSession` and warmed by `ingest_file`. This salsa-side
+// helper has no counterpart in the new architecture.
 
 #[cfg(test)]
 mod tests {
@@ -690,35 +724,9 @@ mod tests {
         store.mirror_text(&u, &text);
     }
 
-    #[test]
-    fn salsa_codebase_aggregates_all_files() {
-        use mir_analyzer::db::{function_exists_via_db, type_exists_via_db};
-        let store = DocumentStore::new();
-        let sources = [
-            (
-                "/a.php",
-                "<?php\nnamespace A;\nclass Foo {}\ninterface IX {}",
-            ),
-            (
-                "/b.php",
-                "<?php\nnamespace B;\nfunction bar(): int { return 1; }",
-            ),
-            ("/c.php", "<?php\nnamespace C;\nenum Color { case Red; }"),
-        ];
-        for (p, src) in &sources {
-            open(&store, uri(p), src.to_string());
-        }
-
-        let salsa_cb = store.get_codebase_salsa();
-
-        for fqn in ["A\\Foo", "A\\IX", "C\\Color"] {
-            assert!(
-                type_exists_via_db(&salsa_cb, fqn),
-                "{fqn} missing from salsa cb"
-            );
-        }
-        assert!(function_exists_via_db(&salsa_cb, "B\\bar"));
-    }
+    // Removed `salsa_codebase_aggregates_all_files`: the salsa-side codebase
+    // aggregation was deleted with the mir 0.22 migration. Equivalent
+    // behaviour is now covered by mir-analyzer's own session tests.
 
     #[test]
     fn index_registers_file_in_salsa() {
@@ -868,47 +876,9 @@ mod tests {
     /// text and confirm the cache is cleared (codebase now reflects the
     /// re-parsed text). Exercises `seed_cached_slice` + `mirror_text`'s
     /// `set_cached_slice(None)` invalidation together.
-    #[test]
-    fn seed_cached_slice_then_edit_invalidates() {
-        let store = DocumentStore::new();
-        let u = uri("/seed_test.php");
-
-        // Mirror the initial text — classes: "Real".
-        store.mirror_text(&u, "<?php\nclass Real {}");
-
-        // Build a cached slice claiming classes: "Seeded", for the same URI.
-        let seeded = {
-            let src = "<?php\nclass Seeded {}";
-            let source_map = php_rs_parser::source_map::SourceMap::new(src);
-            let (doc, _) = crate::diagnostics::parse_document(src);
-            let collector = mir_analyzer::collector::DefinitionCollector::new_for_slice(
-                Arc::<str>::from(u.as_str()),
-                src,
-                &source_map,
-            );
-            let (s, _) = collector.collect_slice(doc.program());
-            Arc::new(s)
-        };
-        assert!(store.seed_cached_slice(&u, seeded));
-
-        use mir_analyzer::db::type_exists_via_db;
-        // Codebase should contain the seeded class, not the real one.
-        let cb = store.get_codebase_salsa();
-        assert!(type_exists_via_db(&cb, "Seeded"));
-        assert!(!type_exists_via_db(&cb, "Real"));
-
-        // Edit: mirror_text flips the text and also clears cached_slice.
-        store.mirror_text(&u, "<?php\nclass Edited {}");
-        let cb = store.get_codebase_salsa();
-        assert!(
-            type_exists_via_db(&cb, "Edited"),
-            "after edit, codebase must reflect fresh parse"
-        );
-        assert!(
-            !type_exists_via_db(&cb, "Seeded"),
-            "mirror_text must clear cached_slice so stale data is gone"
-        );
-    }
+    // Removed `seed_cached_slice_then_edit_invalidates`: the cached_slice
+    // seed path is no longer relevant — mir 0.22's `AnalysisSession` owns
+    // the cache lifecycle internally.
 
     /// Seeding for a URL that was never mirrored is a no-op (returns `false`)
     /// — avoids silently allocating SourceFiles outside `mirror_text`'s control.
@@ -1032,7 +1002,9 @@ mod tests {
                         let _ = store.get_doc_salsa(u);
                         let _ = store.get_index_salsa(u);
                     }
-                    let _ = store.get_codebase_salsa();
+                    // Post mir 0.22: codebase + refs live in the session,
+                    // not salsa. Concurrent-read smoke is now limited to the
+                    // remaining salsa surface (parsed_doc, file_index).
                     let _ = store.get_symbol_refs_salsa("C0");
                 }
             }));

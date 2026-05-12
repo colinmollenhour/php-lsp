@@ -47,6 +47,7 @@ mod moniker;
 mod on_type_format;
 mod open_files;
 mod organize_imports;
+pub mod panic_guard;
 mod phpdoc_action;
 mod phpstorm_meta;
 mod promote_action;

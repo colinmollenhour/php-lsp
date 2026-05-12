@@ -410,14 +410,21 @@ fn bench_rename(c: &mut Criterion) {
     // Cross-file: rename UserService → UserServiceRenamed across the small
     // fixture set (controller + service + repository + …).
     group.bench_function("cross_file_class", |b| {
-        b.iter(|| black_box(rename("UserService", "UserServiceRenamed", &other_docs)));
+        b.iter(|| {
+            black_box(rename(
+                "UserService",
+                "UserServiceRenamed",
+                &other_docs,
+                None,
+            ))
+        });
     });
 
     if let Some(docs) = laravel_docs() {
         eprintln!("Laravel fixture: {} PHP files (rename)", docs.len());
         group.sample_size(10);
         group.bench_function("laravel_framework", |b| {
-            b.iter(|| black_box(rename("Str", "StrRenamed", &docs)));
+            b.iter(|| black_box(rename("Str", "StrRenamed", &docs, None)));
         });
     } else {
         eprintln!("Laravel fixture not found — skipping rename/laravel_framework");

@@ -23,9 +23,16 @@ pub fn is_valid_php_version(v: &str) -> bool {
 ///
 /// Used to resolve a fully-qualified class name to a source file when the
 /// class is not yet in the workspace index.
+#[derive(Clone)]
 pub struct Psr4Map {
     /// Sorted longest-prefix-first so the most-specific prefix always wins.
     entries: Vec<(String, Vec<PathBuf>)>,
+}
+
+impl mir_analyzer::ClassResolver for Psr4Map {
+    fn resolve(&self, fqcn: &str) -> Option<PathBuf> {
+        Psr4Map::resolve(self, fqcn)
+    }
 }
 
 impl Psr4Map {

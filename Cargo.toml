@@ -40,15 +40,16 @@ dhat = { version = "0.3", optional = true }
 mimalloc = { version = "0.1", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-mir-analyzer = "0.21"
-mir-issues = "0.21"
-mir-codebase = "0.21"
-mir-types = "0.21"
-php-rs-parser = "0.10.0"
-php-ast = "0.10.0"
+mir-analyzer = "0.22"
+mir-issues = "0.22"
+mir-codebase = "0.22"
+mir-types = "0.22"
+php-rs-parser = "0.11"
+php-ast = "0.11"
 bumpalo = { version = "3", features = ["collections"] }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }
+futures = "0.3.31"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bincode = { version = "2", features = ["serde"] }
@@ -69,4 +70,8 @@ iai-callgrind = "0.16"
 
 [[bench]]
 name = "iai_critical"
+harness = false
+
+[[bench]]
+name = "edit_latency"
 harness = false
