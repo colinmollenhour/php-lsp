@@ -21,6 +21,11 @@ pub struct DiagnosticsConfig {
     pub deprecated_calls: bool,
     /// Duplicate class / function declarations.
     pub duplicate_declarations: bool,
+    /// Unused-symbol warnings (unused variables / parameters / methods /
+    /// properties / functions). New in mir 0.22; defaults to `false` so the
+    /// LSP doesn't add noisy warnings to existing workspaces without an
+    /// opt-in. Toggle via `diagnostics.unusedSymbols` in initializationOptions.
+    pub unused_symbols: bool,
 }
 
 impl Default for DiagnosticsConfig {
@@ -34,6 +39,7 @@ impl Default for DiagnosticsConfig {
             type_errors: true,
             deprecated_calls: true,
             duplicate_declarations: true,
+            unused_symbols: false,
         }
     }
 }
@@ -61,6 +67,10 @@ impl DiagnosticsConfig {
         cfg.type_errors = flag("typeErrors");
         cfg.deprecated_calls = flag("deprecatedCalls");
         cfg.duplicate_declarations = flag("duplicateDeclarations");
+        cfg.unused_symbols = obj
+            .get("unusedSymbols")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
         cfg
     }
 }

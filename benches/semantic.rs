@@ -1,14 +1,13 @@
-//! mir-analyzer benchmarks: measures the static-analysis pipeline
-//! (DefinitionCollector → finalize → StatementsAnalyzer) that powers
-//! semantic diagnostics.
+//! mir-analyzer benchmarks: measures the session-based analyze pipeline
+//! that powers semantic diagnostics.
 //!
 //! Covers three regimes:
-//!   - `single_file`      — fresh codebase per iter (cold analyze cost)
-//!   - `edit_loop`        — persistent codebase, repeated analyze on the same
+//!   - `single_file`      — fresh AnalysisSession per iter (cold analyze cost)
+//!   - `edit_loop`        — persistent session, repeated analyze on the same
 //!                          file (models per-keystroke re-analyze cost on a
 //!                          small workspace)
-//!   - `laravel_scale`    — full Laravel populated into the codebase once,
-//!                          then one representative file re-analyzed (models
+//!   - `laravel_scale`    — full Laravel ingested into the session once, then
+//!                          one representative file re-analyzed (models
 //!                          per-keystroke cost in a realistic large workspace)
 //!
 //! The Laravel-scale bench is auto-skipped when the fixture is absent.
@@ -20,14 +19,14 @@ use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use tower_lsp::lsp_types::Url;
 
 use php_lsp::ast::ParsedDoc;
-use php_lsp::backend::DiagnosticsConfig;
+use php_lsp::config::DiagnosticsConfig;
 use php_lsp::semantic_diagnostics::{semantic_diagnostics, semantic_diagnostics_no_rebuild};
 
 const MEDIUM: &str = include_str!("fixtures/medium_class.php");
 
 fn all_enabled() -> DiagnosticsConfig {
-    // Constructed literally because `DiagnosticsConfig::all_enabled()` is
-    // `#[cfg(test)]` and not visible to benches.
+    // `DiagnosticsConfig::all_enabled()` is `#[cfg(test)]`; reconstruct
+    // here so the bench can build outside the test profile.
     DiagnosticsConfig {
         enabled: true,
         undefined_variables: true,
@@ -37,10 +36,17 @@ fn all_enabled() -> DiagnosticsConfig {
         type_errors: true,
         deprecated_calls: true,
         duplicate_declarations: true,
+        unused_symbols: false,
     }
 }
 
-/// Single-file cold analyze: fresh `MirDb` on every iteration.
+fn new_session() -> mir_analyzer::AnalysisSession {
+    let s = mir_analyzer::AnalysisSession::new(mir_analyzer::PhpVersion::LATEST);
+    s.ensure_essential_stubs_loaded();
+    s
+}
+
+/// Single-file cold analyze: fresh `AnalysisSession` per iteration.
 fn bench_single_file(c: &mut Criterion) {
     let uri = Url::parse("file:///bench/medium.php").unwrap();
     let doc = ParsedDoc::parse(MEDIUM.to_owned());
@@ -48,37 +54,32 @@ fn bench_single_file(c: &mut Criterion) {
 
     c.bench_function("semantic/single_file/medium", |b| {
         b.iter(|| {
-            let mut mir_db = mir_analyzer::db::MirDb::default();
-            black_box(semantic_diagnostics(&uri, &doc, &mut mir_db, &cfg, None));
+            let session = new_session();
+            black_box(semantic_diagnostics(&uri, &doc, &session, &cfg));
         });
     });
 }
 
-/// Edit-loop: MirDb is re-populated in place per iter via
-/// `semantic_diagnostics` (which evicts the file's definitions, re-collects
-/// into a `StubSlice`, then re-ingests + analyzes). Models the per-keystroke
-/// cost on a small workspace where the changed file is the only thing in the
-/// db.
+/// Edit-loop: session persists; `ingest_file` updates it in place per iter.
 fn bench_edit_loop(c: &mut Criterion) {
     let uri = Url::parse("file:///bench/medium.php").unwrap();
     let doc = ParsedDoc::parse(MEDIUM.to_owned());
     let cfg = all_enabled();
-    let mut mir_db = mir_analyzer::db::MirDb::default();
+    let session = new_session();
 
-    // Warm the db so the first iter isn't an outlier.
-    let _ = semantic_diagnostics(&uri, &doc, &mut mir_db, &cfg, None);
+    // Warm so the first iter isn't an outlier.
+    let _ = semantic_diagnostics(&uri, &doc, &session, &cfg);
 
     c.bench_function("semantic/edit_loop/medium", |b| {
         b.iter(|| {
-            black_box(semantic_diagnostics(&uri, &doc, &mut mir_db, &cfg, None));
+            black_box(semantic_diagnostics(&uri, &doc, &session, &cfg));
         });
     });
 }
 
-/// Laravel-scale edit-loop: populate the codebase with all Laravel definitions
-/// once, finalize once, then on each iter re-analyze one representative file
-/// **without** rebuilding the codebase. Measures per-keystroke re-analyze cost
-/// in a realistic large workspace.
+/// Laravel-scale edit-loop: ingest every file once into a persistent session,
+/// then on each iter re-analyze a representative hot file. Measures
+/// per-keystroke re-analyze cost in a large workspace.
 fn bench_laravel_scale(c: &mut Criterion) {
     let fixture_dir =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("benches/fixtures/laravel/src");
@@ -90,37 +91,27 @@ fn bench_laravel_scale(c: &mut Criterion) {
         return;
     }
 
-    // Load + parse every PHP file up-front (not counted in the bench).
-    let parsed: Vec<(Url, Arc<ParsedDoc>, String)> = walkdir::WalkDir::new(&fixture_dir)
+    let parsed: Vec<(Url, Arc<ParsedDoc>, Arc<str>)> = walkdir::WalkDir::new(&fixture_dir)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "php"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "php"))
         .filter_map(|e| {
             let url = Url::from_file_path(e.path()).ok()?;
             let src = std::fs::read_to_string(e.path()).ok()?;
-            let doc = Arc::new(ParsedDoc::parse(src.clone()));
-            Some((url, doc, src))
+            let src_arc: Arc<str> = Arc::from(src);
+            let doc = Arc::new(ParsedDoc::parse(src_arc.clone()));
+            Some((url, doc, src_arc))
         })
         .collect();
 
     eprintln!("Laravel fixture: {} PHP files (semantic)", parsed.len());
 
-    // Populate the MirDb with every file's definitions.
-    let mut mir_db = mir_analyzer::db::MirDb::default();
-    for (url, doc, _) in &parsed {
+    let session = new_session();
+    for (url, _doc, src_arc) in &parsed {
         let file: Arc<str> = Arc::from(url.as_str());
-        let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
-        let collector = mir_analyzer::collector::DefinitionCollector::new_for_slice(
-            file,
-            doc.source(),
-            &source_map,
-        );
-        let (slice, _) = collector.collect_slice(doc.program());
-        mir_db.ingest_stub_slice(&slice);
+        session.ingest_file(file, src_arc.clone());
     }
 
-    // Pick a representative hot file to re-analyze on each iter. Prefer a
-    // well-known Illuminate file; fall back to the first parsed entry.
     let hot = parsed
         .iter()
         .find(|(u, _, _)| u.as_str().ends_with("/Illuminate/Support/Str.php"))
@@ -134,7 +125,7 @@ fn bench_laravel_scale(c: &mut Criterion) {
     group.bench_function("reanalyze_str", |b| {
         b.iter(|| {
             black_box(semantic_diagnostics_no_rebuild(
-                &hot.0, &hot.1, &mir_db, &cfg, None,
+                &hot.0, &hot.1, &session, &cfg,
             ));
         });
     });

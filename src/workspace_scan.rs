@@ -153,18 +153,11 @@ pub(crate) async fn scan_workspace(
                 docs.index_from_doc(uri.clone(), &doc);
                 count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-                // K2b write path: force `file_definitions` and persist
-                // the fresh slice so a subsequent startup hits the cache.
-                // The work is unavoidable anyway — `get_codebase_salsa`
-                // would call `file_definitions` lazily on first use — so
-                // materializing it here trades a small up-front cost for
-                // a large warm-start win next time. Best-effort: a write
-                // error is logged via `.ok()` and doesn't fail the scan.
-                if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref())
-                    && let Some(slice) = docs.slice_for(&uri)
-                {
-                    let _ = cache.write(key, &*slice);
-                }
+                // Post-0.22: the analyzer-side definition cache is owned by
+                // `AnalysisSession::with_cache_dir`. We no longer extract a
+                // separate `StubSlice` for our own on-disk cache — that data
+                // path is gone. Keep `cache` plumbing intact for future use.
+                let _ = (cache.as_ref(), cache_key.as_ref());
             })
             .await
             .ok();

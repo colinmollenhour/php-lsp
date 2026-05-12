@@ -50,12 +50,12 @@ use crate::moniker::moniker_at;
 use crate::on_type_format::on_type_format;
 use crate::open_files::{OpenFiles, compute_open_file_diagnostics};
 use crate::organize_imports::organize_imports_action;
+use crate::panic_guard::{guard_async, guard_async_result};
 use crate::phpdoc_action::phpdoc_actions;
 use crate::phpstorm_meta::PhpStormMeta;
 use crate::promote_action::promote_constructor_actions;
 use crate::references::{
-    SymbolKind, find_constructor_references, find_references, find_references_codebase_with_target,
-    find_references_with_target,
+    SymbolKind, find_constructor_references, find_references, find_references_with_target,
 };
 use crate::rename::{prepare_rename, rename, rename_property, rename_variable};
 use crate::selection_range::selection_ranges;
@@ -158,21 +158,19 @@ impl Backend {
         self.open_files.get_doc(&self.docs, uri)
     }
 
-    /// Current finalized codebase — stubs + all known files, memoized by salsa.
-    /// Cheap Arc clone on the happy path; on edits the query re-runs under the
-    /// DocumentStore host lock. Hold the returned Arc for the duration of a
-    /// request to get a consistent snapshot.
+    /// Current MirDb snapshot for the workspace, owned by the
+    /// `AnalysisSession`. Cheap clone (Arc-wrapped internals).
     fn codebase(&self) -> mir_analyzer::db::MirDb {
-        self.docs.get_codebase_salsa()
+        let php_version = self.docs.workspace_php_version();
+        let session = self.docs.analysis_session(php_version);
+        session.snapshot_db()
     }
 
-    /// Look up the import map for a file. Reads directly from the per-file
-    /// `StubSlice` (memoized by salsa's `file_definitions`) — avoids building
-    /// or cloning the workspace-wide MirDb on every cursor-position request.
+    /// `use Foo as Bar;` map for a single file, read directly from the AST.
     fn file_imports(&self, uri: &Url) -> std::collections::HashMap<String, String> {
         self.docs
-            .slice_for(uri)
-            .map(|s| s.imports.clone())
+            .get_doc_salsa(uri)
+            .map(|doc| crate::references::collect_file_imports(&doc))
             .unwrap_or_default()
     }
 
@@ -182,6 +180,107 @@ impl Backend {
         let roots = self.root_paths.read().unwrap().clone();
         crate::autoload::resolve_php_version_from_roots(&roots, explicit)
     }
+
+    /// Compute diagnostic publishes for every open dependent of `changed_uri`.
+    /// Uses `session.analyze_dependents_of` to scope work to files whose
+    /// Pass-2 results actually changed; merges LSP-side parse + duplicate-decl
+    /// diagnostics so the publish reflects the full picture per file.
+    async fn compute_dependent_publishes(
+        &self,
+        changed_uri: &Url,
+        diag_cfg: &crate::config::DiagnosticsConfig,
+    ) -> Vec<(Url, Vec<Diagnostic>)> {
+        compute_dependent_publishes_owned(
+            Arc::clone(&self.docs),
+            self.open_files.clone(),
+            changed_uri.clone(),
+            diag_cfg.clone(),
+        )
+        .await
+    }
+}
+
+/// Build a `mir_analyzer::Symbol` from the cursor-resolved `(word, kind,
+/// target_fqn)` triple, when there's enough information to construct one.
+/// Returns `None` when:
+/// - `kind` is `None` (cursor not on a recognizable symbol) or `Property`
+///   (mir doesn't track property refs at the session-API level), or
+/// - the required FQN piece isn't available.
+fn build_mir_symbol(
+    _word: &str,
+    kind: Option<crate::references::SymbolKind>,
+    target_fqn: Option<&str>,
+) -> Option<mir_analyzer::Symbol> {
+    use crate::references::SymbolKind;
+    use std::sync::Arc as StdArc;
+    match kind {
+        Some(SymbolKind::Function) => {
+            target_fqn.map(|fqn| mir_analyzer::Symbol::Function(StdArc::from(fqn)))
+        }
+        Some(SymbolKind::Class) => {
+            target_fqn.map(|fqn| mir_analyzer::Symbol::Class(StdArc::from(fqn)))
+        }
+        // Methods deliberately skipped: mir's session.references_to for
+        // `Symbol::Method` widens matches in ways the AST walker does not
+        // (it can return free-function refs that share the method name when
+        // the receiver type can't be resolved). The AST walker is more
+        // precise for methods today — revisit when mir's index narrows
+        // method matches strictly by `(class, name)` pair.
+        Some(SymbolKind::Method) => None,
+        Some(SymbolKind::Property) | None => None,
+    }
+}
+
+/// Off-`self` variant of `Backend::compute_dependent_publishes`. Needed
+/// because did_change's blocking republish runs inside a detached
+/// `tokio::spawn` that captures `Arc<Backend>` indirectly via clones of
+/// `docs` / `open_files` rather than `&self`.
+async fn compute_dependent_publishes_owned(
+    docs: Arc<DocumentStore>,
+    open_files: OpenFiles,
+    changed_uri: Url,
+    diag_cfg: crate::config::DiagnosticsConfig,
+) -> Vec<(Url, Vec<Diagnostic>)> {
+    tokio::task::spawn_blocking(move || {
+        // For every open file *other than* the one that changed, recompute
+        // the diagnostic bundle via the session. We deliberately iterate
+        // every open file rather than `session.analyze_dependents_of` —
+        // mir's dependency graph only tracks `use`-import edges, so a file
+        // that references a class via `new Foo()` without a `use` statement
+        // still needs a republish but isn't in the graph.
+        //
+        // Per-file analysis is cheap (the session keeps everything memoized)
+        // so iterating all opens is fine. Race window: if `other` is being
+        // edited concurrently, its own debounced did_change will fire a
+        // republish soon after, so any briefly-stale publish here
+        // self-corrects within ~100 ms.
+        let urls: Vec<Url> = open_files
+            .urls()
+            .into_iter()
+            .filter(|u| u != &changed_uri)
+            .collect();
+        let mut out: Vec<(Url, Vec<Diagnostic>)> = Vec::with_capacity(urls.len());
+        for url in urls {
+            let mut diags = open_files.parse_diagnostics(&url).unwrap_or_default();
+            if let Some(d) = open_files.get_doc(&docs, &url) {
+                let source = open_files.text(&url).unwrap_or_default();
+                diags.extend(
+                    crate::semantic_diagnostics::duplicate_declaration_diagnostics(
+                        &source, &d, &diag_cfg,
+                    ),
+                );
+            }
+            if let Some(issues) = docs.get_semantic_issues_salsa(&url) {
+                diags.extend(crate::semantic_diagnostics::issues_to_diagnostics(
+                    &issues, &url, &diag_cfg,
+                ));
+            }
+            out.push((url, diags));
+        }
+        out
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// Generate a stable result_id for diagnostics. Uses the count and position of diagnostics
@@ -743,191 +842,164 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all)]
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri;
-        let text = params.text_document.text;
+        guard_async("did_open", async move {
+            let uri = params.text_document.uri;
+            let text = params.text_document.text;
 
-        // Store text immediately so other features work while parsing.
-        // This also mirrors the new text into salsa, so the codebase query
-        // sees it when semantic_diagnostics runs below.
-        self.set_open_text(uri.clone(), text.clone());
+            // Store text immediately so other features work while parsing.
+            // This also mirrors the new text into salsa, so the codebase query
+            // sees it when semantic_diagnostics runs below.
+            self.set_open_text(uri.clone(), text.clone());
 
-        let docs_for_spawn = Arc::clone(&self.docs);
-        let diag_cfg = self.config.read().unwrap().diagnostics.clone();
+            let docs_for_spawn = Arc::clone(&self.docs);
+            let diag_cfg = self.config.read().unwrap().diagnostics.clone();
 
-        // Phase I: parse + semantic analysis both run on the blocking pool.
-        // The semantic pass is memoized by salsa, but the *first* call per
-        // file walks `StatementsAnalyzer` over the AST (hundreds of ms on
-        // cold files) — we must not block the async executor on it.
-        let uri_sem = uri.clone();
-        let (parse_diags, sem_issues) = tokio::task::spawn_blocking(move || {
-            let (_doc, parse_diags) = parse_document(&text);
-            let sem_issues = docs_for_spawn.get_semantic_issues_salsa(&uri_sem);
-            (parse_diags, sem_issues)
-        })
-        .await
-        .unwrap_or_else(|_| (vec![], None));
+            // Phase I: parse + semantic analysis both run on the blocking pool.
+            // The semantic pass is memoized by salsa, but the *first* call per
+            // file walks `StatementsAnalyzer` over the AST (hundreds of ms on
+            // cold files) — we must not block the async executor on it.
+            let uri_sem = uri.clone();
+            let (parse_diags, sem_issues) = tokio::task::spawn_blocking(move || {
+                let (_doc, parse_diags) = parse_document(&text);
+                let sem_issues = docs_for_spawn.get_semantic_issues_salsa(&uri_sem);
+                (parse_diags, sem_issues)
+            })
+            .await
+            .unwrap_or_else(|_| (vec![], None));
 
-        self.set_parse_diagnostics(&uri, parse_diags.clone());
-        let stored_source = self.get_open_text(&uri).unwrap_or_default();
-        let doc2 = self.get_doc(&uri);
-        let mut all_diags = parse_diags;
-        if let Some(ref d) = doc2 {
-            all_diags.extend(duplicate_declaration_diagnostics(
-                &stored_source,
-                d,
-                &diag_cfg,
-            ));
-        }
-        if let Some(issues) = sem_issues {
-            all_diags.extend(crate::semantic_diagnostics::issues_to_diagnostics(
-                &issues, &uri, &diag_cfg,
-            ));
-        }
-        // Publish for the opened file FIRST — see did_change for why ordering matters.
-        self.client
-            .publish_diagnostics(uri.clone(), all_diags, None)
-            .await;
-
-        // Cross-file republish: opening a file that defines new symbols can
-        // clear `UndefinedClass`/`UndefinedFunction` errors in already-open
-        // dependents. Symmetric to the loop in did_change.
-        let docs_dep = Arc::clone(&self.docs);
-        let open_files_dep = self.open_files.clone();
-        let diag_cfg_dep = diag_cfg.clone();
-        let opened_uri = uri.clone();
-        let dependents = tokio::task::spawn_blocking(move || {
-            let mut out: Vec<(Url, Vec<Diagnostic>)> = Vec::new();
-            for other in open_files_dep.urls() {
-                if other == opened_uri {
-                    continue;
-                }
-                let diags = compute_open_file_diagnostics(
-                    &docs_dep,
-                    &open_files_dep,
-                    &other,
-                    &diag_cfg_dep,
-                );
-                out.push((other, diags));
+            self.set_parse_diagnostics(&uri, parse_diags.clone());
+            let stored_source = self.get_open_text(&uri).unwrap_or_default();
+            let doc2 = self.get_doc(&uri);
+            let mut all_diags = parse_diags;
+            if let Some(ref d) = doc2 {
+                all_diags.extend(duplicate_declaration_diagnostics(
+                    &stored_source,
+                    d,
+                    &diag_cfg,
+                ));
             }
-            out
+            if let Some(issues) = sem_issues {
+                all_diags.extend(crate::semantic_diagnostics::issues_to_diagnostics(
+                    &issues, &uri, &diag_cfg,
+                ));
+            }
+            // Publish for the opened file FIRST — see did_change for why ordering matters.
+            self.client
+                .publish_diagnostics(uri.clone(), all_diags, None)
+                .await;
+
+            // Cross-file republish via the session's parallel re-analysis API.
+            // Only files whose Pass-2 actually changed appear in the result —
+            // we don't blast every open file with a publish like the old loop.
+            let dependents = self.compute_dependent_publishes(&uri, &diag_cfg).await;
+            for (dep_uri, dep_diags) in dependents {
+                self.client
+                    .publish_diagnostics(dep_uri, dep_diags, None)
+                    .await;
+            }
         })
         .await
-        .unwrap_or_default();
-        for (dep_uri, dep_diags) in dependents {
-            self.client
-                .publish_diagnostics(dep_uri, dep_diags, None)
-                .await;
-        }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri;
-        let text = match params.content_changes.into_iter().last() {
-            Some(c) => c.text,
-            None => return,
-        };
+        guard_async("did_change", async move {
+            let uri = params.text_document.uri;
+            let text = match params.content_changes.into_iter().last() {
+                Some(c) => c.text,
+                None => return,
+            };
 
-        // Store text immediately and capture the version token.
-        // Features (completion, hover, …) see the new text instantly while
-        // the parse runs in the background.
-        let version = self.set_open_text(uri.clone(), text.clone());
+            // Store text immediately and capture the version token.
+            // Features (completion, hover, …) see the new text instantly while
+            // the parse runs in the background.
+            let version = self.set_open_text(uri.clone(), text.clone());
 
-        let docs = Arc::clone(&self.docs);
-        let open_files = self.open_files.clone();
-        let client = self.client.clone();
-        let diag_cfg = self.config.read().unwrap().diagnostics.clone();
-        tokio::spawn(async move {
-            // 100 ms debounce: if another edit arrives before we parse,
-            // the version gate in Backend below will discard this result.
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let docs = Arc::clone(&self.docs);
+            let open_files = self.open_files.clone();
+            let client = self.client.clone();
+            let diag_cfg = self.config.read().unwrap().diagnostics.clone();
+            tokio::spawn(async move {
+                // 100 ms debounce: if another edit arrives before we parse,
+                // the version gate in Backend below will discard this result.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-            let (_doc, diagnostics) = tokio::task::spawn_blocking(move || parse_document(&text))
-                .await
-                .unwrap_or_else(|_| (ParsedDoc::default(), vec![]));
+                let (_doc, diagnostics) =
+                    tokio::task::spawn_blocking(move || parse_document(&text))
+                        .await
+                        .unwrap_or_else(|_| (ParsedDoc::default(), vec![]));
 
-            // Only apply if no newer edit arrived while we were parsing.
-            // Backend-level gate replaces the old `apply_parse` version check.
-            if open_files.current_version(&uri) == Some(version) {
-                open_files.set_parse_diagnostics(&uri, diagnostics.clone());
+                // Only apply if no newer edit arrived while we were parsing.
+                // Backend-level gate replaces the old `apply_parse` version check.
+                if open_files.current_version(&uri) == Some(version) {
+                    open_files.set_parse_diagnostics(&uri, diagnostics.clone());
 
-                // Phase I: the salsa `semantic_issues` walk is synchronous
-                // and CPU-bound on a cold file — run it on the blocking
-                // pool so the async runtime stays responsive. Returns the
-                // full diagnostic bundle (semantic + dup-decl + deprecated
-                // calls), all computed off-thread.
-                let docs_sem = Arc::clone(&docs);
-                let open_files_sem = open_files.clone();
-                let uri_sem = uri.clone();
-                let diag_cfg_sem = diag_cfg.clone();
-                let extra = tokio::task::spawn_blocking(move || {
-                    let Some(d) = open_files_sem.get_doc(&docs_sem, &uri_sem) else {
-                        return Vec::<Diagnostic>::new();
-                    };
-                    let source = open_files_sem.text(&uri_sem).unwrap_or_default();
-                    let mut out = Vec::new();
-                    if let Some(issues) = docs_sem.get_semantic_issues_salsa(&uri_sem) {
-                        out.extend(crate::semantic_diagnostics::issues_to_diagnostics(
-                            &issues,
-                            &uri_sem,
+                    // Phase I: the salsa `semantic_issues` walk is synchronous
+                    // and CPU-bound on a cold file — run it on the blocking
+                    // pool so the async runtime stays responsive. Returns the
+                    // full diagnostic bundle (semantic + dup-decl + deprecated
+                    // calls), all computed off-thread.
+                    let docs_sem = Arc::clone(&docs);
+                    let open_files_sem = open_files.clone();
+                    let uri_sem = uri.clone();
+                    let diag_cfg_sem = diag_cfg.clone();
+                    let extra = tokio::task::spawn_blocking(move || {
+                        let Some(d) = open_files_sem.get_doc(&docs_sem, &uri_sem) else {
+                            return Vec::<Diagnostic>::new();
+                        };
+                        let source = open_files_sem.text(&uri_sem).unwrap_or_default();
+                        let mut out = Vec::new();
+                        if let Some(issues) = docs_sem.get_semantic_issues_salsa(&uri_sem) {
+                            out.extend(crate::semantic_diagnostics::issues_to_diagnostics(
+                                &issues,
+                                &uri_sem,
+                                &diag_cfg_sem,
+                            ));
+                        }
+                        out.extend(duplicate_declaration_diagnostics(
+                            &source,
+                            &d,
                             &diag_cfg_sem,
                         ));
-                    }
-                    out.extend(duplicate_declaration_diagnostics(
-                        &source,
-                        &d,
-                        &diag_cfg_sem,
-                    ));
-                    out
-                })
-                .await
-                .unwrap_or_default();
+                        out
+                    })
+                    .await
+                    .unwrap_or_default();
 
-                let mut all_diags = diagnostics;
-                all_diags.extend(extra);
-                // Publish for the changed file FIRST. Test harnesses (and
-                // some clients) consume publishDiagnostics for unrelated
-                // URIs while waiting for one specific URI; reversing this
-                // order would silently swallow the changed file's publish.
-                client
-                    .publish_diagnostics(uri.clone(), all_diags, None)
+                    let mut all_diags = diagnostics;
+                    all_diags.extend(extra);
+                    // Publish for the changed file FIRST. Test harnesses (and
+                    // some clients) consume publishDiagnostics for unrelated
+                    // URIs while waiting for one specific URI; reversing this
+                    // order would silently swallow the changed file's publish.
+                    client
+                        .publish_diagnostics(uri.clone(), all_diags, None)
+                        .await;
+
+                    // Cross-file republish via the session's parallel
+                    // re-analysis API. Only files whose Pass-2 changed are
+                    // returned — the old loop blasted every open file.
+                    //
+                    // Race window: if `other` is being edited concurrently,
+                    // its own debounced did_change will still fire a republish,
+                    // so any briefly-stale publish here self-corrects within
+                    // ~100 ms.
+                    let dependents = compute_dependent_publishes_owned(
+                        Arc::clone(&docs),
+                        open_files.clone(),
+                        uri.clone(),
+                        diag_cfg.clone(),
+                    )
                     .await;
-
-                // Cross-file republish: a dependency change may invalidate
-                // diagnostics in other open files. We re-query each open
-                // file's diagnostics (salsa-cached for unaffected files,
-                // recomputed for affected ones) and publish the result.
-                //
-                // Race window: if `other` is being edited concurrently, its
-                // own debounced did_change will still fire a republish, so
-                // any briefly-stale publish here self-corrects within ~100ms.
-                let docs_dep = Arc::clone(&docs);
-                let open_files_dep = open_files.clone();
-                let diag_cfg_dep = diag_cfg.clone();
-                let changed_uri = uri.clone();
-                let dependents = tokio::task::spawn_blocking(move || {
-                    let mut out: Vec<(Url, Vec<Diagnostic>)> = Vec::new();
-                    for other in open_files_dep.urls() {
-                        if other == changed_uri {
-                            continue;
-                        }
-                        let diags = compute_open_file_diagnostics(
-                            &docs_dep,
-                            &open_files_dep,
-                            &other,
-                            &diag_cfg_dep,
-                        );
-                        out.push((other, diags));
+                    for (dep_uri, dep_diags) in dependents {
+                        client.publish_diagnostics(dep_uri, dep_diags, None).await;
                     }
-                    out
-                })
-                .await
-                .unwrap_or_default();
-                for (dep_uri, dep_diags) in dependents {
-                    client.publish_diagnostics(dep_uri, dep_diags, None).await;
                 }
-            }
-        });
+            });
+        })
+        .await
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -986,51 +1058,54 @@ impl LanguageServer for Backend {
         send_refresh_requests(&self.client).await;
     }
 
+    #[tracing::instrument(skip_all)]
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let uri = &params.text_document_position.text_document.uri;
-        let position = params.text_document_position.position;
-        let source = self.get_open_text(uri).unwrap_or_default();
-        // B4c: first production caller migrated to salsa-backed read.
-        let doc = match self.get_doc(uri) {
-            Some(d) => d,
-            None => return Ok(Some(CompletionResponse::Array(vec![]))),
-        };
-        let other_with_returns = self.docs.other_docs_with_returns(uri, &self.open_urls());
-        let other_docs: Vec<Arc<ParsedDoc>> = other_with_returns
-            .iter()
-            .map(|(_, d, _)| d.clone())
-            .collect();
-        let other_returns: Vec<Arc<crate::ast::MethodReturnsMap>> = other_with_returns
-            .iter()
-            .map(|(_, _, r)| r.clone())
-            .collect();
-        let doc_returns = self.docs.get_method_returns_salsa(uri);
-        let trigger = params
-            .context
-            .as_ref()
-            .and_then(|c| c.trigger_character.as_deref());
-        let meta_guard = self.meta.read().unwrap();
-        let meta_opt = if meta_guard.is_empty() {
-            None
-        } else {
-            Some(&*meta_guard)
-        };
-        let imports = self.file_imports(uri);
-        let ctx = CompletionCtx {
-            source: Some(&source),
-            position: Some(position),
-            meta: meta_opt,
-            doc_uri: Some(uri),
-            file_imports: Some(&imports),
-            doc_returns: doc_returns.as_deref(),
-            other_returns: Some(&other_returns),
-        };
-        Ok(Some(CompletionResponse::Array(filtered_completions_at(
-            &doc,
-            &other_docs,
-            trigger,
-            &ctx,
-        ))))
+        guard_async_result("completion", async move {
+            let uri = &params.text_document_position.text_document.uri;
+            let position = params.text_document_position.position;
+            let source = self.get_open_text(uri).unwrap_or_default();
+            let doc = match self.get_doc(uri) {
+                Some(d) => d,
+                None => return Ok(Some(CompletionResponse::Array(vec![]))),
+            };
+            let other_with_returns = self.docs.other_docs_with_returns(uri, &self.open_urls());
+            let other_docs: Vec<Arc<ParsedDoc>> = other_with_returns
+                .iter()
+                .map(|(_, d, _)| d.clone())
+                .collect();
+            let other_returns: Vec<Arc<crate::ast::MethodReturnsMap>> = other_with_returns
+                .iter()
+                .map(|(_, _, r)| r.clone())
+                .collect();
+            let doc_returns = self.docs.get_method_returns_salsa(uri);
+            let trigger = params
+                .context
+                .as_ref()
+                .and_then(|c| c.trigger_character.as_deref());
+            let meta_guard = self.meta.read().unwrap();
+            let meta_opt = if meta_guard.is_empty() {
+                None
+            } else {
+                Some(&*meta_guard)
+            };
+            let imports = self.file_imports(uri);
+            let ctx = CompletionCtx {
+                source: Some(&source),
+                position: Some(position),
+                meta: meta_opt,
+                doc_uri: Some(uri),
+                file_imports: Some(&imports),
+                doc_returns: doc_returns.as_deref(),
+                other_returns: Some(&other_returns),
+            };
+            Ok(Some(CompletionResponse::Array(filtered_completions_at(
+                &doc,
+                &other_docs,
+                trigger,
+                &ctx,
+            ))))
+        })
+        .await
     }
 
     async fn completion_resolve(&self, mut item: CompletionItem) -> Result<CompletionItem> {
@@ -1060,243 +1135,279 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        let uri = &params.text_document_position_params.text_document.uri;
-        let position = params.text_document_position_params.position;
-        let source = self.get_open_text(uri).unwrap_or_default();
-        let doc = match self.get_doc(uri) {
-            Some(d) => d,
-            None => return Ok(None),
-        };
-        // Search current file's ParsedDoc first (fast), then fall back to index search.
-        let empty_other_docs: Vec<(Url, Arc<ParsedDoc>)> = vec![];
-        if let Some(loc) = goto_definition(uri, &source, &doc, &empty_other_docs, position) {
-            return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
-        }
-        // Receiver-aware method dispatch: `$var->method()` must jump to the
-        // method defined in `$var`'s class hierarchy, not the first `method`
-        // found in any indexed file (which would return a wrong class).
-        if let Some(line_text) = source.lines().nth(position.line as usize)
-            && let Some(word) = crate::util::word_at_position(&source, position)
-            && let Some(receiver) = crate::hover::extract_receiver_var_before_cursor(
-                line_text,
-                position.character as usize,
-            )
-        {
-            let class_name = if receiver == "$this" {
-                crate::type_map::enclosing_class_at(&source, &doc, position)
-            } else {
-                let doc_returns = self
-                    .docs
-                    .get_method_returns_salsa(uri)
-                    .unwrap_or_else(|| std::sync::Arc::new(Default::default()));
-                let tm = crate::type_map::TypeMap::from_docs_at_position(
-                    &doc,
-                    &doc_returns,
-                    std::iter::empty(),
-                    None,
-                    position,
-                );
-                tm.get(&receiver).map(|s| s.to_string())
+        guard_async_result("goto_definition", async move {
+            let uri = &params.text_document_position_params.text_document.uri;
+            let position = params.text_document_position_params.position;
+            let source = self.get_open_text(uri).unwrap_or_default();
+            let doc = match self.get_doc(uri) {
+                Some(d) => d,
+                None => return Ok(None),
             };
-            if let Some(cls) = class_name {
-                let first_cls = cls.split('|').next().unwrap_or(&cls).to_owned();
-                let all_indexes = self.docs.all_indexes();
-                if let Some(loc) = find_method_in_class_hierarchy(&first_cls, &word, &all_indexes) {
-                    let refined = self
+            // Search current file's ParsedDoc first (fast), then fall back to index search.
+            let empty_other_docs: Vec<(Url, Arc<ParsedDoc>)> = vec![];
+            if let Some(loc) = goto_definition(uri, &source, &doc, &empty_other_docs, position) {
+                return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
+            }
+            // Receiver-aware method dispatch: `$var->method()` must jump to the
+            // method defined in `$var`'s class hierarchy, not the first `method`
+            // found in any indexed file (which would return a wrong class).
+            if let Some(line_text) = source.lines().nth(position.line as usize)
+                && let Some(word) = crate::util::word_at_position(&source, position)
+                && let Some(receiver) = crate::hover::extract_receiver_var_before_cursor(
+                    line_text,
+                    position.character as usize,
+                )
+            {
+                let class_name = if receiver == "$this" {
+                    crate::type_map::enclosing_class_at(&source, &doc, position)
+                } else {
+                    let doc_returns = self
                         .docs
-                        .get_doc_salsa(&loc.uri)
-                        .and_then(|doc| {
-                            find_declaration_range(doc.source(), &doc, &word).map(|range| {
-                                Location {
-                                    uri: loc.uri.clone(),
-                                    range,
-                                }
+                        .get_method_returns_salsa(uri)
+                        .unwrap_or_else(|| std::sync::Arc::new(Default::default()));
+                    let tm = crate::type_map::TypeMap::from_docs_at_position(
+                        &doc,
+                        &doc_returns,
+                        std::iter::empty(),
+                        None,
+                        position,
+                    );
+                    tm.get(&receiver).map(|s| s.to_string())
+                };
+                if let Some(cls) = class_name {
+                    let first_cls = cls.split('|').next().unwrap_or(&cls).to_owned();
+                    let all_indexes = self.docs.all_indexes();
+                    if let Some(loc) =
+                        find_method_in_class_hierarchy(&first_cls, &word, &all_indexes)
+                    {
+                        let refined = self
+                            .docs
+                            .get_doc_salsa(&loc.uri)
+                            .and_then(|doc| {
+                                find_declaration_range(doc.source(), &doc, &word).map(|range| {
+                                    Location {
+                                        uri: loc.uri.clone(),
+                                        range,
+                                    }
+                                })
                             })
-                        })
-                        .unwrap_or(loc);
-                    return Ok(Some(GotoDefinitionResponse::Scalar(refined)));
+                            .unwrap_or(loc);
+                        return Ok(Some(GotoDefinitionResponse::Scalar(refined)));
+                    }
                 }
             }
-        }
 
-        // Cross-file: use FileIndex (no disk I/O for background files).
-        let other_indexes = self.docs.other_indexes(uri);
-        if let Some(word) = crate::util::word_at_position(&source, position)
-            && let Some(loc) = find_in_indexes(&word, &other_indexes)
-        {
-            let refined = self
-                .docs
-                .get_doc_salsa(&loc.uri)
-                .and_then(|doc| {
-                    find_declaration_range(doc.source(), &doc, &word).map(|range| Location {
-                        uri: loc.uri.clone(),
-                        range,
+            // Cross-file: use FileIndex (no disk I/O for background files).
+            let other_indexes = self.docs.other_indexes(uri);
+            if let Some(word) = crate::util::word_at_position(&source, position)
+                && let Some(loc) = find_in_indexes(&word, &other_indexes)
+            {
+                let refined = self
+                    .docs
+                    .get_doc_salsa(&loc.uri)
+                    .and_then(|doc| {
+                        find_declaration_range(doc.source(), &doc, &word).map(|range| Location {
+                            uri: loc.uri.clone(),
+                            range,
+                        })
                     })
-                })
-                .unwrap_or(loc);
-            return Ok(Some(GotoDefinitionResponse::Scalar(refined)));
-        }
+                    .unwrap_or(loc);
+                return Ok(Some(GotoDefinitionResponse::Scalar(refined)));
+            }
 
-        // PSR-4 fallback: only useful for fully-qualified names (contain `\`)
-        if let Some(word) = word_at_position(&source, position)
-            && word.contains('\\')
-            && let Some(loc) = self.psr4_goto(&word).await
-        {
-            return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
-        }
+            // PSR-4 fallback: only useful for fully-qualified names (contain `\`)
+            if let Some(word) = word_at_position(&source, position)
+                && word.contains('\\')
+                && let Some(loc) = self.psr4_goto(&word).await
+            {
+                return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
+            }
 
-        Ok(None)
+            Ok(None)
+        })
+        .await
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let uri = &params.text_document_position.text_document.uri;
-        let position = params.text_document_position.position;
-        let source = self.get_open_text(uri).unwrap_or_default();
-        let word = match word_at_position(&source, position) {
-            Some(w) => w,
-            None => return Ok(None),
-        };
-        // Special case: cursor on a class's `__construct` method declaration.
-        // The constructor's call sites are `new OwningClass(...)`, not
-        // `->__construct()`, so name-only matching would return every class's
-        // constructor declaration (what issue reports describe as "references
-        // to __construct shows every class"). Redirect to Class-kind refs on
-        // the owning class and tack on the ctor's own decl span.
-        if word == "__construct"
-            && let Some(doc) = self.get_doc(uri)
-            && let Some(class_name) =
-                class_name_at_construct_decl(doc.source(), &doc.program().stmts, position)
-        {
-            let all_docs = self.docs.all_docs_for_scan();
-            let include_declaration = params.context.include_declaration;
-            // `class_name` is the FQN when the constructor is inside a namespace
-            // (e.g. `"Shop\\Order"`). The AST walker must search for the *short*
-            // name (`"Order"`) since that's what appears in source at call sites,
-            // while the FQN is used only to scope the search and prevent collisions
-            // between two classes with the same short name in different namespaces.
-            let short_name = class_name
-                .rsplit('\\')
-                .next()
-                .unwrap_or(class_name.as_str())
-                .to_owned();
-            let class_fqn = if class_name.contains('\\') {
-                Some(class_name.as_str())
-            } else {
-                None
+        guard_async_result("references", async move {
+            let uri = &params.text_document_position.text_document.uri;
+            let position = params.text_document_position.position;
+            let source = self.get_open_text(uri).unwrap_or_default();
+            let word = match word_at_position(&source, position) {
+                Some(w) => w,
+                None => return Ok(None),
             };
-            // Use `new_refs_in_stmts` directly — bypasses the codebase/salsa
-            // index whose `ClassReference` key is too broad (covers type hints,
-            // `instanceof`, `extends`, `implements` in addition to `new` calls).
-            let mut locations = find_constructor_references(&short_name, &all_docs, class_fqn);
-            if include_declaration {
-                // The cursor is already on the `__construct` name (verified by
-                // `class_name_at_construct_decl`), so use the cursor position directly as
-                // the span rather than re-searching via str_offset (which finds the first
-                // occurrence in the file and would point at the wrong constructor in files
-                // with more than one class).
-                let end = Position {
-                    line: position.line,
-                    character: position.character + "__construct".len() as u32,
+            // Special case: cursor on a class's `__construct` method declaration.
+            // The constructor's call sites are `new OwningClass(...)`, not
+            // `->__construct()`, so name-only matching would return every class's
+            // constructor declaration (what issue reports describe as "references
+            // to __construct shows every class"). Redirect to Class-kind refs on
+            // the owning class and tack on the ctor's own decl span.
+            if word == "__construct"
+                && let Some(doc) = self.get_doc(uri)
+                && let Some(class_name) =
+                    class_name_at_construct_decl(doc.source(), &doc.program().stmts, position)
+            {
+                let all_docs = self.docs.all_docs_for_scan();
+                let include_declaration = params.context.include_declaration;
+                // `class_name` is the FQN when the constructor is inside a namespace
+                // (e.g. `"Shop\\Order"`). The AST walker must search for the *short*
+                // name (`"Order"`) since that's what appears in source at call sites,
+                // while the FQN is used only to scope the search and prevent collisions
+                // between two classes with the same short name in different namespaces.
+                let short_name = class_name
+                    .rsplit('\\')
+                    .next()
+                    .unwrap_or(class_name.as_str())
+                    .to_owned();
+                let class_fqn = if class_name.contains('\\') {
+                    Some(class_name.as_str())
+                } else {
+                    None
                 };
-                locations.push(Location {
-                    uri: uri.clone(),
-                    range: Range {
-                        start: position,
-                        end,
-                    },
+                // Use `new_refs_in_stmts` directly — bypasses the codebase/salsa
+                // index whose `ClassReference` key is too broad (covers type hints,
+                // `instanceof`, `extends`, `implements` in addition to `new` calls).
+                let mut locations = find_constructor_references(&short_name, &all_docs, class_fqn);
+                if include_declaration {
+                    // The cursor is already on the `__construct` name (verified by
+                    // `class_name_at_construct_decl`), so use the cursor position directly as
+                    // the span rather than re-searching via str_offset (which finds the first
+                    // occurrence in the file and would point at the wrong constructor in files
+                    // with more than one class).
+                    let end = Position {
+                        line: position.line,
+                        character: position.character + "__construct".len() as u32,
+                    };
+                    locations.push(Location {
+                        uri: uri.clone(),
+                        range: Range {
+                            start: position,
+                            end,
+                        },
+                    });
+                }
+                return Ok(if locations.is_empty() {
+                    None
+                } else {
+                    Some(locations)
                 });
             }
-            return Ok(if locations.is_empty() {
-                None
-            } else {
-                Some(locations)
-            });
-        }
 
-        let doc_opt = self.get_doc(uri);
-        // Check for promoted constructor property params before the character-based
-        // heuristic: `$name` in `public function __construct(public string $name)`
-        // should find `->name` property accesses, not `$name` variable occurrences.
-        let (word, kind) = if let Some(doc) = &doc_opt
-            && let Some(prop_name) =
-                promoted_property_at_cursor(doc.source(), &doc.program().stmts, position)
-        {
-            (prop_name, Some(SymbolKind::Property))
-        } else if let Some(doc) = &doc_opt {
-            let stmts = &doc.program().stmts;
-            if cursor_is_on_method_decl(doc.source(), stmts, position) {
-                (word, Some(SymbolKind::Method))
-            } else if let Some(prop_name) =
-                cursor_is_on_property_decl(doc.source(), stmts, position)
+            let doc_opt = self.get_doc(uri);
+            // Check for promoted constructor property params before the character-based
+            // heuristic: `$name` in `public function __construct(public string $name)`
+            // should find `->name` property accesses, not `$name` variable occurrences.
+            let (word, kind) = if let Some(doc) = &doc_opt
+                && let Some(prop_name) =
+                    promoted_property_at_cursor(doc.source(), &doc.program().stmts, position)
             {
                 (prop_name, Some(SymbolKind::Property))
+            } else if let Some(doc) = &doc_opt {
+                let stmts = &doc.program().stmts;
+                if cursor_is_on_method_decl(doc.source(), stmts, position) {
+                    (word, Some(SymbolKind::Method))
+                } else if let Some(prop_name) =
+                    cursor_is_on_property_decl(doc.source(), stmts, position)
+                {
+                    (prop_name, Some(SymbolKind::Property))
+                } else {
+                    let k = symbol_kind_at(&source, position, &word);
+                    (word, k)
+                }
             } else {
                 let k = symbol_kind_at(&source, position, &word);
                 (word, k)
-            }
-        } else {
-            let k = symbol_kind_at(&source, position, &word);
-            (word, k)
-        };
-        let all_docs = self.docs.all_docs_for_scan();
-        let include_declaration = params.context.include_declaration;
+            };
+            let all_docs = self.docs.all_docs_for_scan();
+            let include_declaration = params.context.include_declaration;
 
-        // Resolve the FQN at the cursor so `find_references_codebase_with_target`
-        // can match by exact FQN instead of short name. This fixes the
-        // cross-namespace overmatch for Function/Class and the unrelated-class
-        // overmatch for Method (via the owning FQCN).
-        let target_fqn: Option<String> = doc_opt.as_ref().and_then(|doc| {
-            let imports = self.file_imports(uri);
-            match kind {
-                Some(SymbolKind::Function) | Some(SymbolKind::Class) => {
-                    let resolved = crate::moniker::resolve_fqn(doc, &word, &imports);
-                    if resolved.contains('\\') {
-                        Some(resolved)
-                    } else {
-                        None
+            // Resolve the FQN at the cursor so `find_references_codebase_with_target`
+            // can match by exact FQN instead of short name. This fixes the
+            // cross-namespace overmatch for Function/Class and the unrelated-class
+            // overmatch for Method (via the owning FQCN).
+            let target_fqn: Option<String> = doc_opt.as_ref().and_then(|doc| {
+                let imports = self.file_imports(uri);
+                match kind {
+                    Some(SymbolKind::Function) | Some(SymbolKind::Class) => {
+                        let resolved = crate::moniker::resolve_fqn(doc, &word, &imports);
+                        if resolved.contains('\\') {
+                            Some(resolved)
+                        } else {
+                            None
+                        }
                     }
+                    Some(SymbolKind::Method) => {
+                        // Owning FQCN: the class/interface/trait/enum that contains the cursor.
+                        let short_owner =
+                            crate::type_map::enclosing_class_at(doc.source(), doc, position)?;
+                        // `resolve_fqn` walks the doc and applies namespace prefix if any.
+                        Some(crate::moniker::resolve_fqn(doc, &short_owner, &imports))
+                    }
+                    _ => None,
                 }
-                Some(SymbolKind::Method) => {
-                    // Owning FQCN: the class/interface/trait/enum that contains the cursor.
-                    let short_owner =
-                        crate::type_map::enclosing_class_at(doc.source(), doc, position)?;
-                    // `resolve_fqn` walks the doc and applies namespace prefix if any.
-                    Some(crate::moniker::resolve_fqn(doc, &short_owner, &imports))
-                }
-                _ => None,
-            }
-        });
+            });
 
-        // Fast path: look up references via the salsa `symbol_refs` query.
-        // First call per key runs `file_refs` across the workspace; subsequent
-        // calls hit salsa's memo. Falls back to the full AST scan for Method /
-        // None kinds, and whenever the symbol is not found in the codebase.
-        let locations = {
-            let cb = self.codebase();
-            let docs = Arc::clone(&self.docs);
-            let lookup = move |key: &str| docs.get_symbol_refs_salsa(key);
-            find_references_codebase_with_target(
-                &word,
-                &all_docs,
-                include_declaration,
-                kind,
-                target_fqn.as_deref(),
-                &cb,
-                &lookup,
-            )
-            .unwrap_or_else(|| match target_fqn.as_deref() {
+            // AST walker is the workspace-wide source of truth: it scans
+            // every indexed file (open or not) for the symbol's short name
+            // with namespace + kind disambiguation. Reliable for all kinds.
+            let mut locations = match target_fqn.as_deref() {
                 Some(t) => {
                     find_references_with_target(&word, &all_docs, include_declaration, kind, t)
                 }
                 None => find_references(&word, &all_docs, include_declaration, kind),
-            })
-        };
+            };
 
-        Ok(if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
+            // Augment with session-backed refs when we can build a
+            // `mir_analyzer::Symbol` from the cursor info. The session sees
+            // type-resolved method calls and similar semantic refs that the
+            // AST walker would miss. De-duplicates by (uri, line, range).
+            if let Some(sym) = build_mir_symbol(&word, kind, target_fqn.as_deref()) {
+                let extra = self.docs.session_references_to(&sym);
+                if !extra.is_empty() {
+                    let mut seen: std::collections::HashSet<(String, u32, u32, u32)> = locations
+                        .iter()
+                        .map(|loc| {
+                            (
+                                loc.uri.to_string(),
+                                loc.range.start.line,
+                                loc.range.start.character,
+                                loc.range.end.character,
+                            )
+                        })
+                        .collect();
+                    for (file, line, col_start, col_end) in extra {
+                        let Ok(uri_parsed) = Url::parse(&file) else {
+                            continue;
+                        };
+                        let key = (uri_parsed.to_string(), line, col_start, col_end);
+                        if !seen.insert(key) {
+                            continue;
+                        }
+                        locations.push(Location {
+                            uri: uri_parsed,
+                            range: tower_lsp::lsp_types::Range {
+                                start: tower_lsp::lsp_types::Position {
+                                    line,
+                                    character: col_start,
+                                },
+                                end: tower_lsp::lsp_types::Position {
+                                    line,
+                                    character: col_end,
+                                },
+                            },
+                        });
+                    }
+                }
+            }
+
+            Ok(if locations.is_empty() {
+                None
+            } else {
+                Some(locations)
+            })
         })
+        .await
     }
 
     async fn prepare_rename(
@@ -1358,41 +1469,45 @@ impl LanguageServer for Backend {
         Ok(signature_help(&source, &doc, position))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let uri = &params.text_document_position_params.text_document.uri;
-        let position = params.text_document_position_params.position;
-        let source = self.get_open_text(uri).unwrap_or_default();
-        let doc = match self.get_doc(uri) {
-            Some(d) => d,
-            None => return Ok(None),
-        };
-        let doc_returns = self
-            .docs
-            .get_method_returns_salsa(uri)
-            .unwrap_or_else(|| std::sync::Arc::new(Default::default()));
-        let other_docs = self.docs.other_docs_with_returns(uri, &self.open_urls());
-        let result = hover_info(&source, &doc, &doc_returns, position, &other_docs);
-        if result.is_some() {
-            return Ok(result);
-        }
-        // Fallback: look up the word in the workspace index so class names in
-        // extends clauses and parameter types resolve even when their defining
-        // file is never opened.  Also try the alias-resolved name so that
-        // `use Foo as Bar` works even when Foo is only in the index.
-        let all_indexes = self.docs.all_indexes();
-        if let Some(word) = crate::util::word_at_position(&source, position) {
-            // Try the literal word first.
-            if let Some(h) = class_hover_from_index(&word, &all_indexes) {
-                return Ok(Some(h));
+        guard_async_result("hover", async move {
+            let uri = &params.text_document_position_params.text_document.uri;
+            let position = params.text_document_position_params.position;
+            let source = self.get_open_text(uri).unwrap_or_default();
+            let doc = match self.get_doc(uri) {
+                Some(d) => d,
+                None => return Ok(None),
+            };
+            let doc_returns = self
+                .docs
+                .get_method_returns_salsa(uri)
+                .unwrap_or_else(|| std::sync::Arc::new(Default::default()));
+            let other_docs = self.docs.other_docs_with_returns(uri, &self.open_urls());
+            let result = hover_info(&source, &doc, &doc_returns, position, &other_docs);
+            if result.is_some() {
+                return Ok(result);
             }
-            // Try alias resolution.
-            if let Some(resolved) = crate::hover::resolve_use_alias(&doc.program().stmts, &word)
-                && let Some(h) = class_hover_from_index(&resolved, &all_indexes)
-            {
-                return Ok(Some(h));
+            // Fallback: look up the word in the workspace index so class names in
+            // extends clauses and parameter types resolve even when their defining
+            // file is never opened.  Also try the alias-resolved name so that
+            // `use Foo as Bar` works even when Foo is only in the index.
+            let all_indexes = self.docs.all_indexes();
+            if let Some(word) = crate::util::word_at_position(&source, position) {
+                // Try the literal word first.
+                if let Some(h) = class_hover_from_index(&word, &all_indexes) {
+                    return Ok(Some(h));
+                }
+                // Try alias resolution.
+                if let Some(resolved) = crate::hover::resolve_use_alias(&doc.program().stmts, &word)
+                    && let Some(h) = class_hover_from_index(&resolved, &all_indexes)
+                {
+                    return Ok(Some(h));
+                }
             }
-        }
-        Ok(None)
+            Ok(None)
+        })
+        .await
     }
 
     async fn document_symbol(
@@ -1485,30 +1600,34 @@ impl LanguageServer for Backend {
         Ok(resolve_workspace_symbol(params, &docs))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        let uri = &params.text_document.uri;
-        let doc = match self.get_doc(uri) {
-            Some(d) => d,
-            None => {
-                return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-                    result_id: None,
-                    data: vec![],
-                })));
-            }
-        };
-        let tokens = semantic_tokens(doc.source(), &doc);
-        let result_id = token_hash(&tokens);
-        let tokens_arc = Arc::new(tokens);
-        self.docs
-            .store_token_cache(uri, result_id.clone(), Arc::clone(&tokens_arc));
-        let data = Arc::try_unwrap(tokens_arc).unwrap_or_else(|arc| (*arc).clone());
-        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-            result_id: Some(result_id),
-            data,
-        })))
+        guard_async_result("semantic_tokens_full", async move {
+            let uri = &params.text_document.uri;
+            let doc = match self.get_doc(uri) {
+                Some(d) => d,
+                None => {
+                    return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                        result_id: None,
+                        data: vec![],
+                    })));
+                }
+            };
+            let tokens = semantic_tokens(doc.source(), &doc);
+            let result_id = token_hash(&tokens);
+            let tokens_arc = Arc::new(tokens);
+            self.docs
+                .store_token_cache(uri, result_id.clone(), Arc::clone(&tokens_arc));
+            let data = Arc::try_unwrap(tokens_arc).unwrap_or_else(|arc| (*arc).clone());
+            Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: Some(result_id),
+                data,
+            })))
+        })
+        .await
     }
 
     async fn semantic_tokens_range(

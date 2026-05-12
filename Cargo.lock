@@ -514,6 +514,7 @@ checksum = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d"
 dependencies = [
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -535,6 +536,17 @@ name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
+
+[[package]]
+name = "futures-executor"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baf29c38818342a3b26b5b923639e7b1f4a61fc5e76102d4b1981c6dc7a7579d"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "futures-util",
+]
 
 [[package]]
 name = "futures-io"
@@ -1025,9 +1037,9 @@ dependencies = [
 
 [[package]]
 name = "mir-analyzer"
-version = "0.21.1"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fc6436169c1c5416c71dd9a4d9ff8615cce6c841210e2f5523ebf02d9607a8b"
+checksum = "6cbe56c66fbe82d03f996d7a8ebe1fab348b26a5f325fba5c58a65c715a72c35"
 dependencies = [
  "blake3",
  "bumpalo",
@@ -1037,7 +1049,9 @@ dependencies = [
  "mir-types",
  "parking_lot",
  "php-ast",
+ "php-lexer",
  "php-rs-parser",
+ "phpdoc-parser",
  "quick-xml",
  "rayon",
  "rustc-hash 2.1.2",
@@ -1049,9 +1063,9 @@ dependencies = [
 
 [[package]]
 name = "mir-codebase"
-version = "0.21.1"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3293502d38044b57bd92e882fbddb8bfb1fbda5d4f1b30ba7070838551dd220b"
+checksum = "985a2a5269f45703d57837828587ef1fd98434a00b5dd930fd53f1132adb21c9"
 dependencies = [
  "indexmap",
  "mir-types",
@@ -1060,9 +1074,9 @@ dependencies = [
 
 [[package]]
 name = "mir-issues"
-version = "0.21.1"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59e03c09e70f22e52bc00432bffbfe32c75e1b415910f3a7974eb3788640e26a"
+checksum = "3a72ae0a4e69f675666187a0ce3220a138e7c04b5a01d1c1d9a24a5bf0cf20a5"
 dependencies = [
  "mir-types",
  "owo-colors",
@@ -1072,9 +1086,9 @@ dependencies = [
 
 [[package]]
 name = "mir-types"
-version = "0.21.1"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cb5413ba4c95ab4bcb20b33fb8602c0726cf38a03dfabb49190ca7a3acfd666"
+checksum = "dea82af12b1e9adc05283bbcc999a02adc912ad954dfbd5b5a9451e1387d2a22"
 dependencies = [
  "indexmap",
  "serde",
@@ -1167,9 +1181,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "php-ast"
-version = "0.10.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bb9700d12b998a7648d3471d0b0f06044d2ef4b29cd18d2d39fb97c9d933dbe"
+checksum = "447d309e46ab05b68baee80fa5a13ef0abe8e513a3d22e348458a9917fcf3d6d"
 dependencies = [
  "bumpalo",
  "serde",
@@ -1177,9 +1191,9 @@ dependencies = [
 
 [[package]]
 name = "php-lexer"
-version = "0.10.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39a58cd28d2d1bea35e0eb64afec99020fcc26080744dd1f02b7a0bbcee4af05"
+checksum = "2b9b6becbb3a06ee90c0e033a5d4df493405c4d66e39532604e09e0cfd9793cb"
 dependencies = [
  "memchr",
  "php-ast",
@@ -1196,6 +1210,7 @@ dependencies = [
  "dashmap 6.1.0",
  "dhat",
  "expect-test",
+ "futures",
  "iai-callgrind",
  "indexmap",
  "mimalloc",
@@ -1219,16 +1234,26 @@ dependencies = [
 
 [[package]]
 name = "php-rs-parser"
-version = "0.10.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9d2e48fe4b8948147dc049d9403f70fe7b98c27190f31ddda5d1667676125e5"
+checksum = "9a15402b4afa4b6f696dbb5cc6fb045a628e992cb28bea26355b340002ae4a3c"
 dependencies = [
  "bumpalo",
  "memchr",
  "miette",
  "php-ast",
  "php-lexer",
+ "phpdoc-parser",
  "thiserror",
+]
+
+[[package]]
+name = "phpdoc-parser"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70c7315f7d40a7bde17cb4adcd4f973d728b57470b490add85e2a305ee60c853"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

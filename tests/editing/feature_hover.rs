@@ -1609,7 +1609,7 @@ $result = box$0('hello');
 
         ---
 
-        **@template** `T` of `mixed`"#]]
+        **@template** `T`"#]]
     .assert_eq(&v);
 }
 
@@ -1638,6 +1638,6 @@ $result = identi$0ty($myString);
 
         ---
 
-        **@template** `T` of `mixed`"#]]
+        **@template** `T`"#]]
     .assert_eq(&v);
 }

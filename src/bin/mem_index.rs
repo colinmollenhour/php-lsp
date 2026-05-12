@@ -121,29 +121,22 @@ fn main() {
     let t0 = Instant::now();
 
     let store = DocumentStore::new();
-    let mut mir_db = if full_pipeline {
-        Some(mir_analyzer::db::MirDb::default())
+    let session = if full_pipeline {
+        Some(mir_analyzer::AnalysisSession::new(
+            mir_analyzer::PhpVersion::LATEST,
+        ))
     } else {
         None
     };
 
     for (url, src) in php_files.iter() {
-        if let Some(db) = mir_db.as_mut() {
-            // Replicate the real scan_workspace pipeline:
-            // 1. Parse once to get AST
-            // 2. Run DefinitionCollector into a StubSlice and ingest into MirDb
-            // 3. Store FileIndex reusing the same ParsedDoc (no second parse)
+        if let Some(s) = session.as_ref() {
+            // Post mir 0.22: ingest_file replaces manual DefinitionCollector
+            // + StubSlice + ingest_stub_slice plumbing.
             let src_arc: Arc<str> = Arc::from(src.as_str());
-            let doc = ParsedDoc::parse(src_arc);
+            let doc = ParsedDoc::parse(src_arc.clone());
             let file: Arc<str> = Arc::from(url.as_str());
-            let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
-            let collector = mir_analyzer::collector::DefinitionCollector::new_for_slice(
-                file,
-                doc.source(),
-                &source_map,
-            );
-            let (slice, _issues) = collector.collect_slice(doc.program());
-            db.ingest_stub_slice(&slice);
+            s.ingest_file(file, src_arc);
             store.index_from_doc(url.clone(), &doc);
         } else {
             store.index(url.clone(), src);
@@ -174,5 +167,5 @@ fn main() {
     if let Some(post) = rss_after_index.checked_sub(rss_before) {
         print_rss("  DocumentStore share", post);
     }
-    let _ = (mir_db, rss_final);
+    let _ = (session, rss_final);
 }
