@@ -716,8 +716,12 @@ impl LanguageServer for Backend {
                 // `snapshot_query`'s `salsa::Cancelled` handling.
                 let warm_docs = Arc::clone(&docs);
                 tokio::task::spawn_blocking(move || {
-                    warm_docs.warm_reference_index();
-                });
+                    // Pre-compute file_index for every workspace file so the first
+                    // hover/completion does not pay the full parse cost at request time.
+                    warm_docs.get_workspace_index_salsa();
+                })
+                .await
+                .ok();
                 drop(docs);
                 client.send_notification::<IndexReadyNotification>(()).await;
             });
@@ -1593,15 +1597,15 @@ impl LanguageServer for Backend {
             // extends clauses and parameter types resolve even when their defining
             // file is never opened.  Also try the alias-resolved name so that
             // `use Foo as Bar` works even when Foo is only in the index.
-            let all_indexes = self.docs.all_indexes();
             if let Some(word) = crate::util::word_at_position(&source, position) {
+                let wi = self.docs.get_workspace_index_salsa();
                 // Try the literal word first.
-                if let Some(h) = class_hover_from_index(&word, &all_indexes) {
+                if let Some(h) = class_hover_from_index(&word, &wi.files) {
                     return Ok(Some(h));
                 }
                 // Try alias resolution.
                 if let Some(resolved) = crate::hover::resolve_use_alias(&doc.program().stmts, &word)
-                    && let Some(h) = class_hover_from_index(&resolved, &all_indexes)
+                    && let Some(h) = class_hover_from_index(&resolved, &wi.files)
                 {
                     return Ok(Some(h));
                 }
