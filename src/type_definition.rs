@@ -38,15 +38,6 @@ pub fn goto_type_definition(
         resolve_fqn(doc, &raw, &imports)
     };
 
-    // First pass: FQN match. `find_class_range` compares short names only; resolve
-    // the search candidate to a short name for the match, but prefer the FQN-matched
-    // file when there are multiple classes with the same short name.
-    let _fqn_short = class_name
-        .trim_start_matches('\\')
-        .rsplit('\\')
-        .next()
-        .unwrap_or(&class_name);
-
     // Look only in files whose namespace + short class name matches the FQN.
     for candidate in type_candidates(&class_name) {
         let cand_short = candidate
