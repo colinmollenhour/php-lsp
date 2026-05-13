@@ -1353,6 +1353,28 @@ impl LanguageServer for Backend {
             // Mir's session.references_to is type-aware; use it as the
             // primary source for Method+target_fqn. The AST walker is only
             // used to add the declaration span (sessions return call sites).
+            //
+            // Ensure all workspace files are ingested before querying the
+            // session — the session only sees files that have been opened
+            // (via get_semantic_issues_salsa), so background-indexed files
+            // would otherwise be invisible to references_to.
+            if matches!(kind, Some(SymbolKind::Method)) {
+                self.docs.ensure_all_files_ingested();
+            }
+            // The short owner class name used to filter session results:
+            // any file where a receiver is typed as Owner must mention Owner by
+            // name (import, new expr, or type hint). Files with only
+            // `$unknown->method()` (no Owner reference) have untyped receivers
+            // and must be excluded.
+            let owner_short: Option<String> = if matches!(kind, Some(SymbolKind::Method)) {
+                target_fqn
+                    .as_deref()
+                    .and_then(|fqn| fqn.trim_start_matches('\\').rsplit('\\').next())
+                    .map(|s| s.to_string())
+            } else {
+                None
+            };
+
             let session_method_refs: Option<Vec<Location>> =
                 if matches!(kind, Some(SymbolKind::Method))
                     && let Some(sym) = build_mir_symbol(&word, kind, target_fqn.as_deref())
@@ -1362,6 +1384,19 @@ impl LanguageServer for Backend {
                         .into_iter()
                         .filter_map(|(file, line, col_start, col_end)| {
                             let uri_parsed = Url::parse(&file).ok()?;
+                            // Filter out call sites where the receiver is untyped
+                            // (Mixed). Any file where the receiver is legitimately
+                            // typed as Owner must reference Owner by name somewhere.
+                            if let Some(short) = &owner_short {
+                                let src_opt = self.docs.source_text(&uri_parsed);
+                                let mentions = src_opt
+                                    .as_ref()
+                                    .map(|src| src.contains(short.as_str()))
+                                    .unwrap_or(true);
+                                if !mentions {
+                                    return None;
+                                }
+                            }
                             Some(Location {
                                 uri: uri_parsed,
                                 range: tower_lsp::lsp_types::Range {
