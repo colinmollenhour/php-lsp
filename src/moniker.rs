@@ -361,6 +361,9 @@ pub(crate) fn resolve_fqn(
     // the declaration-form `namespace App;` (NamespaceBody::Simple) applies
     // to every subsequent class/function until the next namespace statement.
     let mut current_ns: Option<String> = None;
+    // Namespace from the braced form — used as fallback when the name is not a
+    // local declaration but the whole file lives inside `namespace Foo { }`.
+    let mut braced_ns: Option<String> = None;
 
     fn matches_top(kind: &StmtKind<'_, '_>, name: &str) -> bool {
         match kind {
@@ -388,6 +391,10 @@ pub(crate) fn resolve_fqn(
                                 return format!("{ns_prefix}{bare}");
                             }
                         }
+                        // No local declaration matched — record the braced namespace so
+                        // unqualified names that resolve via imports or fallback still
+                        // get the correct namespace prefix applied.
+                        braced_ns = ns_name;
                     }
                     NamespaceBody::Simple => {
                         // Set the "active namespace" for all following top-level stmts.
@@ -411,10 +418,11 @@ pub(crate) fn resolve_fqn(
     }
 
     // No local declaration and no `use` import. When the file declares a
-    // namespace (Simple form), unqualified references still resolve to that
-    // namespace (PHP falls back to global only for *functions*; for classes
-    // the namespace-prefixed FQCN is authoritative).
-    if let Some(ns) = current_ns {
+    // namespace (Simple or Braced form), unqualified references still resolve
+    // to that namespace (PHP falls back to global only for *functions*; for
+    // classes the namespace-prefixed FQCN is authoritative).
+    let effective_ns = current_ns.or(braced_ns);
+    if let Some(ns) = effective_ns {
         return format!("{ns}\\{bare}");
     }
 

@@ -497,6 +497,37 @@ impl DocumentStore {
     /// to pre-warm here.
     pub fn warm_reference_index(&self) {}
 
+    /// Return the raw source text for `uri` if it has been mirrored into the
+    /// salsa workspace. Used by the references handler to pre-filter session
+    /// results by checking whether a file mentions the owning class name.
+    pub fn source_text(&self, uri: &Url) -> Option<Arc<str>> {
+        let sf = self.source_file(uri)?;
+        Some(self.snapshot_query(move |db| sf.text(db)))
+    }
+
+    /// Run Pass 1 + Pass 2 analysis on every mirrored workspace file so that
+    /// type-aware queries (e.g. `session.references_to`) see the full workspace.
+    ///
+    /// Reference locations are only recorded during Pass 2 (`FileAnalyzer::analyze`).
+    /// `ingest_file` alone (Pass 1) is not sufficient. Only needed for cross-file
+    /// queries like `textDocument/references` that rely on the reference index.
+    /// The session's internal cache makes re-analysis of unchanged files cheap.
+    pub fn ensure_all_files_ingested(&self) {
+        let php_version = self.workspace_php_version();
+        let session = self.analysis_session(php_version);
+        let urls: Vec<Url> = self.source_files.iter().map(|e| e.key().clone()).collect();
+        for uri in &urls {
+            let Some(doc) = self.get_doc_salsa(uri) else {
+                continue;
+            };
+            let file: Arc<str> = Arc::from(uri.as_str());
+            session.ingest_file(file.clone(), doc.source_arc());
+            let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
+            let analyzer = mir_analyzer::FileAnalyzer::new(&session);
+            analyzer.analyze(file, doc.source(), doc.program(), &source_map);
+        }
+    }
+
     /// Salsa-backed per-file method-return-type map.
     pub fn get_method_returns_salsa(&self, uri: &Url) -> Option<Arc<crate::ast::MethodReturnsMap>> {
         let sf = self.source_file(uri)?;

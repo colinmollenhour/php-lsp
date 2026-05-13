@@ -257,9 +257,10 @@ $u$0->getName();
     .assert_eq(&out);
 }
 
-/// Aliased type hints are not currently supported by type_definition
+/// Aliased type hints in `use X as Y` are resolved via `collect_file_imports`.
+/// This covers both open-docs and background-index paths.
 #[tokio::test]
-async fn type_definition_does_not_support_use_aliases() {
+async fn type_definition_alias_resolved_from_index() {
     let mut s = TestServer::with_fixture("psr4-mini").await;
     s.wait_for_index_ready().await;
 
@@ -273,16 +274,16 @@ function create(UserModel $u$0): void {}
         )
         .await;
 
-    // Aliased types are not supported - type hint uses alias name that's not a real class
-    expect!["<none>"].assert_eq(&out);
+    // Alias is resolved to the real FQN App\Model\User → finds the class in index
+    expect![[r#"
+        src/Model/User.php:4:0-4:0"#]]
+    .assert_eq(&out);
 }
 
-/// **LIMITATION**: Unqualified type names in non-global namespaces are NOT automatically
-/// qualified with namespace context. This documents a known limitation.
-/// Example: `Logger $l` in `namespace App\Service` is NOT resolved to `App\Service\Logger`.
-/// Workaround: Use fully qualified name `\App\Service\Logger` or import with `use`.
+/// Unqualified type names in non-global namespaces are resolved with namespace context.
+/// `Logger $l` in `namespace App\Service` resolves to `App\Service\Logger` via resolve_fqn.
 #[tokio::test]
-async fn type_definition_limitation_unqualified_no_namespace_resolution() {
+async fn type_definition_unqualified_param_in_namespace_resolves_correctly() {
     let mut s = TestServer::new().await;
     let out = s
         .check_type_definition(
@@ -300,9 +301,8 @@ class Service {
 "#,
         )
         .await;
-    // This SHOULD resolve to App\Service\Logger but currently doesn't because
-    // param_type_for() doesn't have namespace context to qualify the unqualified name.
-    // It works in this case because both are in the same file and Logger is in scope.
+    // param_type_for returns "Logger", resolve_fqn qualifies it to "App\Service\Logger",
+    // and the FQN-scoped search finds the correct file.
     expect![[r#"
         src/Logger.php:2:6-2:12"#]]
     .assert_eq(&out);
@@ -328,8 +328,8 @@ function authenticate(Admin|User $a$0): void {}
 }
 
 /// **LIMITATION**: Intersection types (PHP 8.1+) are not currently supported.
-/// TypeMap does not properly handle parameters with intersection types on variable cursors.
-/// Unqualified type names in intersections may also not be automatically qualified with namespace context.
+/// `type_hint_to_class_string` returns `None` for intersection type hints, so TypeMap
+/// has no entry for the variable and type_definition returns nothing.
 #[tokio::test]
 async fn type_definition_limitation_intersection_types_not_supported() {
     let mut s = TestServer::new().await;
@@ -346,11 +346,10 @@ function process(Readable&Writable $rw$0): void {}
     expect!["<none>"].assert_eq(&out);
 }
 
-/// **LIMITATION**: Aliased types in use imports are not supported.
-/// When a type is imported with an alias (use X as Y), jumping to type definition
-/// won't work because the implementation doesn't track use aliases.
+/// Aliased types in use imports are resolved via `collect_file_imports` which
+/// tracks `use X as Y` mappings. Jumping to type definition works correctly.
 #[tokio::test]
-async fn type_definition_limitation_alias_with_use_import() {
+async fn type_definition_alias_with_use_import() {
     let mut s = TestServer::new().await;
     let out = s
         .check_type_definition(
@@ -367,9 +366,9 @@ function create(UserAccount $acc$0): void {}
 "#,
         )
         .await;
-    // Aliased types are not resolved - the alias name "UserAccount" doesn't match
-    // any real class name in the index
-    expect!["<none>"].assert_eq(&out);
+    expect![[r#"
+        src/Model/Account.php:2:6-2:13"#]]
+    .assert_eq(&out);
 }
 
 /// **LIMITATION**: Generic-like syntax (e.g., Collection<User>) is not supported.
@@ -466,6 +465,238 @@ class UserService {
     // Should resolve to App\Model\User despite being in App\Service namespace
     expect![[r#"
         src/Model/User.php:2:6-2:10"#]]
+    .assert_eq(&out);
+}
+
+// ── Regression tests for $var FQN resolution ─────────────────────────────────
+
+/// `$var = new Class()` in a namespace: TypeMap stores only the short class name,
+/// but resolve_fqn must qualify it to the file's namespace so the FQN-scoped
+/// search picks the right file when two classes share the same short name.
+#[tokio::test]
+async fn type_definition_var_new_in_namespace_prefers_same_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Model/Order.php
+<?php
+namespace App\Model;
+class Order {}
+
+//- /src/Service/Order.php
+<?php
+namespace App\Service;
+class Order {}
+
+//- /src/Service/Processor.php
+<?php
+namespace App\Service;
+$order = new Order();
+$order$0->process();
+"#,
+        )
+        .await;
+    // $order is `new Order()` in namespace App\Service, so it should resolve to
+    // App\Service\Order, not App\Model\Order
+    expect![[r#"
+        src/Service/Order.php:2:6-2:11"#]]
+    .assert_eq(&out);
+}
+
+/// `$var = new Class()` in a namespace with a `use` import: the import overrides
+/// the namespace prefix, so $var should resolve to the imported class.
+#[tokio::test]
+async fn type_definition_var_new_with_use_import_overrides_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Model/Invoice.php
+<?php
+namespace App\Model;
+class Invoice {}
+
+//- /src/Service/Invoice.php
+<?php
+namespace App\Service;
+class Invoice {}
+
+//- /src/Billing/Creator.php
+<?php
+namespace App\Billing;
+use App\Model\Invoice;
+$inv = new Invoice();
+$inv$0->total();
+"#,
+        )
+        .await;
+    // use App\Model\Invoice is explicit, so $inv resolves to App\Model\Invoice
+    expect![[r#"
+        src/Model/Invoice.php:2:6-2:13"#]]
+    .assert_eq(&out);
+}
+
+/// Typed parameter in a class method (not a top-level function) in a namespace.
+/// Regression: param_type_for must recurse into class members.
+#[tokio::test]
+async fn type_definition_method_param_in_namespaced_class() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Model/Product.php
+<?php
+namespace App\Model;
+class Product {}
+
+//- /src/Service/Cart.php
+<?php
+namespace App\Service;
+use App\Model\Product;
+class Cart {
+    public function addItem(Product $item$0): void {}
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        src/Model/Product.php:2:6-2:13"#]]
+    .assert_eq(&out);
+}
+
+/// Nullable type `?ClassName` in a namespace resolves the inner class by FQN.
+#[tokio::test]
+async fn type_definition_nullable_type_in_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Model/Address.php
+<?php
+namespace App\Model;
+class Address {}
+
+//- /src/Service/Address.php
+<?php
+namespace App\Service;
+class Address {}
+
+//- /src/Handler.php
+<?php
+namespace App\Service;
+function deliver(?Address $addr$0): void {}
+"#,
+        )
+        .await;
+    // ?Address in App\Service namespace resolves to App\Service\Address
+    expect![[r#"
+        src/Service/Address.php:2:6-2:13"#]]
+    .assert_eq(&out);
+}
+
+/// Braced namespace form: both the calling file and the target class use
+/// `namespace Foo { ... }` syntax.
+#[tokio::test]
+async fn type_definition_braced_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Model/Report.php
+<?php
+namespace App\Model {
+    class Report {}
+}
+
+//- /src/Service/Report.php
+<?php
+namespace App\Service {
+    class Report {}
+}
+
+//- /src/Runner.php
+<?php
+namespace App\Service {
+    function run(Report $r$0): void {}
+}
+"#,
+        )
+        .await;
+    // Report in braced App\Service namespace → App\Service\Report (indented class, col 10)
+    expect![[r#"
+        src/Service/Report.php:2:10-2:16"#]]
+    .assert_eq(&out);
+}
+
+/// Deeply nested namespace (A\B\C) — resolve_fqn must handle multi-segment prefix.
+#[tokio::test]
+async fn type_definition_deeply_nested_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"//- /src/Cmd.php
+<?php
+namespace App\Console\Command;
+class Cmd {}
+
+//- /src/Other/Cmd.php
+<?php
+namespace App\Http\Controller;
+class Cmd {}
+
+//- /src/Dispatch.php
+<?php
+namespace App\Console\Command;
+function dispatch(Cmd $c$0): void {}
+"#,
+        )
+        .await;
+    // Cmd in App\Console\Command → App\Console\Command\Cmd, not App\Http\Controller\Cmd
+    expect![[r#"
+        src/Cmd.php:2:6-2:9"#]]
+    .assert_eq(&out);
+}
+
+// ── Regression tests for index (background file) FQN resolution ──────────────
+
+/// Background-indexed class: `$var` in a namespace resolves without an explicit
+/// `use` import — the namespace itself qualifies the short class name to an FQN.
+#[tokio::test]
+async fn type_definition_index_var_namespace_resolves_without_import() {
+    let mut s = TestServer::with_fixture("psr4-mini").await;
+    s.wait_for_index_ready().await;
+
+    let out = s
+        .check_type_definition(
+            r#"<?php
+namespace App\Model;
+$u = new User();
+$u$0->greet();
+"#,
+        )
+        .await;
+    // No explicit `use` — namespace App\Model qualifies User to App\Model\User,
+    // which the index finds directly via FQN match.
+    expect![[r#"
+        src/Model/User.php:4:0-4:0"#]]
+    .assert_eq(&out);
+}
+
+/// Background-indexed class: typed parameter with `use` alias, index path.
+/// Tests that goto_type_definition_from_index also resolves aliases.
+#[tokio::test]
+async fn type_definition_index_param_alias_resolved() {
+    let mut s = TestServer::with_fixture("psr4-mini").await;
+    s.wait_for_index_ready().await;
+
+    let out = s
+        .check_type_definition(
+            r#"<?php
+namespace App\Service;
+use App\Model\User as UserModel;
+function greet(UserModel $u$0): void {}
+"#,
+        )
+        .await;
+    // Alias UserModel resolved to App\Model\User via imports; index finds it
+    expect![[r#"
+        src/Model/User.php:4:0-4:0"#]]
     .assert_eq(&out);
 }
 

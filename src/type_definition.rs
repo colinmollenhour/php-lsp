@@ -9,6 +9,8 @@ use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint, str_offset_in_range};
+use crate::moniker::resolve_fqn;
+use crate::references::collect_file_imports;
 use crate::type_map::TypeMap;
 use crate::util::word_at_position;
 
@@ -23,22 +25,83 @@ pub fn goto_type_definition(
 ) -> Option<Location> {
     let word = word_at_position(source, position)?;
 
+    let imports = collect_file_imports(doc);
     let type_map = TypeMap::from_doc_with_meta(doc, None, doc_returns);
     let class_name = if word.starts_with('$') {
-        type_map.get(&word)?.to_string()
+        // TypeMap stores the short class name; resolve it to FQN using the
+        // current file's namespace + use imports so that `User` in
+        // `namespace App\Service` resolves to `App\Service\User`.
+        let short = type_map.get(&word)?.to_string();
+        resolve_fqn(doc, &short, &imports)
     } else {
-        param_type_for(&doc.program().stmts, &word)?
+        let raw = param_type_for(&doc.program().stmts, &word)?;
+        resolve_fqn(doc, &raw, &imports)
     };
 
+    // First pass: FQN match. `find_class_range` compares short names only; resolve
+    // the search candidate to a short name for the match, but prefer the FQN-matched
+    // file when there are multiple classes with the same short name.
+    let _fqn_short = class_name
+        .trim_start_matches('\\')
+        .rsplit('\\')
+        .next()
+        .unwrap_or(&class_name);
+
+    // Look only in files whose namespace + short class name matches the FQN.
     for candidate in type_candidates(&class_name) {
+        let cand_short = candidate
+            .trim_start_matches('\\')
+            .rsplit('\\')
+            .next()
+            .unwrap_or(candidate);
+        let cand_fqn = candidate.trim_start_matches('\\');
+
         for (uri, other_doc) in all_docs {
+            // Skip files whose namespace can't contain this FQN.
+            if !cand_fqn.is_empty() && cand_fqn.contains('\\') {
+                let ns_prefix = &cand_fqn[..cand_fqn.rfind('\\').unwrap_or(0)];
+                let file_ns = file_namespace(other_doc);
+                if file_ns.as_deref() != Some(ns_prefix) {
+                    continue;
+                }
+            }
             let other_sv = other_doc.view();
-            if let Some(range) = find_class_range(other_sv, &other_doc.program().stmts, candidate) {
+            if let Some(range) = find_class_range(other_sv, &other_doc.program().stmts, cand_short)
+            {
                 return Some(Location {
                     uri: uri.clone(),
                     range,
                 });
             }
+        }
+    }
+
+    // Fallback: short-name search across all docs.
+    for candidate in type_candidates(&class_name) {
+        let cand_short = candidate
+            .trim_start_matches('\\')
+            .rsplit('\\')
+            .next()
+            .unwrap_or(candidate);
+        for (uri, other_doc) in all_docs {
+            let other_sv = other_doc.view();
+            if let Some(range) = find_class_range(other_sv, &other_doc.program().stmts, cand_short)
+            {
+                return Some(Location {
+                    uri: uri.clone(),
+                    range,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Return the namespace declared in a doc's top-level statements, if any.
+fn file_namespace(doc: &ParsedDoc) -> Option<String> {
+    for stmt in doc.program().stmts.iter() {
+        if let StmtKind::Namespace(ns) = &stmt.kind {
+            return ns.name.as_ref().map(|n| n.to_string_repr().to_string());
         }
     }
     None
@@ -216,11 +279,14 @@ pub fn goto_type_definition_from_index(
     use crate::util::word_at_position;
     let word = word_at_position(source, position)?;
 
+    let imports = collect_file_imports(doc);
     let type_map = TypeMap::from_doc_with_meta(doc, None, doc_returns);
     let class_name = if word.starts_with('$') {
-        type_map.get(&word)?.to_string()
+        let short = type_map.get(&word)?.to_string();
+        resolve_fqn(doc, &short, &imports)
     } else {
-        param_type_for(&doc.program().stmts, &word)?
+        let raw = param_type_for(&doc.program().stmts, &word)?;
+        resolve_fqn(doc, &raw, &imports)
     };
 
     let line_range = |line: u32| -> Range {
