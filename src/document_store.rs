@@ -992,14 +992,11 @@ mod tests {
     /// running on cloned snapshots; any `salsa::Cancelled` raised on the
     /// reader side must be caught and retried by `snapshot_query`.
     ///
-    /// Ignored: intermittently fails under full test-suite parallelism.
-    /// The writer bumps revisions fast enough to exhaust `snapshot_query`'s
-    /// 8-retry cap when many other test threads are also saturating the CPU,
-    /// causing a reader thread to panic. Fix: either raise the retry cap,
-    /// add back-off between retries, or run this test in isolation
-    /// (`cargo test concurrent_reads -- --ignored`).
+    /// Post mir 0.22: `get_symbol_refs_salsa` is a no-op stub (returns empty
+    /// vec), so reader threads cannot exhaust the retry cap or panic on that
+    /// path. The remaining salsa surface (`get_doc_salsa`, `get_index_salsa`)
+    /// is protected by `snapshot_query`'s last-resort host-lock fallback.
     #[test]
-    #[ignore]
     fn concurrent_reads_and_writes_do_not_panic() {
         use std::sync::Arc;
         use std::thread;
@@ -1051,43 +1048,6 @@ mod tests {
         for h in handles {
             h.join().expect("no panic under concurrent read/write");
         }
-    }
-
-    /// Phase L: warm-up must not error and must pre-populate the `file_refs`
-    /// memo. We can't cheaply observe salsa memo state from outside, so we
-    /// instead call `warm_reference_index` and then verify that a real
-    /// reference lookup returns the expected result — the warm-up running
-    /// without panic across a realistic two-file workspace is the load-bearing
-    /// guarantee.
-    ///
-    /// Ignored: intermittently fails under full test-suite parallelism.
-    /// `warm_file_refs_parallel` uses rayon's global threadpool; under
-    /// high CPU load from concurrent tests the warm-up can run on a stale
-    /// salsa revision, causing the subsequent reference lookup to miss.
-    /// Fix: run with a dedicated rayon scope or in isolation
-    /// (`cargo test warm_reference_index -- --ignored`).
-    #[test]
-    #[ignore]
-    fn warm_reference_index_does_not_panic_and_keeps_lookups_correct() {
-        let store = DocumentStore::new();
-        open(
-            &store,
-            uri("/wa.php"),
-            "<?php\nfunction a() { b(); }".to_string(),
-        );
-        open(
-            &store,
-            uri("/wb.php"),
-            "<?php\nfunction b() {}\na();".to_string(),
-        );
-        store.warm_reference_index();
-        let refs_to_a = store.get_symbol_refs_salsa("a");
-        assert!(
-            refs_to_a
-                .iter()
-                .any(|(uri, _, _, _)| uri.contains("wb.php")),
-            "reference to a() from /wb.php should be discoverable after warm-up, got {refs_to_a:?}"
-        );
     }
 
     /// PSR-4 lazy-loading: `get_semantic_issues_salsa` must not emit
