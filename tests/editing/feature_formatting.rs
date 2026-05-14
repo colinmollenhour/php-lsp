@@ -469,3 +469,24 @@ async fn range_formatting_returns_no_edits_outside_requested_range() {
         }
     }
 }
+
+/// `}` trigger on a line index beyond the end of the file must return null/no-edits.
+#[tokio::test]
+async fn on_type_formatting_cursor_beyond_file_end_returns_empty() {
+    let mut server = TestServer::new().await;
+    server.open("otfmt_oob.php", "<?php\n$x = 1;\n").await;
+
+    // Line 99 does not exist; close_brace should return vec![] which maps to null.
+    let resp = server.on_type_formatting("otfmt_oob.php", 99, 0, "}").await;
+
+    assert!(
+        resp["error"].is_null(),
+        "onTypeFormatting error: {:?}",
+        resp
+    );
+    assert!(
+        resp["result"].is_null(),
+        "expected null result for cursor beyond file end, got: {:?}",
+        resp["result"]
+    );
+}

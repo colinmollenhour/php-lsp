@@ -291,3 +291,44 @@ sprintf('%d %s %d', 1, 'x', $0);
         .await;
     expect!["▶ sprintf($format, ...$values)  @param1"].assert_eq(&out);
 }
+
+/// Function defined in a separate file; signature must resolve via workspace index.
+#[tokio::test]
+async fn signature_help_cross_file_function() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"
+//- /helpers.php
+<?php
+function compute(string $name, int $count): int { return 0; }
+
+//- /main.php
+<?php
+compute($0);
+"#,
+        )
+        .await;
+    expect!["▶ compute(string $name, int $count)  @param0"].assert_eq(&out);
+}
+
+/// Fully-qualified name call to a function in another file/namespace.
+#[tokio::test]
+async fn signature_help_cross_file_fqn() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_signature_help(
+            r#"
+//- /lib.php
+<?php
+namespace App\Lib;
+function transform(array $data, bool $strict): string { return ''; }
+
+//- /main.php
+<?php
+\App\Lib\transform($0);
+"#,
+        )
+        .await;
+    expect!["▶ App\\Lib\\transform(array $data, bool $strict)  @param0"].assert_eq(&out);
+}
