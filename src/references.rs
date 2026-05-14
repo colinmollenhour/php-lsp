@@ -8,8 +8,8 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use crate::ast::{ParsedDoc, str_offset_in_range};
 use crate::util::utf16_code_units;
 use crate::walk::{
-    class_refs_in_stmts, function_refs_in_stmts, method_refs_in_stmts, new_refs_in_stmts,
-    property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use,
+    class_refs_in_stmts, fqn_new_class_refs_in_stmts, function_refs_in_stmts, method_refs_in_stmts,
+    new_refs_in_stmts, property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use,
 };
 
 /// Callback signature for the mir-codebase reference-lookup fast path:
@@ -292,6 +292,14 @@ pub(crate) fn collect_file_imports(doc: &ParsedDoc) -> std::collections::HashMap
     }
     walk(&doc.program().stmts, &mut out);
     out
+}
+
+/// Collect every FQN class name (e.g. `\App\Model\Entity`) referenced in a
+/// `new` expression that has no corresponding `use` import (i.e. written with
+/// a leading `\`).  Returns de-duplicated strings with the leading `\` stripped,
+/// ready for `session.lazy_load_class`.
+pub(crate) fn collect_fqn_new_class_refs(doc: &ParsedDoc) -> Vec<String> {
+    fqn_new_class_refs_in_stmts(&doc.program().stmts)
 }
 
 fn scan_doc(

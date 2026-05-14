@@ -613,6 +613,12 @@ impl DocumentStore {
             for fqcn in imports.values() {
                 let _ = session.lazy_load_class(fqcn);
             }
+            // Also pre-load classes referenced via FQN `new \App\Model\Entity()`
+            // which bypass the `use` statement import map.
+            let fqn_refs = crate::references::collect_fqn_new_class_refs(&doc);
+            for fqcn in &fqn_refs {
+                let _ = session.lazy_load_class(fqcn);
+            }
         }
         let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
         let analysis = {

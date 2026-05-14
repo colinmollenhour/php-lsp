@@ -889,7 +889,6 @@ $fn = fn() => nonexistent_function();
         .await;
 }
 
-#[ignore = "mir-analyzer 0.19: FileAnalyzer exists but is not in public API; StatementsAnalyzer still skips traits"]
 #[tokio::test]
 async fn undefined_function_detected_in_trait_method() {
     let mut server = TestServer::new().await;
@@ -995,7 +994,6 @@ async fn psr4_imported_class_not_flagged_before_workspace_scan() {
     );
 }
 
-#[ignore = "mir-analyzer gap: too-many-arguments not detected"]
 #[tokio::test]
 async fn argument_count_too_many_detected() {
     let mut server = TestServer::new().await;
@@ -1005,7 +1003,7 @@ async fn argument_count_too_many_detected() {
 function takes_one(string $s): void {}
 function wrap(): void {
     takes_one('a', 'b', 'c');
-//  ^^^^^^^^^^^^^^^^^^^^^^^^^ error: takes_one
+//                 ^^^ error: takes_one
 }
 "#,
         )
@@ -1092,9 +1090,6 @@ async fn new_expr_with_explicit_use_alias_not_flagged_as_undefined_class() {
 
 /// Sanity baseline: fully-qualified `new \App\Model\Entity()` (no `use` statement)
 /// must not emit UndefinedClass when the class is PSR-4-resolvable.
-/// Tracked as a known gap: PSR-4 lazy-loading only inspects `use` statements,
-/// so FQN `new` expressions that bypass the import list are not resolved.
-#[ignore = "mir-analyzer gap: PSR-4 lazy-loading does not cover FQN new expressions"]
 #[tokio::test]
 async fn new_expr_fully_qualified_not_flagged_as_undefined_class() {
     let tmp = tempfile::tempdir().unwrap();
