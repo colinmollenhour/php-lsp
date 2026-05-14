@@ -650,6 +650,36 @@ impl<'arena, 'src> Visitor<'arena, 'src> for NewRefsVisitor<'_> {
     }
 }
 
+/// Collect every fully-qualified class name (i.e. starting with `\`) that
+/// appears as the class argument of a `new` expression in `stmts`.
+/// Returns de-duplicated FQCN strings with the leading `\` stripped, ready to
+/// pass to `session.lazy_load_class`.
+pub fn fqn_new_class_refs_in_stmts(stmts: &[Stmt<'_, '_>]) -> Vec<String> {
+    let mut v = FqnNewRefsVisitor { out: Vec::new() };
+    for stmt in stmts {
+        let _ = v.visit_stmt(stmt);
+    }
+    v.out.sort_unstable();
+    v.out.dedup();
+    v.out
+}
+
+struct FqnNewRefsVisitor {
+    out: Vec<String>,
+}
+
+impl<'arena, 'src> Visitor<'arena, 'src> for FqnNewRefsVisitor {
+    fn visit_expr(&mut self, expr: &Expr<'arena, 'src>) -> ControlFlow<()> {
+        if let ExprKind::New(n) = &expr.kind
+            && let ExprKind::Identifier(id) = &n.class.kind
+            && id.starts_with('\\')
+        {
+            self.out.push(id.trim_start_matches('\\').to_string());
+        }
+        walk_expr(self, expr)
+    }
+}
+
 /// `new ClassName`, `extends ClassName`, `implements ClassName`, type hints,
 /// and `$x instanceof ClassName`. Does NOT match free function calls or
 /// method names with the same spelling.
