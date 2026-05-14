@@ -1,19 +1,31 @@
+use std::sync::Arc;
+
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{
     Documentation, ParameterInformation, ParameterLabel, Position, SignatureHelp,
-    SignatureInformation,
+    SignatureInformation, Url,
 };
 
 use crate::ast::ParsedDoc;
 use crate::docblock::find_docblock;
+use crate::file_index::FileIndex;
 use crate::hover::format_params_str;
 use crate::util::split_params;
 
 /// Returns signature help for the function call the cursor is inside of.
-pub fn signature_help(source: &str, doc: &ParsedDoc, position: Position) -> Option<SignatureHelp> {
+///
+/// Falls back to `ws_indexes` for cross-file function lookup when the function
+/// is not defined in the current file.
+pub fn signature_help(
+    source: &str,
+    doc: &ParsedDoc,
+    position: Position,
+    ws_indexes: &[(Url, Arc<FileIndex>)],
+) -> Option<SignatureHelp> {
     let (func_name, active_param) = call_context(source, position)?;
     let sig_text = find_signature(&doc.program().stmts, &func_name)
-        .or_else(|| builtin_signature(&func_name).map(|s| s.to_string()))?;
+        .or_else(|| builtin_signature(&func_name).map(|s| s.to_string()))
+        .or_else(|| find_params_in_index(&func_name, ws_indexes))?;
 
     let display_name = func_name.trim_start_matches('\\');
     let label = format!("{}({})", display_name, sig_text);
@@ -135,6 +147,44 @@ fn extract_name_before(text: &[char], paren_pos: usize) -> String {
         return String::new();
     }
     text[start..end].iter().collect()
+}
+
+/// Search the workspace index for a function matching `name` and return its
+/// parameter list string (same format as `find_signature`).
+///
+/// Strips a leading `\` and matches either the bare name or the FQN, so both
+/// `process($0)` and `\App\process($0)` resolve.
+fn find_params_in_index(name: &str, ws_indexes: &[(Url, Arc<FileIndex>)]) -> Option<String> {
+    let bare = name.trim_start_matches('\\');
+    let local = bare.rsplit('\\').next().unwrap_or(bare);
+    for (_, idx) in ws_indexes {
+        for f in &idx.functions {
+            let f_name = f.name.as_ref();
+            let f_fqn = f.fqn.trim_start_matches('\\');
+            if f_name == local || f_fqn == bare {
+                let params = f
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let mut s = String::new();
+                        if let Some(t) = &p.type_hint {
+                            s.push_str(t);
+                            s.push(' ');
+                        }
+                        if p.variadic {
+                            s.push_str("...");
+                        }
+                        s.push('$');
+                        s.push_str(&p.name);
+                        s
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Some(params);
+            }
+        }
+    }
+    None
 }
 
 fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {

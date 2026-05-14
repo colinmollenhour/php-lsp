@@ -1571,7 +1571,8 @@ impl LanguageServer for Backend {
             Some(d) => d,
             None => return Ok(None),
         };
-        Ok(signature_help(&source, &doc, position))
+        let all_indexes = self.docs.all_indexes();
+        Ok(signature_help(&source, &doc, position, &all_indexes))
     }
 
     #[tracing::instrument(skip_all)]
