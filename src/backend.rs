@@ -241,25 +241,58 @@ async fn compute_dependent_publishes_owned(
     diag_cfg: crate::config::DiagnosticsConfig,
 ) -> Vec<(Url, Vec<Diagnostic>)> {
     tokio::task::spawn_blocking(move || {
-        // For every open file *other than* the one that changed, recompute
-        // the diagnostic bundle via the session. We deliberately iterate
-        // every open file rather than `session.analyze_dependents_of` —
-        // mir's dependency graph only tracks `use`-import edges, so a file
-        // that references a class via `new Foo()` without a `use` statement
-        // still needs a republish but isn't in the graph.
-        //
-        // Per-file analysis is cheap (the session keeps everything memoized)
-        // so iterating all opens is fine. Race window: if `other` is being
-        // edited concurrently, its own debounced did_change will fire a
-        // republish soon after, so any briefly-stale publish here
-        // self-corrects within ~100 ms.
-        let urls: Vec<Url> = open_files
+        // Ask mir which files actually depend on `changed_uri` and let it
+        // re-run Pass 2 for them in parallel. mir 0.25's dependency graph
+        // covers every reference kind that can produce a cross-file
+        // diagnostic (imports, class hierarchy, type hints, instanceof,
+        // catch, ::class, ::CONST, `new`, static and instance calls) and
+        // tracks symbols-deleted-from-a-file so renames / deletions still
+        // surface the orphaned dependents.
+        let php_version = docs.workspace_php_version();
+        let session = docs.analysis_session(php_version);
+        let analyses = session.analyze_dependents_of(changed_uri.as_str());
+        if analyses.is_empty() {
+            return Vec::new();
+        }
+
+        // We only publish for files the editor has open. Filter the
+        // session-wide dependent set down to open URLs.
+        let open_urls: std::collections::HashSet<Url> = open_files
             .urls()
             .into_iter()
             .filter(|u| u != &changed_uri)
             .collect();
-        let mut out: Vec<(Url, Vec<Diagnostic>)> = Vec::with_capacity(urls.len());
-        for url in urls {
+        let dependents: Vec<(Url, mir_analyzer::FileAnalysis)> = analyses
+            .into_iter()
+            .filter_map(|(file, analysis)| {
+                let url = Url::parse(file.as_ref()).ok()?;
+                open_urls.contains(&url).then_some((url, analysis))
+            })
+            .collect();
+        if dependents.is_empty() {
+            return Vec::new();
+        }
+
+        // Workspace-level class issues (circular inheritance, override
+        // violations, abstract-method gaps) aren't in `FileAnalysis` —
+        // pull them in one batched call covering every affected file.
+        let dep_files: Vec<Arc<str>> = dependents
+            .iter()
+            .map(|(u, _)| Arc::from(u.as_str()))
+            .collect();
+        let class_issues = session.class_issues_for(&dep_files);
+        let mut class_issues_by_file: std::collections::HashMap<Arc<str>, Vec<mir_issues::Issue>> =
+            std::collections::HashMap::new();
+        for issue in class_issues {
+            if issue.suppressed {
+                continue;
+            }
+            let file = issue.location.file.clone();
+            class_issues_by_file.entry(file).or_default().push(issue);
+        }
+
+        let mut out: Vec<(Url, Vec<Diagnostic>)> = Vec::with_capacity(dependents.len());
+        for (url, analysis) in dependents {
             let mut diags = open_files.parse_diagnostics(&url).unwrap_or_default();
             if let Some(d) = open_files.get_doc(&docs, &url) {
                 let source = open_files.text(&url).unwrap_or_default();
@@ -269,11 +302,17 @@ async fn compute_dependent_publishes_owned(
                     ),
                 );
             }
-            if let Some(issues) = docs.get_semantic_issues_salsa(&url) {
-                diags.extend(crate::semantic_diagnostics::issues_to_diagnostics(
-                    &issues, &url, &diag_cfg,
-                ));
+            let mut issues: Vec<mir_issues::Issue> = analysis
+                .issues
+                .into_iter()
+                .filter(|i| !i.suppressed)
+                .collect();
+            if let Some(extra) = class_issues_by_file.remove(&Arc::<str>::from(url.as_str())) {
+                issues.extend(extra);
             }
+            diags.extend(crate::semantic_diagnostics::issues_to_diagnostics(
+                &issues, &url, &diag_cfg,
+            ));
             out.push((url, diags));
         }
         out

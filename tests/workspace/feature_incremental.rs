@@ -326,16 +326,25 @@ async fn cross_file_republish_skips_closed_files() {
 
 #[tokio::test]
 async fn cross_file_republish_uses_empty_array_for_clean_dependent() {
+    // `clean_b` is a genuine dependent of `clean_a` (references `aa()`).
+    // Renaming an unrelated symbol in `clean_a` must still send a publish
+    // for `clean_b`, and the diagnostics field must be an empty array
+    // (LSP requires the field even when there are no issues).
     let mut server = TestServer::new().await;
     server
-        .open("clean_a.php", "<?php\nfunction aa(): void {}\n")
+        .open(
+            "clean_a.php",
+            "<?php\nfunction aa(): void {}\nfunction extra(): void {}\n",
+        )
         .await;
-    server
-        .open("clean_b.php", "<?php\nfunction bb(): void {}\n")
-        .await;
+    server.open("clean_b.php", "<?php\naa();\n").await;
 
     server
-        .change("clean_a.php", 2, "<?php\nfunction aaaa(): void {}\n")
+        .change(
+            "clean_a.php",
+            2,
+            "<?php\nfunction aa(): void {}\nfunction renamed(): void {}\n",
+        )
         .await;
 
     let b_uri = server.uri("clean_b.php");
@@ -347,19 +356,30 @@ async fn cross_file_republish_uses_empty_array_for_clean_dependent() {
     );
     assert!(
         diags.as_array().unwrap().is_empty(),
-        "clean_b is independent — expected empty diagnostics, got: {diags:?}"
+        "clean_b still resolves aa() — expected empty diagnostics, got: {diags:?}"
     );
 }
 
 #[tokio::test]
 async fn cross_file_republish_preserves_dependent_parse_errors() {
+    // `broken.php` has a parse error AND references `Triggered`, which is
+    // about to be defined by `trigger.php`. When the dependent is
+    // republished, the parse error must survive (we merge LSP-side parse
+    // diagnostics with mir's semantic issues).
     let mut server = TestServer::new().await;
-    let notif = server.open("broken.php", "<?php\nbroken(;\n").await;
-    let original_count = notif["params"]["diagnostics"]
-        .as_array()
-        .map(|a| a.len())
-        .unwrap_or(0);
-    expect!["true"].assert_eq(&(original_count > 0).to_string());
+    // Count parse-error diagnostics (no `code` field) vs semantic ones.
+    fn parse_error_count(notif: &serde_json::Value) -> usize {
+        notif["params"]["diagnostics"]
+            .as_array()
+            .map(|arr| arr.iter().filter(|d| d.get("code").is_none()).count())
+            .unwrap_or(0)
+    }
+
+    let notif = server
+        .open("broken.php", "<?php\nnew Triggered();\nbroken(;\n")
+        .await;
+    let original_parse = parse_error_count(&notif);
+    expect!["true"].assert_eq(&(original_parse > 0).to_string());
 
     server
         .open("trigger.php", "<?php\nclass Triggered {}\n")
@@ -367,10 +387,8 @@ async fn cross_file_republish_preserves_dependent_parse_errors() {
 
     let broken_uri = server.uri("broken.php");
     let notif = server.client().wait_for_diagnostics(&broken_uri).await;
-    let count = notif["params"]["diagnostics"]
-        .as_array()
-        .map(|a| a.len())
-        .unwrap_or(0);
-    // Parse errors must be preserved during cross-file republish
-    expect!["true"].assert_eq(&(count >= original_count).to_string());
+    let final_parse = parse_error_count(&notif);
+    // Parse errors must be preserved during cross-file republish, even
+    // though the UndefinedClass diagnostic clears once `Triggered` exists.
+    expect!["true"].assert_eq(&(final_parse >= original_parse).to_string());
 }
