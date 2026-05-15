@@ -2,6 +2,21 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.5.0] — 2026-05-15
+
+### Features
+
+- **Cross-file signature help**: `textDocument/signatureHelp` now falls back to the workspace `FileIndex` when a function is not found in the current file or built-in signatures. Supports both bare names and fully-qualified names (leading `\` stripped).
+
+### Performance
+
+- **Incremental cross-file diagnostics**: Uses `mir::analyze_dependents_of` to republish diagnostics only for files that genuinely depend on a changed file, replacing the previous full open-file scan.
+- **Pre-warmed workspace index**: `workspace_index` is computed before `indexReady`, so the first hover request no longer triggers a cold parse.
+
+### Bug Fixes
+
+- **`phpVersion` fallback**: An explicitly-provided but invalid `phpVersion` now falls back to the latest stubs instead of falling through to PHP binary detection, which could pick up an unexpected system PHP version.
+
 ## [0.3.0] — 2026-04-26
 
 ### Maintenance
