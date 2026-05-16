@@ -8,8 +8,9 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use crate::ast::{ParsedDoc, str_offset_in_range};
 use crate::util::utf16_code_units;
 use crate::walk::{
-    class_refs_in_stmts, fqn_new_class_refs_in_stmts, function_refs_in_stmts, method_refs_in_stmts,
-    new_refs_in_stmts, property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use,
+    all_class_ref_names_in_stmts, class_refs_in_stmts, fqn_new_class_refs_in_stmts,
+    function_refs_in_stmts, method_refs_in_stmts, new_refs_in_stmts, property_refs_in_stmts,
+    refs_in_stmts, refs_in_stmts_with_use,
 };
 
 /// Callback signature for the mir-codebase reference-lookup fast path:
@@ -300,6 +301,90 @@ pub(crate) fn collect_file_imports(doc: &ParsedDoc) -> std::collections::HashMap
 /// ready for `session.lazy_load_class`.
 pub(crate) fn collect_fqn_new_class_refs(doc: &ParsedDoc) -> Vec<String> {
     fqn_new_class_refs_in_stmts(&doc.program().stmts)
+}
+
+/// Collect every class-typed reference in `doc` (extends, implements, new,
+/// instanceof, type hints, static calls, catch types), resolved to an FQN via
+/// the current namespace and `use` imports. Used to lazy-load same-namespace
+/// dependencies that have no explicit `use` statement (and so are missed by
+/// `collect_file_imports`) before semantic analysis runs.
+///
+/// Returns de-duplicated FQNs with any leading `\` stripped.
+pub(crate) fn collect_referenced_class_fqns(doc: &ParsedDoc) -> Vec<String> {
+    let imports = collect_file_imports(doc);
+    let names = all_class_ref_names_in_stmts(&doc.program().stmts);
+    let locals = collect_local_type_decl_fqns(doc);
+    let mut out: Vec<String> = names
+        .into_iter()
+        .map(|name| {
+            // A leading `\` marks an already-fully-qualified reference like
+            // `new \App\Model\Entity()` — strip the slash and use as-is.
+            // `resolve_fqn` would otherwise prepend the current namespace.
+            if let Some(stripped) = name.strip_prefix('\\') {
+                return stripped.to_string();
+            }
+            let fqn = crate::moniker::resolve_fqn(doc, &name, &imports);
+            fqn.trim_start_matches('\\').to_string()
+        })
+        // Skip references that resolve to a type declared in this very file —
+        // mir already has them via `session.ingest_file`, and asking it to
+        // lazy-load them can recurse back through analysis.
+        .filter(|fqn| !locals.contains(fqn))
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// FQNs of every top-level type declared in `doc` (class, interface, trait,
+/// enum), applying the file's `namespace` declaration. Used to suppress
+/// self-references in the lazy-load list.
+fn collect_local_type_decl_fqns(doc: &ParsedDoc) -> HashSet<String> {
+    use php_ast::NamespaceBody;
+    let mut out = HashSet::new();
+    fn name_of(kind: &StmtKind<'_, '_>) -> Option<String> {
+        match kind {
+            StmtKind::Class(c) => c.name.as_ref().map(|n| n.to_string()),
+            StmtKind::Interface(i) => Some(i.name.to_string()),
+            StmtKind::Trait(t) => Some(t.name.to_string()),
+            StmtKind::Enum(e) => Some(e.name.to_string()),
+            _ => None,
+        }
+    }
+    let mut current_ns: Option<String> = None;
+    for stmt in doc.program().stmts.iter() {
+        match &stmt.kind {
+            StmtKind::Namespace(ns) => {
+                let ns_name = ns.name.as_ref().map(|n| n.to_string_repr().to_string());
+                match &ns.body {
+                    NamespaceBody::Braced(inner) => {
+                        let prefix = ns_name
+                            .as_deref()
+                            .map(|n| format!("{n}\\"))
+                            .unwrap_or_default();
+                        for s in inner.iter() {
+                            if let Some(n) = name_of(&s.kind) {
+                                out.insert(format!("{prefix}{n}"));
+                            }
+                        }
+                    }
+                    NamespaceBody::Simple => {
+                        current_ns = ns_name;
+                    }
+                }
+            }
+            k => {
+                if let Some(n) = name_of(k) {
+                    let fqn = match &current_ns {
+                        Some(ns) => format!("{ns}\\{n}"),
+                        None => n,
+                    };
+                    out.insert(fqn);
+                }
+            }
+        }
+    }
+    out
 }
 
 fn scan_doc(

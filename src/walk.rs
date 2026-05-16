@@ -680,6 +680,106 @@ impl<'arena, 'src> Visitor<'arena, 'src> for FqnNewRefsVisitor {
     }
 }
 
+/// Collect every class-typed name reference (extends, implements, new,
+/// instanceof, type hints, static method/property/const access, catch types).
+/// Each entry is the source-spelling of the reference (`Foo`, `Sub\Foo`, or
+/// `\Foo`) — callers apply namespace/use resolution to obtain an FQN.
+///
+/// Returned vec is sorted + de-duplicated by exact spelling.
+pub fn all_class_ref_names_in_stmts(stmts: &[Stmt<'_, '_>]) -> Vec<String> {
+    let mut v = AllClassRefsVisitor { out: Vec::new() };
+    for stmt in stmts {
+        let _ = v.visit_stmt(stmt);
+    }
+    v.out.sort_unstable();
+    v.out.dedup();
+    v.out
+}
+
+struct AllClassRefsVisitor {
+    out: Vec<String>,
+}
+
+impl AllClassRefsVisitor {
+    fn push_name(&mut self, name: &Name<'_, '_>) {
+        self.out.push(name.to_string_repr().into_owned());
+    }
+
+    fn push_id(&mut self, id: &str) {
+        self.out.push(id.to_string());
+    }
+}
+
+impl<'arena, 'src> Visitor<'arena, 'src> for AllClassRefsVisitor {
+    fn visit_stmt(&mut self, stmt: &Stmt<'arena, 'src>) -> ControlFlow<()> {
+        match &stmt.kind {
+            StmtKind::Class(c) => {
+                if let Some(ext) = &c.extends {
+                    self.push_name(ext);
+                }
+                for iface in c.implements.iter() {
+                    self.push_name(iface);
+                }
+            }
+            StmtKind::Interface(i) => {
+                for parent in i.extends.iter() {
+                    self.push_name(parent);
+                }
+            }
+            _ => {}
+        }
+        walk_stmt(self, stmt)
+    }
+
+    fn visit_expr(&mut self, expr: &Expr<'arena, 'src>) -> ControlFlow<()> {
+        match &expr.kind {
+            ExprKind::New(n) => {
+                if let ExprKind::Identifier(id) = &n.class.kind {
+                    self.push_id(id);
+                }
+            }
+            ExprKind::Binary(b) => {
+                // `$x instanceof Foo` — parser models this as a Binary expr
+                // whose right-hand side is an Identifier.
+                if let ExprKind::Identifier(id) = &b.right.kind {
+                    self.push_id(id);
+                }
+            }
+            ExprKind::StaticMethodCall(s) => {
+                if let ExprKind::Identifier(id) = &s.class.kind {
+                    self.push_id(id);
+                }
+            }
+            ExprKind::StaticPropertyAccess(s) => {
+                if let ExprKind::Identifier(id) = &s.class.kind {
+                    self.push_id(id);
+                }
+            }
+            ExprKind::ClassConstAccess(c) => {
+                if let ExprKind::Identifier(id) = &c.class.kind {
+                    self.push_id(id);
+                }
+            }
+            _ => {}
+        }
+        walk_expr(self, expr)
+    }
+
+    fn visit_type_hint(&mut self, type_hint: &TypeHint<'arena, 'src>) -> ControlFlow<()> {
+        if let TypeHintKind::Named(name) = &type_hint.kind {
+            self.push_name(name);
+        }
+        walk_type_hint(self, type_hint)
+    }
+
+    fn visit_catch_clause(&mut self, catch: &CatchClause<'arena, 'src>) -> ControlFlow<()> {
+        for ty in catch.types.iter() {
+            self.push_name(ty);
+        }
+        walk_catch_clause(self, catch)
+    }
+}
+
 /// `new ClassName`, `extends ClassName`, `implements ClassName`, type hints,
 /// and `$x instanceof ClassName`. Does NOT match free function calls or
 /// method names with the same spelling.
@@ -1077,5 +1177,92 @@ mod tests {
         class_refs_in_stmts(&doc.program().stmts, "MyClass", &mut out);
         // param type hint + return type hint
         assert_eq!(out.len(), 2, "got {out:?}");
+    }
+
+    // ── all_class_ref_names_in_stmts ─────────────────────────────────────────
+
+    #[test]
+    fn all_class_refs_collects_extends_and_implements() {
+        let src = "<?php\nclass A extends B implements C, D {}";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert_eq!(out, vec!["B", "C", "D"]);
+    }
+
+    #[test]
+    fn all_class_refs_collects_interface_extends() {
+        let src = "<?php\ninterface I extends J, K {}";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert_eq!(out, vec!["J", "K"]);
+    }
+
+    #[test]
+    fn all_class_refs_collects_new_bare_and_fqn() {
+        let src = "<?php\n$a = new Local();\n$b = new \\Vendor\\Pkg\\Cls();";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(out.contains(&"Local".to_string()));
+        assert!(out.contains(&"\\Vendor\\Pkg\\Cls".to_string()));
+    }
+
+    #[test]
+    fn all_class_refs_collects_instanceof() {
+        let src = "<?php\nif ($x instanceof MyClass) {}";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(out.contains(&"MyClass".to_string()));
+    }
+
+    #[test]
+    fn all_class_refs_collects_static_call_property_const() {
+        let src = "<?php\nA::method();\nB::$prop;\nC::CONST;\n$x = D::class;";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(out.contains(&"A".to_string()), "A::method() — got {out:?}");
+        assert!(out.contains(&"B".to_string()), "B::$prop — got {out:?}");
+        assert!(out.contains(&"C".to_string()), "C::CONST — got {out:?}");
+        assert!(out.contains(&"D".to_string()), "D::class — got {out:?}");
+    }
+
+    #[test]
+    fn all_class_refs_collects_type_hints_in_all_positions() {
+        let src = "<?php\nclass C {\n    public P $prop;\n    public function f(Q $q): R { return $q; }\n}";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(
+            out.contains(&"P".to_string()),
+            "property type — got {out:?}"
+        );
+        assert!(out.contains(&"Q".to_string()), "param type — got {out:?}");
+        assert!(out.contains(&"R".to_string()), "return type — got {out:?}");
+    }
+
+    #[test]
+    fn all_class_refs_collects_catch_types() {
+        let src = "<?php\ntry {} catch (FirstException | SecondException $e) {}";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(out.contains(&"FirstException".to_string()));
+        assert!(out.contains(&"SecondException".to_string()));
+    }
+
+    #[test]
+    fn all_class_refs_does_not_collect_free_function_calls_or_method_names() {
+        let src = "<?php\nrun();\n$obj->run();";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(
+            !out.contains(&"run".to_string()),
+            "function call / method must not be a class ref; got {out:?}"
+        );
+    }
+
+    #[test]
+    fn all_class_refs_deduplicates() {
+        let src = "<?php\n$a = new X();\n$b = new X();\n$c instanceof X;";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert_eq!(out.iter().filter(|s| s == &"X").count(), 1);
     }
 }

@@ -564,15 +564,13 @@ impl DocumentStore {
             Some(d) => d,
             None => return,
         };
-        let imports = crate::references::collect_file_imports(&doc);
-        if imports.is_empty() {
+        let fqns = crate::references::collect_referenced_class_fqns(&doc);
+        if fqns.is_empty() {
             return;
         }
         let psr4 = self.psr4.read().unwrap();
-        let paths: Vec<std::path::PathBuf> = imports
-            .values()
-            .filter_map(|fqcn| psr4.resolve(fqcn))
-            .collect();
+        let paths: Vec<std::path::PathBuf> =
+            fqns.iter().filter_map(|fqcn| psr4.resolve(fqcn)).collect();
         drop(psr4);
 
         for path in paths {
@@ -612,14 +610,14 @@ impl DocumentStore {
         // construction time.
         {
             let _s = tracing::debug_span!("session.lazy_load_imports").entered();
-            let imports = crate::references::collect_file_imports(&doc);
-            for fqcn in imports.values() {
-                let _ = session.lazy_load_class(fqcn);
-            }
-            // Also pre-load classes referenced via FQN `new \App\Model\Entity()`
-            // which bypass the `use` statement import map.
-            let fqn_refs = crate::references::collect_fqn_new_class_refs(&doc);
-            for fqcn in &fqn_refs {
+            // Pre-load every class-typed reference resolved via the file's
+            // namespace + `use` imports. This covers `use` imports, FQN refs
+            // (`new \App\Foo`), and bare same-namespace refs (`new Foo` from
+            // inside `namespace App;`) in a single sweep — mir won't auto-
+            // resolve via the ClassResolver, so anything not lazy-loaded here
+            // produces a spurious `UndefinedClass`.
+            let fqns = crate::references::collect_referenced_class_fqns(&doc);
+            for fqcn in &fqns {
                 let _ = session.lazy_load_class(fqcn);
             }
         }
