@@ -4,10 +4,11 @@ use std::ops::ControlFlow;
 
 use php_ast::{
     CatchClause, ClassMember, ClassMemberKind, EnumMember, EnumMemberKind, Expr, ExprKind, Name,
-    NamespaceBody, Span, Stmt, StmtKind, TypeHint, TypeHintKind, UnaryPostfixOp, UnaryPrefixOp,
+    NamespaceBody, Span, Stmt, StmtKind, TraitUseDecl, TypeHint, TypeHintKind, UnaryPostfixOp,
+    UnaryPrefixOp,
     visitor::{
         Visitor, walk_catch_clause, walk_class_member, walk_enum_member, walk_expr, walk_stmt,
-        walk_type_hint,
+        walk_trait_use, walk_type_hint,
     },
 };
 use tower_lsp::lsp_types::DocumentHighlightKind;
@@ -778,6 +779,13 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllClassRefsVisitor {
         }
         walk_catch_clause(self, catch)
     }
+
+    fn visit_trait_use(&mut self, trait_use: &TraitUseDecl<'arena, 'src>) -> ControlFlow<()> {
+        for name in trait_use.traits.iter() {
+            self.push_name(name);
+        }
+        walk_trait_use(self, trait_use)
+    }
 }
 
 /// `new ClassName`, `extends ClassName`, `implements ClassName`, type hints,
@@ -1256,6 +1264,23 @@ mod tests {
             !out.contains(&"run".to_string()),
             "function call / method must not be a class ref; got {out:?}"
         );
+    }
+
+    #[test]
+    fn all_class_refs_collects_trait_use_in_class() {
+        let src = "<?php\nclass C {\n    use TraitOne, TraitTwo;\n}";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(out.contains(&"TraitOne".to_string()), "got {out:?}");
+        assert!(out.contains(&"TraitTwo".to_string()), "got {out:?}");
+    }
+
+    #[test]
+    fn all_class_refs_collects_trait_use_in_enum() {
+        let src = "<?php\nenum E: int {\n    use TraitEnum;\n    case A = 1;\n}";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(out.contains(&"TraitEnum".to_string()), "got {out:?}");
     }
 
     #[test]

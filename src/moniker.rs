@@ -354,7 +354,10 @@ pub(crate) fn resolve_fqn(
     name: &str,
     file_imports: &HashMap<String, String>,
 ) -> String {
-    // Strip a leading `\` from a fully-qualified reference.
+    // A leading `\` marks the name as already fully-qualified: skip both
+    // `use`-import lookups and namespace fallback. Strip the slash for the
+    // local-declaration walk below.
+    let is_fqn = name.starts_with('\\');
     let bare = name.trim_start_matches('\\');
 
     // Track the current namespace prefix across top-level statements so that
@@ -412,9 +415,24 @@ pub(crate) fn resolve_fqn(
         }
     }
 
+    // Fully-qualified names (`\Foo\Bar`) bypass everything below — they're
+    // already absolute.
+    if is_fqn {
+        return bare.to_string();
+    }
+
     // Not a local declaration — resolve via `use` statements.
     if let Some(fqn) = file_imports.get(bare) {
         return fqn.clone();
+    }
+
+    // Qualified-via-aliased-use: `Sub\Inner` where `use App\Sub;` is in
+    // scope. The first segment of the qualified name is the alias; replace
+    // it with the alias's FQN and append the remainder.
+    if let Some((first, rest)) = bare.split_once('\\')
+        && let Some(prefix) = file_imports.get(first)
+    {
+        return format!("{prefix}\\{rest}");
     }
 
     // No local declaration and no `use` import. When the file declares a
@@ -511,5 +529,47 @@ mod tests {
         let d = doc(src);
         let m = moniker_at(src, &d, pos(1, 7), &empty()).unwrap();
         assert_eq!(m.unique, UniquenessLevel::Project);
+    }
+
+    // ── resolve_fqn ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_fqn_qualified_via_aliased_use() {
+        // `use App\Sub;` then `new Sub\Foo()` must resolve to `App\Sub\Foo`.
+        // The first segment of the qualified name (`Sub`) is the use-imported
+        // alias; the remainder is appended.
+        let src = "<?php\nuse App\\Sub;\n";
+        let d = doc(src);
+        let imports = HashMap::from([("Sub".to_string(), "App\\Sub".to_string())]);
+        assert_eq!(resolve_fqn(&d, "Sub\\Foo", &imports), "App\\Sub\\Foo");
+    }
+
+    #[test]
+    fn resolve_fqn_qualified_via_aliased_use_with_alias() {
+        // `use App\Submodule as Sub;` then `Sub\Foo`.
+        let src = "<?php\nuse App\\Submodule as Sub;\n";
+        let d = doc(src);
+        let imports = HashMap::from([("Sub".to_string(), "App\\Submodule".to_string())]);
+        assert_eq!(resolve_fqn(&d, "Sub\\Foo", &imports), "App\\Submodule\\Foo");
+    }
+
+    #[test]
+    fn resolve_fqn_qualified_without_matching_use_falls_back_to_namespace() {
+        // No `use` import for `Sub` — qualified name resolves relative to the
+        // current namespace.
+        let src = "<?php\nnamespace Acme;\n";
+        let d = doc(src);
+        let m = resolve_fqn(&d, "Sub\\Foo", &empty());
+        assert_eq!(m, "Acme\\Sub\\Foo");
+    }
+
+    #[test]
+    fn resolve_fqn_fully_qualified_bypasses_use_imports() {
+        // A leading `\` means "use the literal FQN" — must not consult `use`
+        // imports, even if the first segment happens to match an alias.
+        let src = "<?php\nuse App\\Sub;\n";
+        let d = doc(src);
+        let imports = HashMap::from([("Sub".to_string(), "App\\Sub".to_string())]);
+        assert_eq!(resolve_fqn(&d, "\\Sub\\Foo", &imports), "Sub\\Foo");
     }
 }

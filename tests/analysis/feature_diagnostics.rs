@@ -1090,6 +1090,39 @@ async fn same_namespace_truly_missing_class_is_flagged() {
     );
 }
 
+/// Tripwire for a mir-analyzer gap: a missing trait in `class Foo { use
+/// Missing; }` produces no diagnostic today. When mir grows an
+/// `UndefinedTrait` (or extends `UndefinedClass` to cover trait positions),
+/// un-ignore this — it will start passing.
+///
+/// Until then we keep the test alongside the unit-level fix in
+/// `all_class_ref_names_in_stmts` so future analyses can rely on every
+/// class-typed AST position being collected (rename, references, etc.).
+#[ignore = "mir gap: missing traits in `use TraitName;` are not diagnosed"]
+#[tokio::test]
+async fn same_namespace_trait_use_truly_missing_is_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let user_src = "<?php\nnamespace App;\nclass Person {\n    use MissingTrait;\n}\n";
+    std::fs::write(tmp.path().join("src/Person.php"), user_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Person.php", user_src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    assert!(
+        out.contains("MissingTrait"),
+        "expected a diagnostic mentioning MissingTrait, got:\n{out}"
+    );
+}
+
 #[tokio::test]
 async fn argument_count_too_many_detected() {
     let mut server = TestServer::new().await;
