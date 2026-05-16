@@ -993,6 +993,103 @@ async fn psr4_imported_class_not_flagged_before_workspace_scan() {
     .assert_eq(&out);
 }
 
+/// Same-namespace, single-base PSR-4: a class referencing a sibling in the
+/// same namespace WITHOUT a `use` statement must not emit UndefinedClass.
+/// This is the core bug — the previous pre-load path only covered `use`
+/// imports and FQN-`new` refs, missing bare same-namespace type hints,
+/// `extends`, `instanceof`, and static-member access.
+#[tokio::test]
+async fn same_namespace_bare_ref_not_flagged_as_undefined_class() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Producer.php"),
+        "<?php\nnamespace App;\nclass Producer {\n    public function make(): string { return 'p'; }\n}\n",
+    )
+    .unwrap();
+
+    // Consumer references Producer in three positions (type hint, new,
+    // instanceof) — all bare, no `use` because both live in `namespace App`.
+    let consumer_src = "<?php\nnamespace App;\nclass Consumer {\n    public function __construct(private Producer $p) {}\n    public function fresh(): Producer {\n        return new Producer();\n    }\n    public function isProducer(mixed $x): bool {\n        return $x instanceof Producer;\n    }\n}\n";
+    std::fs::write(tmp.path().join("src/Consumer.php"), consumer_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Consumer.php", consumer_src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Consumer.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+/// Same-namespace, single-base PSR-4: `extends` across files with no `use`.
+/// `extends` is a separate AST position from type hints; this guards against a
+/// regression where the visitor stops collecting one but not the other.
+#[tokio::test]
+async fn same_namespace_extends_not_flagged_as_undefined_class() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Base.php"),
+        "<?php\nnamespace App;\nabstract class Base {}\n",
+    )
+    .unwrap();
+
+    let child_src = "<?php\nnamespace App;\nfinal class Child extends Base {}\n";
+    std::fs::write(tmp.path().join("src/Child.php"), child_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Child.php", child_src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Child.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+/// Positive control for the above: a truly-missing same-namespace class must
+/// still be flagged. Without this, the no-false-positive tests prove nothing.
+#[tokio::test]
+async fn same_namespace_truly_missing_class_is_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    // No `Missing` class exists anywhere on disk.
+    let consumer_src = "<?php\nnamespace App;\nclass Consumer {\n    public function __construct(private Missing $m) {}\n}\n";
+    std::fs::write(tmp.path().join("src/Consumer.php"), consumer_src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Consumer.php", consumer_src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    assert!(
+        out.contains("UndefinedClass") && out.contains("App\\Missing"),
+        "expected UndefinedClass for App\\Missing, got:\n{out}"
+    );
+}
+
 #[tokio::test]
 async fn argument_count_too_many_detected() {
     let mut server = TestServer::new().await;

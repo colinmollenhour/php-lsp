@@ -322,6 +322,78 @@ async fn multi_psr4_autoload_dev_scanned() {
     expect!["Class       MailerTest @ tests/Unit/MailerTest.php:6"].assert_eq(&out);
 }
 
+// ── Single prefix mapped to an array of base dirs ──────────────────────────────
+//
+// Regression coverage for the composer PSR-4 array form, e.g.
+//   { "App\\": ["src/", "lib/"] }
+//
+// All other multi_psr4_* tests use distinct prefixes per dir; this fixture
+// shares one prefix across two dirs so resolution must search every base in
+// the array before giving up.
+
+#[tokio::test]
+async fn multi_psr4_array_all_bases_indexed() {
+    let mut s = TestServer::with_fixture("multi-psr4-array").await;
+    s.wait_for_index_ready().await;
+
+    let out = s.snapshot_workspace_symbols("").await;
+    assert_all_symbols_exist(
+        &out,
+        &[("Alpha", "src/Alpha.php"), ("Beta", "lib/Beta.php")],
+    );
+}
+
+#[tokio::test]
+async fn multi_psr4_array_cross_base_definition() {
+    let mut s = TestServer::with_fixture("multi-psr4-array").await;
+    s.wait_for_index_ready().await;
+
+    let out = s
+        .check_definition(
+            r#"//- /lib/Beta.php
+<?php
+namespace App;
+
+class Beta {
+    public function __construct(
+        private Alpha$0 $alpha,
+    ) {}
+}
+"#,
+        )
+        .await;
+
+    expect!["src/Alpha.php:3:6-3:11"].assert_eq(&out);
+}
+
+// Regression for same-namespace cross-file refs: `Beta` lives in `lib/` and
+// references `Alpha` (in `src/`) without a `use` statement, since both share
+// the `App` namespace. The pre-load path must resolve same-namespace bare
+// class references, not just `use`-imported ones.
+#[tokio::test]
+async fn multi_psr4_array_cross_base_clean_diagnostics() {
+    let mut s = TestServer::with_fixture("multi-psr4-array").await;
+    s.wait_for_index_ready().await;
+
+    s.check_diagnostics(
+        r#"//- /lib/Beta.php
+<?php
+namespace App;
+
+class Beta {
+    public function __construct(
+        private Alpha $alpha,
+    ) {}
+
+    public function run(): string {
+        return $this->alpha->describe();
+    }
+}
+"#,
+    )
+    .await;
+}
+
 // ── PHP version with project structure ─────────────────────────────────────────
 
 #[tokio::test]
