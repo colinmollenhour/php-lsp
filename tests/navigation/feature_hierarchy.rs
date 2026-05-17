@@ -527,3 +527,63 @@ async fn subtypes_trait_returns_using_classes() {
         .await;
     expect!["Post (Class) @ Post.php:0"].assert_eq(&out);
 }
+
+/// Partial class name must not be confused with a supertype — "Animal" must not
+/// match a class named "AnimalHouse" (which extends an unrelated "Creature").
+#[tokio::test]
+async fn subtypes_partial_class_name_not_confused_with_supertype() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_subtypes(
+            r#"<?php
+interface Animal$0 {}
+class AnimalHouse extends Creature {}
+"#,
+        )
+        .await;
+    assert!(
+        !out.contains("AnimalHouse"),
+        "AnimalHouse does not implement Animal: {out}"
+    );
+}
+
+/// Anonymous classes have no name and must be skipped silently — the server
+/// must not panic when encountering `new class extends Animal {}`.
+#[tokio::test]
+async fn subtypes_with_anonymous_class_does_not_panic() {
+    let mut s = TestServer::new().await;
+    // Only assert no panic; anonymous classes produce no named subtype.
+    let _ = s
+        .check_subtypes(
+            r#"<?php
+interface Animal$0 {}
+$obj = new class extends Animal {};
+"#,
+        )
+        .await;
+}
+
+/// When goto-implementation is requested on a symbol defined in both the current
+/// file and another file, URIs in the result must point to the correct source.
+#[tokio::test]
+async fn subtypes_location_uris_match_source_files() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_subtypes(
+            r#"//- /src/Animal.php
+<?php
+interface Animal$0 {}
+
+//- /src/Dog.php
+<?php
+class Dog implements Animal {}
+
+//- /src/Cat.php
+<?php
+class Cat implements Animal {}
+"#,
+        )
+        .await;
+    assert!(out.contains("Dog.php"), "Dog.php uri missing: {out}");
+    assert!(out.contains("Cat.php"), "Cat.php uri missing: {out}");
+}

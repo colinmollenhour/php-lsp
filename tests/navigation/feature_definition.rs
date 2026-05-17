@@ -1073,6 +1073,129 @@ $r->co$0nn;
     .await;
 }
 
+/// Variable goto-definition must jump to the first assignment in scope, not the
+/// use-site. $0 is on a read; the `def` annotation marks the initial assignment.
+#[tokio::test]
+async fn definition_variable_jumps_to_first_occurrence() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+function foo() {
+    $x = 1;
+//  ^^ def
+    return $x$0;
+}
+"#,
+    )
+    .await;
+}
+
+/// Goto-definition on an enum case reference must jump to the case declaration.
+#[tokio::test]
+async fn definition_enum_case_same_file() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+enum Suit {
+    case Hearts;
+    //   ^^^^^^ def
+}
+$x = Suit::Hearts$0;
+"#,
+    )
+    .await;
+}
+
+/// Goto-definition on an enum method reference must jump to the method declaration.
+#[tokio::test]
+async fn definition_enum_method_same_file() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+enum Color {
+    case Red;
+    public function label(): string { return ''; }
+    //              ^^^^^ def
+}
+Color::Red->labe$0l();
+"#,
+    )
+    .await;
+}
+
+/// Goto-definition on a symbol inside a braced namespace must find it.
+#[tokio::test]
+async fn definition_symbol_inside_braced_namespace() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+namespace App {
+    function boot() {}
+    //       ^^^^ def
+    boo$0t();
+}
+"#,
+    )
+    .await;
+}
+
+/// Cross-file goto-definition for a free function (not a class), exercises the
+/// `StmtKind::Function` arm of `scan_statements` via `other_docs`.
+#[tokio::test]
+async fn definition_cross_file_free_function() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"//- /helpers.php
+<?php
+function helperFn() {}
+//       ^^^^^^^^ def
+
+//- /main.php
+<?php
+helperFn$0();
+"#,
+    )
+    .await;
+}
+
+/// When a symbol is defined in both the current file and another file, the
+/// current file's definition must be returned (current-file-first search order).
+#[tokio::test]
+async fn definition_current_file_takes_priority_over_other_files() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"//- /main.php
+<?php
+class Foo {}
+//    ^^^ def
+$f = new Foo$0();
+
+//- /other.php
+<?php
+class Foo {}
+"#,
+    )
+    .await;
+}
+
+/// Goto-definition on a regular (non-promoted) property access must jump to
+/// the property declaration, not just the class declaration.
+#[tokio::test]
+async fn definition_regular_property_same_file() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+class Person {
+    public string $name = '';
+    //             ^^^^ def
+}
+$p = new Person();
+$p->na$0me;
+"#,
+    )
+    .await;
+}
+
 /// Receiver-aware dispatch: `$this->render()` must jump to the correct parent's
 /// `render()` even when another unrelated class also defines `render()`.
 #[tokio::test]
@@ -1117,4 +1240,226 @@ async fn definition_this_method_picks_correct_parent_not_unrelated_class() {
             .ends_with("AbstractController.php"),
         "must jump to AbstractController::render(), got: {loc:?}"
     );
+}
+
+#[tokio::test]
+async fn implementation_enum_implements_interface() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface HasLabel$0 {}
+enum Status: string implements HasLabel {
+    case Active = 'active';
+}
+"#,
+        )
+        .await;
+    expect!["main.php:2:5-2:11"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_class_implementing_multiple_interfaces() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Readable$0 {}
+interface Writable {}
+class Stream implements Readable, Writable {}
+"#,
+        )
+        .await;
+    expect!["main.php:3:6-3:12"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_class_that_extends_and_implements_interface_side() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Shape$0 {}
+class Base {}
+class Circle extends Base implements Shape {}
+"#,
+        )
+        .await;
+    expect!["main.php:3:6-3:12"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_partial_name_not_matched() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Countab$0le {}
+class MyCountableList {}
+"#,
+        )
+        .await;
+    expect!["<none>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_no_implementors_returns_none() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Orphan$0 {}
+"#,
+        )
+        .await;
+    expect!["<none>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_braced_namespace_class() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Runner$0 {}
+namespace App {
+    class Task implements Runner {}
+}
+"#,
+        )
+        .await;
+    expect!["main.php:3:10-3:14"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_unbraced_namespace_class() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Worker$0 {}
+namespace Jobs;
+class BackgroundJob implements Worker {}
+"#,
+        )
+        .await;
+    expect!["main.php:3:6-3:19"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implementation_anonymous_class_no_panic() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Greet$0er {}
+$obj = new class implements Greeter {};
+"#,
+        )
+        .await;
+    expect!["<none>"].assert_eq(&out);
+}
+
+// Cursor on the parent class: `class Circle extends Base$0 implements Shape {}`
+// must return exactly one location, same as searching for the interface.
+#[tokio::test]
+async fn implementation_class_that_extends_and_implements_parent_side() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+class Base$0 {}
+interface Shape {}
+class Circle extends Base implements Shape {}
+"#,
+        )
+        .await;
+    expect!["main.php:3:6-3:12"].assert_eq(&out);
+}
+
+// Without a `use` import the handler passes fqn=None.
+// A class that writes `extends \Animal` (backslash-qualified) must NOT be
+// returned when searching for bare "Animal" — `name_matches` requires the
+// fqn parameter to bridge global-namespace qualifiers.
+#[tokio::test]
+async fn implementation_fqn_backslash_prefix_not_matched_without_context() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"//- /Animal.php
+<?php
+interface Animal$0 {}
+
+//- /Dog.php
+<?php
+class Dog extends \Animal {}
+"#,
+        )
+        .await;
+    expect!["<none>"].assert_eq(&out);
+}
+
+// With `use App\Animal` the handler resolves fqn="App\Animal".
+// A class doing `extends \App\Animal` (fully-qualified with leading backslash)
+// must be found.
+#[tokio::test]
+async fn implementation_fqn_fully_qualified_extends_found() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"//- /search.php
+<?php
+use App\Animal;
+function foo(Animal$0 $a): void {}
+
+//- /Dog.php
+<?php
+class Dog extends \App\Animal {}
+"#,
+        )
+        .await;
+    expect!["Dog.php:1:6-1:9"].assert_eq(&out);
+}
+
+// Same as above but the class writes `extends App\Animal` (no leading `\`).
+// `name_matches` strips the leading `\` from the repr before comparing.
+#[tokio::test]
+async fn implementation_fqn_qualified_without_leading_backslash_found() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"//- /search.php
+<?php
+use App\Animal;
+function foo(Animal$0 $a): void {}
+
+//- /Dog.php
+<?php
+class Dog extends App\Animal {}
+"#,
+        )
+        .await;
+    expect!["Dog.php:1:6-1:9"].assert_eq(&out);
+}
+
+// When fqn is provided, the short-name form `extends Animal` must still match
+// so that classes in the same namespace (which omit the namespace prefix) are
+// included alongside FQN-using classes.
+#[tokio::test]
+async fn implementation_fqn_short_name_still_matched() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"//- /search.php
+<?php
+use App\Animal;
+function foo(Animal$0 $a): void {}
+
+//- /Dog.php
+<?php
+class Dog extends Animal {}
+"#,
+        )
+        .await;
+    expect!["Dog.php:1:6-1:9"].assert_eq(&out);
 }

@@ -510,3 +510,74 @@ async fn code_lens_resolve_is_idempotent() {
         "calling resolve twice must return identical results (idempotent)"
     );
 }
+
+/// Enum methods must get a code lens for references, just like class methods.
+#[tokio::test]
+async fn lens_for_enum_method() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_lens(
+            r#"<?php
+enum Suit {
+    public function label(): string { return 'x'; }
+}
+"#,
+        )
+        .await;
+    // check_code_lens renders positions, not names. Two lenses expected:
+    // one for the enum declaration, one for the enum method.
+    let lens_count = out.lines().count();
+    assert!(
+        lens_count >= 2,
+        "expected lenses for both enum and enum method, got {lens_count} lens(es):\n{out}"
+    );
+}
+
+/// Every lens that fires `editor.action.showReferences` must supply exactly
+/// three arguments `[uri, position, locations]`. This guards against the bug
+/// class where a lens has `arguments: None` and silently does nothing.
+#[tokio::test]
+async fn lens_show_references_always_has_three_arguments() {
+    let mut s = TestServer::new().await;
+    s.open(
+        "test.php",
+        r#"<?php
+interface Animal { public function speak(): string; }
+trait Barker { public function bark(): string { return 'woof'; } }
+class Dog implements Animal {
+    use Barker;
+    public string $breed = '';
+    public function speak(): string { return 'woof'; }
+}
+function topLevel(): void {}
+"#,
+    )
+    .await;
+    let resp = s.code_lens("test.php").await;
+    let lenses = resp["result"].as_array().cloned().unwrap_or_default();
+    let mut seen_any = false;
+    for lens in &lenses {
+        let Some(cmd) = lens["command"].as_object() else {
+            continue;
+        };
+        if cmd["command"].as_str() == Some("editor.action.showReferences") {
+            seen_any = true;
+            let args = &cmd["arguments"];
+            assert!(!args.is_null(), "lens {:?} missing arguments", cmd["title"]);
+            assert_eq!(
+                args.as_array().map(|a| a.len()),
+                Some(3),
+                "lens {:?} must pass [uri, position, locations]",
+                cmd["title"]
+            );
+            assert!(
+                args[2].is_array(),
+                "3rd argument (locations) must be an array"
+            );
+        }
+    }
+    assert!(
+        seen_any,
+        "fixture must produce at least one showReferences lens"
+    );
+}

@@ -681,7 +681,11 @@ impl LanguageServer for Backend {
             let client = self.client.clone();
             let (exclude_paths, include_paths, max_indexed_files) = {
                 let cfg = self.config.read().unwrap();
-                (cfg.exclude_paths.clone(), cfg.include_paths.clone(), cfg.max_indexed_files)
+                (
+                    cfg.exclude_paths.clone(),
+                    cfg.include_paths.clone(),
+                    cfg.max_indexed_files,
+                )
             };
             tokio::spawn(async move {
                 client
@@ -851,7 +855,11 @@ impl LanguageServer for Backend {
         // Add new folders and kick off background scans for each.
         let (exclude_paths, include_paths, max_indexed_files) = {
             let cfg = self.config.read().unwrap();
-            (cfg.exclude_paths.clone(), cfg.include_paths.clone(), cfg.max_indexed_files)
+            (
+                cfg.exclude_paths.clone(),
+                cfg.include_paths.clone(),
+                cfg.max_indexed_files,
+            )
         };
         for added in &params.event.added {
             if let Ok(path) = added.uri.to_file_path() {
@@ -873,8 +881,16 @@ impl LanguageServer for Backend {
                     let client = self.client.clone();
                     tokio::spawn(async move {
                         let cache = crate::cache::WorkspaceCache::new(&path_clone);
-                        scan_workspace(path_clone, docs, open_files, cache, &ex, &ip, max_indexed_files)
-                            .await;
+                        scan_workspace(
+                            path_clone,
+                            docs,
+                            open_files,
+                            cache,
+                            &ex,
+                            &ip,
+                            max_indexed_files,
+                        )
+                        .await;
                         send_refresh_requests(&client).await;
                     });
                 }

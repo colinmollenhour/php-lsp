@@ -252,3 +252,268 @@ async fn symbol_resolve_is_idempotent() {
         "calling resolve twice must return identical results (idempotent)"
     );
 }
+
+/// The symbol's `range.start` must be ≤ `selection_range.start`. This is an
+/// LSP invariant that clients rely on for folding and breadcrumb behaviour.
+#[tokio::test]
+async fn symbols_range_start_lte_selection_range_start() {
+    let mut s = TestServer::new().await;
+    s.open(
+        "test.php",
+        "<?php\nfunction hello(string $x): int { return 0; }",
+    )
+    .await;
+    let resp = s.document_symbols("test.php").await;
+    let syms = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(!syms.is_empty(), "expected at least one symbol");
+    for sym in &syms {
+        let range_start_line = sym["range"]["start"]["line"].as_u64().unwrap_or(u64::MAX);
+        let sel_start_line = sym["selectionRange"]["start"]["line"]
+            .as_u64()
+            .unwrap_or(u64::MAX);
+        assert!(
+            range_start_line <= sel_start_line,
+            "range.start.line ({range_start_line}) must be ≤ selectionRange.start.line ({sel_start_line})"
+        );
+    }
+}
+
+/// A partial AST from a parse error must still return valid symbols for the
+/// declarations that did parse successfully.
+#[tokio::test]
+async fn symbols_partial_ast_on_parse_error_returns_valid_symbols() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_document_symbols(
+            r#"<?php
+function valid() {}
+class {
+"#,
+        )
+        .await;
+    assert!(
+        out.contains("valid"),
+        "expected 'valid' symbol despite parse error: {out}"
+    );
+}
+
+/// The function symbol's `range.start.line` must be the line where the
+/// `function` keyword appears, not the first line of the file.
+#[tokio::test]
+async fn symbols_function_range_starts_at_function_keyword_line() {
+    let mut s = TestServer::new().await;
+    s.open("test.php", "<?php\nfunction myFunc() {}").await;
+    let resp = s.document_symbols("test.php").await;
+    let syms = resp["result"].as_array().cloned().unwrap_or_default();
+    let func = syms
+        .iter()
+        .find(|s| s["name"].as_str() == Some("myFunc"))
+        .expect("myFunc symbol not found");
+    let range_line = func["range"]["start"]["line"].as_u64().unwrap_or(0);
+    assert_eq!(
+        range_line, 1,
+        "function range must start at line 1 (where 'function' keyword is)"
+    );
+    let sel_line = func["selectionRange"]["start"]["line"]
+        .as_u64()
+        .unwrap_or(0);
+    assert_eq!(sel_line, 1, "selectionRange must also start at line 1");
+}
+
+#[tokio::test]
+async fn document_symbols_trait() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_document_symbols(
+            r#"<?php
+trait Loggable {
+    public function log(): void {}
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        Class Loggable @L1
+          Method log @L2"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn document_symbols_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_document_symbols(
+            r#"<?php
+namespace App\Services;
+class Mailer {
+    public function send(): void {}
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        Class Mailer @L2
+          Method send @L3"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn document_symbols_class_with_properties() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_document_symbols(
+            r#"<?php
+class User {
+    public string $name = '';
+    private int $age = 0;
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        Class User @L1
+          Property $name @L2
+          Property $age @L3"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn document_symbols_class_with_constants() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_document_symbols(
+            r#"<?php
+class Config {
+    const VERSION = '1.0';
+    const MAX_RETRIES = 3;
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        Class Config @L1
+          Constant VERSION @L2
+          Constant MAX_RETRIES @L3"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn document_symbols_trait_methods() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_document_symbols(
+            r#"<?php
+trait Serializable {
+    public function serialize(): string { return ''; }
+    public function unserialize(string $data): void {}
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        Class Serializable @L1
+          Method serialize @L2
+          Method unserialize @L3"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn document_symbols_interface_with_constants() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_document_symbols(
+            r#"<?php
+interface Limits {
+    const MAX_SIZE = 100;
+    public function check(): bool;
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        Interface Limits @L1
+          Constant MAX_SIZE @L2
+          Method check @L3"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn document_symbols_deprecated_function() {
+    let mut s = TestServer::new().await;
+    s.open(
+        "test.php",
+        "<?php\n/** @deprecated */\nfunction oldApi(): void {}\n",
+    )
+    .await;
+    let resp = s.document_symbols("test.php").await;
+    let syms = resp["result"].as_array().cloned().unwrap_or_default();
+    let func = syms
+        .iter()
+        .find(|s| s["name"].as_str() == Some("oldApi"))
+        .expect("oldApi symbol not found");
+    assert!(
+        func["deprecated"].as_bool().unwrap_or(false),
+        "deprecated function must have deprecated=true, got: {func}"
+    );
+}
+
+#[tokio::test]
+async fn document_symbols_non_deprecated_function_has_no_deprecated_field() {
+    let mut s = TestServer::new().await;
+    s.open("test.php", "<?php\nfunction freshApi(): void {}\n")
+        .await;
+    let resp = s.document_symbols("test.php").await;
+    let syms = resp["result"].as_array().cloned().unwrap_or_default();
+    let func = syms
+        .iter()
+        .find(|s| s["name"].as_str() == Some("freshApi"))
+        .expect("freshApi symbol not found");
+    assert!(
+        !func["deprecated"].as_bool().unwrap_or(false),
+        "non-deprecated function must not have deprecated=true, got: {func}"
+    );
+}
+
+#[tokio::test]
+async fn document_symbols_deprecated_class() {
+    let mut s = TestServer::new().await;
+    s.open(
+        "test.php",
+        "<?php\n/** @deprecated */\nclass LegacyService {}\n",
+    )
+    .await;
+    let resp = s.document_symbols("test.php").await;
+    let syms = resp["result"].as_array().cloned().unwrap_or_default();
+    let cls = syms
+        .iter()
+        .find(|s| s["name"].as_str() == Some("LegacyService"))
+        .expect("LegacyService symbol not found");
+    assert!(
+        cls["deprecated"].as_bool().unwrap_or(false),
+        "deprecated class must have deprecated=true, got: {cls}"
+    );
+}
+
+#[tokio::test]
+async fn document_symbols_deprecated_method() {
+    let mut s = TestServer::new().await;
+    s.open(
+        "test.php",
+        "<?php\nclass Repo {\n    /** @deprecated */\n    public function findAll(): array { return []; }\n}\n",
+    )
+    .await;
+    let resp = s.document_symbols("test.php").await;
+    let syms = resp["result"].as_array().cloned().unwrap_or_default();
+    let cls = syms
+        .iter()
+        .find(|s| s["name"].as_str() == Some("Repo"))
+        .expect("Repo class not found");
+    let method = cls["children"]
+        .as_array()
+        .and_then(|ch| ch.iter().find(|m| m["name"].as_str() == Some("findAll")))
+        .expect("findAll method not found");
+    assert!(
+        method["deprecated"].as_bool().unwrap_or(false),
+        "deprecated method must have deprecated=true, got: {method}"
+    );
+}

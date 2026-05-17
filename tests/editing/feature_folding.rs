@@ -4,6 +4,217 @@ use expect_test::expect;
 use serde_json::{Value, json};
 
 #[tokio::test]
+async fn folding_interface() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+interface Countable {
+    public function count(): int;
+}
+"#,
+        )
+        .await;
+    expect!["1..3 region"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_trait_and_method() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+trait Loggable {
+    public function log(): void {
+        echo 'log';
+    }
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        1..5 region
+        2..4 region"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_braced_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+namespace App {
+    class Foo {}
+}
+"#,
+        )
+        .await;
+    expect!["1..3 region"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_single_line_construct_produces_no_fold() {
+    let mut s = TestServer::new().await;
+    let out = s.check_folding("<?php\nclass Inline {}\n").await;
+    expect!["<no folds>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_empty_file_produces_no_fold() {
+    let mut s = TestServer::new().await;
+    let out = s.check_folding("<?php\n").await;
+    expect!["<no folds>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_if_statement() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+if (true) {
+    echo 'yes';
+}
+"#,
+        )
+        .await;
+    expect!["1..3 region"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_foreach_statement() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+foreach ([1, 2, 3] as $i) {
+    echo $i;
+}
+"#,
+        )
+        .await;
+    expect!["1..3 region"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_try_catch() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+try {
+    risky();
+} catch (\Exception $e) {
+    echo 'error';
+}
+"#,
+        )
+        .await;
+    expect!["1..5 region"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_multiline_doc_comment() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+/**
+ * A documented function.
+ * @param int $x
+ */
+function foo(int $x): void {}
+"#,
+        )
+        .await;
+    expect!["1..4 comment"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_region_endregion() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+// #region MySection
+$a = 1;
+// #endregion
+"#,
+        )
+        .await;
+    expect!["1..3 region"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_consecutive_use_statements() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+use A\ClassA;
+use B\ClassB;
+use C\ClassC;
+"#,
+        )
+        .await;
+    expect!["1..3 imports"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_nested_constructs_both_returned() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+class Container {
+    public function work(): void {
+        if (true) {
+            echo 'x';
+        }
+    }
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        1..7 region
+        2..6 region
+        3..5 region"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_single_line_function_not_folded() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding("<?php\nfunction tiny(): void { echo 1; }\n")
+        .await;
+    expect!["<no folds>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn folding_enum_method() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_folding(
+            r#"<?php
+enum Status {
+    case Active;
+    public function label(): string {
+        return 'active';
+    }
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        1..6 region
+        3..5 region"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
 async fn folding_ranges_cover_function_body() {
     let mut s = TestServer::new().await;
     let out = s
