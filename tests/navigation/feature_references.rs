@@ -1076,3 +1076,32 @@ async fn references_after_did_change_reflects_added_call() {
         main.php:3:0-3:7"#]]
     .assert_eq(&render_locations(&resp2, &server.uri("")));
 }
+
+#[tokio::test]
+async fn references_class_used_as_attribute() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+class Ro$0ute {}
+//    ^^^^^ def
+#[Route]
+//  ^^^^^ ref
+class HomeController {}
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn references_class_as_anonymous_class_base() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+class Ba$0se {}
+//    ^^^^ def
+$x = new class extends Base {};
+//                     ^^^^ ref
+"#,
+    )
+    .await;
+}
