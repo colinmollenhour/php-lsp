@@ -4,8 +4,8 @@ use std::ops::ControlFlow;
 
 use php_ast::{
     Attribute, CatchClause, ClassMember, ClassMemberKind, EnumMember, EnumMemberKind, Expr,
-    ExprKind, Name, NamespaceBody, Span, Stmt, StmtKind, TraitUseDecl, TypeHint, TypeHintKind,
-    UnaryPostfixOp, UnaryPrefixOp,
+    ExprKind, MethodDecl, Name, NamespaceBody, Span, Stmt, StmtKind, TraitUseDecl, TypeHint,
+    TypeHintKind, UnaryPostfixOp, UnaryPrefixOp,
     visitor::{
         Visitor, walk_attribute, walk_catch_clause, walk_class_member, walk_enum_member, walk_expr,
         walk_stmt, walk_trait_use, walk_type_hint,
@@ -313,6 +313,52 @@ pub fn collect_var_refs_in_scope(
     var_refs_in_stmts(stmts, var_name, out);
 }
 
+/// Returns `true` if the cursor at `byte_off` falls within `m`'s span, collecting
+/// variable references from `m`'s body and parameters into `out`.
+fn collect_method_scope(
+    m: &MethodDecl<'_, '_>,
+    member_span: Span,
+    var_name: &str,
+    byte_off: usize,
+    out: &mut Vec<(Span, DocumentHighlightKind)>,
+) -> bool {
+    if byte_off < member_span.start as usize || byte_off >= member_span.end as usize {
+        return false;
+    }
+    if let Some(body) = &m.body {
+        for inner in body.iter() {
+            if collect_in_fn_at(inner, var_name, byte_off, out) {
+                return true;
+            }
+        }
+        var_refs_in_stmts(body, var_name, out);
+    }
+    for p in m.params.iter() {
+        if p.name == var_name {
+            out.push((p.span, DocumentHighlightKind::WRITE));
+        }
+    }
+    true
+}
+
+/// Search `members` for the method whose span contains `byte_off` and collect
+/// variable references for `var_name` from it. Returns `true` when found.
+fn collect_in_class_members(
+    members: &[ClassMember<'_, '_>],
+    var_name: &str,
+    byte_off: usize,
+    out: &mut Vec<(Span, DocumentHighlightKind)>,
+) -> bool {
+    for member in members {
+        if let ClassMemberKind::Method(m) = &member.kind
+            && collect_method_scope(m, member.span, var_name, byte_off, out)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Returns `true` if `stmt` is (or contains) the function/method that owns `byte_off`
 /// and has populated `out` with variable + param spans for `var_name`.
 fn collect_in_fn_at(
@@ -326,13 +372,11 @@ fn collect_in_fn_at(
             if byte_off < stmt.span.start as usize || byte_off >= stmt.span.end as usize {
                 return false;
             }
-            // Check nested functions first.
             for inner in f.body.iter() {
                 if collect_in_fn_at(inner, var_name, byte_off, out) {
                     return true;
                 }
             }
-            // This is the enclosing function — collect param + body refs.
             for p in f.params.iter() {
                 if p.name == var_name {
                     out.push((p.span, DocumentHighlightKind::WRITE));
@@ -341,101 +385,14 @@ fn collect_in_fn_at(
             var_refs_in_stmts(&f.body, var_name, out);
             true
         }
-        StmtKind::Class(c) => {
-            for member in c.members.iter() {
-                if let ClassMemberKind::Method(m) = &member.kind {
-                    if byte_off < member.span.start as usize || byte_off >= member.span.end as usize
-                    {
-                        continue;
-                    }
-                    if let Some(body) = &m.body {
-                        for inner in body.iter() {
-                            if collect_in_fn_at(inner, var_name, byte_off, out) {
-                                return true;
-                            }
-                        }
-                        var_refs_in_stmts(body, var_name, out);
-                    }
-                    for p in m.params.iter() {
-                        if p.name == var_name {
-                            out.push((p.span, DocumentHighlightKind::WRITE));
-                        }
-                    }
-                    return true;
-                }
-            }
-            false
-        }
-        StmtKind::Trait(t) => {
-            for member in t.members.iter() {
-                if let ClassMemberKind::Method(m) = &member.kind {
-                    if byte_off < member.span.start as usize || byte_off >= member.span.end as usize
-                    {
-                        continue;
-                    }
-                    if let Some(body) = &m.body {
-                        for inner in body.iter() {
-                            if collect_in_fn_at(inner, var_name, byte_off, out) {
-                                return true;
-                            }
-                        }
-                        var_refs_in_stmts(body, var_name, out);
-                    }
-                    for p in m.params.iter() {
-                        if p.name == var_name {
-                            out.push((p.span, DocumentHighlightKind::WRITE));
-                        }
-                    }
-                    return true;
-                }
-            }
-            false
-        }
+        StmtKind::Class(c) => collect_in_class_members(&c.members, var_name, byte_off, out),
+        StmtKind::Trait(t) => collect_in_class_members(&t.members, var_name, byte_off, out),
+        StmtKind::Interface(i) => collect_in_class_members(&i.members, var_name, byte_off, out),
         StmtKind::Enum(e) => {
             for member in e.members.iter() {
-                if let EnumMemberKind::Method(m) = &member.kind {
-                    if byte_off < member.span.start as usize || byte_off >= member.span.end as usize
-                    {
-                        continue;
-                    }
-                    if let Some(body) = &m.body {
-                        for inner in body.iter() {
-                            if collect_in_fn_at(inner, var_name, byte_off, out) {
-                                return true;
-                            }
-                        }
-                        for p in m.params.iter() {
-                            if p.name == var_name {
-                                out.push((p.span, DocumentHighlightKind::WRITE));
-                            }
-                        }
-                        var_refs_in_stmts(body, var_name, out);
-                    }
-                    return true;
-                }
-            }
-            false
-        }
-        StmtKind::Interface(i) => {
-            for member in i.members.iter() {
-                if let ClassMemberKind::Method(m) = &member.kind {
-                    if byte_off < member.span.start as usize || byte_off >= member.span.end as usize
-                    {
-                        continue;
-                    }
-                    if let Some(body) = &m.body {
-                        for inner in body.iter() {
-                            if collect_in_fn_at(inner, var_name, byte_off, out) {
-                                return true;
-                            }
-                        }
-                        var_refs_in_stmts(body, var_name, out);
-                    }
-                    for p in m.params.iter() {
-                        if p.name == var_name {
-                            out.push((p.span, DocumentHighlightKind::WRITE));
-                        }
-                    }
+                if let EnumMemberKind::Method(m) = &member.kind
+                    && collect_method_scope(m, member.span, var_name, byte_off, out)
+                {
                     return true;
                 }
             }
