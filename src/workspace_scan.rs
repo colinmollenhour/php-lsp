@@ -42,7 +42,7 @@ pub(crate) async fn send_refresh_requests(client: &Client) {
 ///
 /// Post-salsa: we only populate the DocumentStore here. The codebase is built
 /// on demand by the salsa `codebase` query the first time a feature asks for
-/// it — stubs + every indexed file's StubSlice, memoized thereafter.
+/// it — every indexed file's FileIndex, memoized thereafter.
 #[tracing::instrument(
     skip(docs, open_files, cache, exclude_paths, include_paths),
     fields(root = %root.display())
@@ -181,34 +181,35 @@ pub(crate) async fn scan_workspace(
                     return;
                 }
 
-                // Phase K2b read path: if the on-disk cache has a StubSlice
+                // Phase K2b read path: if the on-disk cache has a FileIndex
                 // for this (uri, content) key, mirror the text and seed
-                // the cached slice — `file_definitions` will return it
-                // directly on the first query, skipping parse and
-                // `DefinitionCollector` entirely. An edit later clears
-                // the seeded slice via `mirror_text` (K2a).
+                // the cached index — `file_index` will return it directly
+                // on the first query, skipping parse + extract entirely.
+                // An edit later clears the seeded index via `mirror_text`.
                 let cache_key = cache
                     .as_ref()
                     .map(|_| crate::cache::WorkspaceCache::key_for(uri.as_str(), &text));
                 if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref())
-                    && let Some(slice) = cache.read::<mir_codebase::storage::StubSlice>(key)
+                    && let Some(index) = cache.read::<crate::file_index::FileIndex>(key)
                 {
                     docs.mirror_text(&uri, &text);
-                    docs.seed_cached_slice(&uri, Arc::new(slice));
+                    docs.seed_cached_index(&uri, Arc::new(index));
                     count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     return;
                 }
 
-                // Cache miss: normal parse + mirror.
+                // Cache miss: parse, extract FileIndex, mirror, and write
+                // the index to the on-disk cache for the next cold start.
                 let doc = parse_document_no_diags(&text);
-                docs.index_from_doc(uri.clone(), &doc);
+                if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref()) {
+                    let index = crate::file_index::FileIndex::extract(&doc);
+                    let _ = cache.write(key, &index);
+                    docs.mirror_text(&uri, &text);
+                    docs.seed_cached_index(&uri, Arc::new(index));
+                } else {
+                    docs.index_from_doc(uri.clone(), &doc);
+                }
                 count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                // Post-0.22: the analyzer-side definition cache is owned by
-                // `AnalysisSession::with_cache_dir`. We no longer extract a
-                // separate `StubSlice` for our own on-disk cache — that data
-                // path is gone. Keep `cache` plumbing intact for future use.
-                let _ = (cache.as_ref(), cache_key.as_ref());
             })
             .await
             .ok();
@@ -218,4 +219,134 @@ pub(crate) async fn scan_workspace(
     while set.join_next().await.is_some() {}
 
     count.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use tower_lsp::lsp_types::Url;
+
+    use super::scan_workspace;
+    use crate::cache::WorkspaceCache;
+    use crate::document_store::DocumentStore;
+    use crate::open_files::OpenFiles;
+
+    #[tokio::test]
+    async fn cache_round_trip_writes_then_reads_file_index() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(
+            src_dir.path().join("Foo.php"),
+            "<?php\nnamespace App;\nclass Foo { public function bar(): string {} }",
+        )
+        .unwrap();
+
+        let cache = WorkspaceCache::with_dir(cache_dir.path().to_path_buf());
+
+        // First scan: cache miss → parses file and writes cache entry.
+        let docs1 = Arc::new(DocumentStore::new());
+        let count1 = scan_workspace(
+            src_dir.path().to_path_buf(),
+            Arc::clone(&docs1),
+            OpenFiles::default(),
+            Some(cache.clone()),
+            &[],
+            &[],
+            50_000,
+        )
+        .await;
+        assert_eq!(count1, 1, "first scan should index 1 file");
+
+        // Overwrite the cache entry with a sentinel value. If the second scan
+        // actually reads from the cache it must return this sentinel; if it
+        // silently falls through to parse, it would return real data and the
+        // assertion below would catch the bug.
+        let disk_content = "<?php\nnamespace App;\nclass Foo { public function bar(): string {} }";
+        let uri = Url::from_file_path(src_dir.path().join("Foo.php")).unwrap();
+        let sentinel = crate::file_index::FileIndex {
+            namespace: Some("CACHE_HIT_MARKER".into()),
+            ..Default::default()
+        };
+        let key = WorkspaceCache::key_for(uri.as_str(), disk_content);
+        cache.write(&key, &sentinel).unwrap();
+
+        // Second scan: same cache dir → must read the sentinel from disk.
+        let docs2 = Arc::new(DocumentStore::new());
+        let count2 = scan_workspace(
+            src_dir.path().to_path_buf(),
+            Arc::clone(&docs2),
+            OpenFiles::default(),
+            Some(cache.clone()),
+            &[],
+            &[],
+            50_000,
+        )
+        .await;
+        assert_eq!(count2, 1, "second scan should still index 1 file");
+
+        let idx2 = docs2
+            .snapshot_query_file_index(&uri)
+            .expect("docs2 must have Foo.php indexed");
+
+        assert_eq!(
+            idx2.namespace.as_deref(),
+            Some("CACHE_HIT_MARKER"),
+            "second scan must use the on-disk cache, not re-parse"
+        );
+        assert!(
+            idx2.classes.is_empty(),
+            "sentinel has no classes; non-empty means cache was bypassed"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_clears_cached_index() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let php_path = src_dir.path().join("Bar.php");
+
+        std::fs::write(
+            &php_path,
+            "<?php\nclass Bar { public function a(): void {} }",
+        )
+        .unwrap();
+
+        let cache = WorkspaceCache::with_dir(cache_dir.path().to_path_buf());
+        let docs = Arc::new(DocumentStore::new());
+
+        // First scan: writes cache.
+        scan_workspace(
+            src_dir.path().to_path_buf(),
+            Arc::clone(&docs),
+            OpenFiles::default(),
+            Some(cache.clone()),
+            &[],
+            &[],
+            50_000,
+        )
+        .await;
+
+        let uri = Url::from_file_path(&php_path).unwrap();
+        let idx_before = docs
+            .snapshot_query_file_index(&uri)
+            .expect("Bar.php must be indexed");
+        assert_eq!(idx_before.classes[0].methods.len(), 1);
+
+        // Simulate an edit: mirror new text (clears cached_index).
+        let new_src =
+            "<?php\nclass Bar { public function a(): void {} public function b(): void {} }";
+        docs.mirror_text(&uri, new_src);
+
+        // Re-query: salsa should re-extract (2 methods now).
+        let idx_after = docs
+            .snapshot_query_file_index(&uri)
+            .expect("Bar.php must still be indexed after edit");
+        assert_eq!(
+            idx_after.classes[0].methods.len(),
+            2,
+            "edit must invalidate cached_index so fresh parse + extract runs"
+        );
+    }
 }

@@ -1,9 +1,9 @@
 //! Persistent on-disk cache for Phase K.
 //!
-//! **Status: infrastructure layer only.** This module exposes the primitives
-//! — directory layout, content hashing, serde round-trip — that a later
-//! commit will wire into `scan_workspace` to skip re-parsing on warm start.
-//! Nothing in `backend.rs` / `document_store.rs` consumes it yet.
+//! The cache stores a serialized `FileIndex` per PHP file, keyed on
+//! `(uri, content)`.  On a warm start `scan_workspace` reads the cached index
+//! instead of parsing the file, shrinking cold-start I/O from O(parse) to
+//! O(read + bincode-decode) — roughly 10–50× faster per file.
 //!
 //! ## Layout
 //!
@@ -11,9 +11,8 @@
 //! ~/.cache/php-lsp/<schema-version>/<workspace-hash>/<entry-hash>.bin
 //! ```
 //!
-//! - `<schema-version>` — `php-lsp` crate version concatenated with the
-//!   `mir-codebase` version (the latter owns `StubSlice`'s schema, so
-//!   bumping either rotates the cache).
+//! - `<schema-version>` — `php-lsp` crate version; bumping it rotates the
+//!   entire cache so old entries are never decoded against a newer schema.
 //! - `<workspace-hash>` — blake3 of the canonicalized absolute path of the
 //!   first workspace root, truncated to 16 hex chars. Two separate projects
 //!   get isolated caches; two checkouts of the same project at the same
@@ -25,7 +24,7 @@
 //! ## Format
 //!
 //! `bincode` v2 (binary, fast, schema-stable via serde derives on
-//! `StubSlice` et al). Files are written atomically via a temp-file rename
+//! `FileIndex` et al). Files are written atomically via a temp-file rename
 //! to avoid half-written entries on an interrupted shutdown.
 //!
 //! ## Invalidation
@@ -62,7 +61,7 @@ pub struct WorkspaceCache {
 /// startup, if the directory exceeds this, we reset it — simpler than
 /// LRU eviction and the rebuild cost is bounded (it's just the next
 /// workspace scan running as if cold). 512 MiB fits a mega-workspace
-/// (50 k files × ~10 KB average `StubSlice`) with headroom and is
+/// (50 k files × ~10 KB average `FileIndex`) with headroom and is
 /// small enough that no reasonable disk will choke on it.
 pub const CACHE_SIZE_CAP: u64 = 512 * 1024 * 1024;
 
@@ -205,14 +204,22 @@ fn cache_base_dir() -> Option<PathBuf> {
     None
 }
 
-/// Schema marker: bumping either `php-lsp` or `mir-codebase` invalidates
-/// every cached entry. The hardcoded mir version is a trade-off: keeping
-/// it in source means we don't depend on `build.rs` introspection, at the
-/// cost of needing to remember to update it alongside `Cargo.toml`. A
-/// compile-time assert in the serialize/deserialize path could catch
-/// drift — deferred to Step 2.
+/// Bump this constant (and the matching literal in [`schema_version`]) when
+/// `FileIndex` or any type it contains gains, loses, or renames a field.
+/// Rotating it causes every cached entry to be treated as a miss on the next
+/// cold start, regardless of whether the crate version changed.
+pub const FILE_INDEX_SCHEMA: &str = "fi-v1";
+
+/// Schema marker: bumping `php-lsp` crate version, `mir-codebase` version,
+/// or [`FILE_INDEX_SCHEMA`] invalidates every cached entry. The hardcoded mir
+/// version is a trade-off: keeping it in source means we don't depend on
+/// `build.rs` introspection, at the cost of needing to remember to update it
+/// alongside `Cargo.toml`.
+///
+/// **Important**: the `"fi-v1"` literal here must stay in sync with
+/// `FILE_INDEX_SCHEMA`. `concat!` requires a literal — bump both together.
 fn schema_version() -> &'static str {
-    concat!(env!("CARGO_PKG_VERSION"), "-mir-0.7")
+    concat!(env!("CARGO_PKG_VERSION"), "-mir-0.7-fi-v1")
 }
 
 fn workspace_hash(root: &Path) -> String {
@@ -368,17 +375,24 @@ mod tests {
     }
 
     #[test]
-    fn stub_slice_round_trips() {
-        // Smoke-test the real payload shape Phase K Step 2 will cache:
-        // mir_codebase::StubSlice already derives Serialize/Deserialize.
+    fn file_index_round_trips() {
+        use crate::ast::ParsedDoc;
+        use crate::file_index::FileIndex;
+
         let dir = TempDir::new().unwrap();
         let cache = WorkspaceCache::with_dir(dir.path().to_path_buf());
-        let key = WorkspaceCache::key_for("file:///stub.php", "<?php class Foo {}");
-        let slice = mir_codebase::storage::StubSlice::default();
-        cache.write(&key, &slice).unwrap();
-        let decoded: mir_codebase::storage::StubSlice = cache.read(&key).unwrap();
-        // StubSlice has no PartialEq, so we compare a cheap proxy:
-        // the class count (0 for a default).
-        assert_eq!(decoded.classes.len(), slice.classes.len());
+        let src = "<?php\nnamespace App;\nclass Foo { public function bar(): string {} }";
+        let key = WorkspaceCache::key_for("file:///Foo.php", src);
+
+        let doc = ParsedDoc::parse(src.to_string());
+        let index = FileIndex::extract(&doc);
+        cache.write(&key, &index).unwrap();
+
+        let decoded: FileIndex = cache.read(&key).unwrap();
+        assert_eq!(decoded.namespace.as_deref(), Some("App"));
+        assert_eq!(decoded.classes.len(), 1);
+        assert_eq!(decoded.classes[0].name.as_ref(), "Foo");
+        assert_eq!(decoded.classes[0].methods.len(), 1);
+        assert_eq!(decoded.classes[0].methods[0].name.as_ref(), "bar");
     }
 }

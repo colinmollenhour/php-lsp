@@ -30,8 +30,14 @@ crate::impl_arc_update!(IndexArc);
 
 /// Build the compact symbol index for a file. `no_eq` so salsa doesn't try to
 /// compare `IndexArc` structurally; invalidation flows from `parsed_doc`.
+///
+/// Fast path: if the workspace scan seeded a `cached_index` (loaded from the
+/// on-disk cache), return it directly — no parse, no extract.
 #[salsa::tracked(no_eq)]
 pub fn file_index(db: &dyn Database, file: SourceFile) -> IndexArc {
+    if let Some(cached) = file.cached_index(db) {
+        return IndexArc(cached);
+    }
     let doc = parsed_doc(db, file);
     IndexArc(Arc::new(FileIndex::extract(doc.get())))
 }

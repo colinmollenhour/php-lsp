@@ -17,7 +17,7 @@ use crate::docblock::docblock_before;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct FileIndex {
     pub namespace: Option<Box<str>>,
     pub functions: Vec<FunctionDef>,
@@ -25,7 +25,7 @@ pub struct FileIndex {
     pub constants: Vec<Box<str>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FunctionDef {
     pub name: Box<str>,
     /// Fully-qualified name: `\Namespace\function_name` or just `function_name`.
@@ -39,7 +39,7 @@ pub struct FunctionDef {
     pub name_char: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParamDef {
     pub name: Box<str>,
     pub type_hint: Option<Box<str>>,
@@ -47,7 +47,7 @@ pub struct ParamDef {
     pub variadic: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClassDef {
     pub name: Box<str>,
     /// Fully-qualified name.
@@ -68,7 +68,7 @@ pub struct ClassDef {
     pub name_char: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ClassKind {
     Class,
     Interface,
@@ -76,7 +76,7 @@ pub enum ClassKind {
     Enum,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MethodDef {
     pub name: Box<str>,
     pub is_static: bool,
@@ -90,14 +90,14 @@ pub struct MethodDef {
     pub name_char: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Visibility {
     Public,
     Protected,
     Private,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PropertyDef {
     pub name: Box<str>,
     pub is_static: bool,
