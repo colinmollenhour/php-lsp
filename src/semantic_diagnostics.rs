@@ -36,20 +36,8 @@ pub fn semantic_diagnostics(
         .chain(class_issues)
         .filter(|i| !i.suppressed)
         .filter(|i| issue_passes_filter(i, cfg))
-        .map(|i| to_lsp_diagnostic(i, uri))
+        .map(to_lsp_diagnostic)
         .collect()
-}
-
-/// Backward-compat alias kept for benchmarks. mir 0.22's session-based API
-/// no longer distinguishes "rebuild" vs "no-rebuild"; the session always
-/// updates incrementally via `ingest_file`.
-pub fn semantic_diagnostics_no_rebuild(
-    uri: &Url,
-    doc: &ParsedDoc,
-    session: &mir_analyzer::AnalysisSession,
-    cfg: &DiagnosticsConfig,
-) -> Vec<Diagnostic> {
-    semantic_diagnostics(uri, doc, session, cfg)
 }
 
 /// Convert pre-computed raw issues (from `db::semantic::semantic_issues`) into
@@ -58,7 +46,7 @@ pub fn semantic_diagnostics_no_rebuild(
 /// config toggles (the user flipping a category must not rerun the analyzer).
 pub fn issues_to_diagnostics(
     issues: &[mir_issues::Issue],
-    uri: &Url,
+    _uri: &Url,
     cfg: &DiagnosticsConfig,
 ) -> Vec<Diagnostic> {
     if !cfg.enabled {
@@ -68,7 +56,7 @@ pub fn issues_to_diagnostics(
         .iter()
         .filter(|i| issue_passes_filter(i, cfg))
         .cloned()
-        .map(|i| to_lsp_diagnostic(i, uri))
+        .map(to_lsp_diagnostic)
         .collect()
 }
 
@@ -82,7 +70,10 @@ fn issue_passes_filter(issue: &mir_issues::Issue, cfg: &DiagnosticsConfig) -> bo
         IssueKind::UndefinedFunction { .. } | IssueKind::UndefinedMethod { .. } => {
             cfg.undefined_functions
         }
-        IssueKind::UndefinedClass { .. } => cfg.undefined_classes,
+        IssueKind::UndefinedClass { .. } | IssueKind::UndefinedTrait { .. } => {
+            cfg.undefined_classes
+        }
+        IssueKind::InvalidTraitUse { .. } => cfg.type_errors,
         IssueKind::TooFewArguments { .. }
         | IssueKind::TooManyArguments { .. }
         | IssueKind::InvalidPassByReference { .. }
@@ -247,7 +238,7 @@ fn is_identifier_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-fn to_lsp_diagnostic(issue: mir_issues::Issue, _uri: &Url) -> Diagnostic {
+fn to_lsp_diagnostic(issue: mir_issues::Issue) -> Diagnostic {
     // mir-analyzer uses 1-based line numbers; LSP uses 0-based.
     let line = issue.location.line.saturating_sub(1);
     let col_start = issue.location.col_start as u32;
@@ -521,9 +512,8 @@ mod tests {
     fn to_lsp_diagnostic_sets_code_to_issue_kind_name() {
         use mir_issues::{Issue, IssueKind, Location};
         use std::sync::Arc;
-        use tower_lsp::lsp_types::{NumberOrString, Url};
+        use tower_lsp::lsp_types::NumberOrString;
 
-        let uri = Url::parse("file:///test.php").unwrap();
         let location = Location {
             file: Arc::from("file:///test.php"),
             line: 1,
@@ -537,7 +527,7 @@ mod tests {
             },
             location,
         );
-        let diag = to_lsp_diagnostic(issue, &uri);
+        let diag = to_lsp_diagnostic(issue);
         assert_eq!(
             diag.code,
             Some(NumberOrString::String("UndefinedClass".to_string())),
