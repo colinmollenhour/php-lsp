@@ -1186,6 +1186,11 @@ impl TestServer {
         }
     }
 
+    /// Assert that opening `src` produces zero diagnostics.
+    pub async fn check_no_diagnostics(&mut self, src: &str) {
+        self.check_diagnostics(src).await;
+    }
+
     /// rust-analyzer-style helper: open `src`, run hover at `$0`, and return
     /// a stable string rendering of the response. Pair with
     /// `expect_test::expect!` to snapshot hover content.

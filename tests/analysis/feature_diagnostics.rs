@@ -292,7 +292,10 @@ async fn workspace_diagnostic_after_edit() {
     // Verify initial error
     let resp1 = server.workspace_diagnostic().await;
     let out1 = render_workspace_diagnostic(&resp1, &server.uri(""));
-    assert!(out1.contains("undefined_fn"));
+    expect![[r#"
+        ws_fix.php
+          1:0 Function undefined_fn() is not defined [UndefinedFunction] (error)"#]]
+    .assert_eq(&out1);
 
     // Fix the error by changing the code
     server.change("ws_fix.php", 2, "<?php\n").await;
