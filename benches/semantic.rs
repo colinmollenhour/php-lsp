@@ -20,7 +20,7 @@ use tower_lsp::lsp_types::Url;
 
 use php_lsp::ast::ParsedDoc;
 use php_lsp::config::DiagnosticsConfig;
-use php_lsp::semantic_diagnostics::{semantic_diagnostics, semantic_diagnostics_no_rebuild};
+use php_lsp::semantic_diagnostics::semantic_diagnostics;
 
 const MEDIUM: &str = include_str!("fixtures/medium_class.php");
 
@@ -124,9 +124,7 @@ fn bench_laravel_scale(c: &mut Criterion) {
 
     group.bench_function("reanalyze_str", |b| {
         b.iter(|| {
-            black_box(semantic_diagnostics_no_rebuild(
-                &hot.0, &hot.1, &session, &cfg,
-            ));
+            black_box(semantic_diagnostics(&hot.0, &hot.1, &session, &cfg));
         });
     });
 

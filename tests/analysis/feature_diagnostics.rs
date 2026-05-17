@@ -1093,15 +1093,6 @@ async fn same_namespace_truly_missing_class_is_flagged() {
     );
 }
 
-/// Tripwire for a mir-analyzer gap: a missing trait in `class Foo { use
-/// Missing; }` produces no diagnostic today. When mir grows an
-/// `UndefinedTrait` (or extends `UndefinedClass` to cover trait positions),
-/// un-ignore this — it will start passing.
-///
-/// Until then we keep the test alongside the unit-level fix in
-/// `all_class_ref_names_in_stmts` so future analyses can rely on every
-/// class-typed AST position being collected (rename, references, etc.).
-#[ignore = "mir gap: missing traits in `use TraitName;` are not diagnosed"]
 #[tokio::test]
 async fn same_namespace_trait_use_truly_missing_is_flagged() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1124,6 +1115,21 @@ async fn same_namespace_trait_use_truly_missing_is_flagged() {
         out.contains("MissingTrait"),
         "expected a diagnostic mentioning MissingTrait, got:\n{out}"
     );
+}
+
+#[tokio::test]
+async fn invalid_trait_use_class_as_trait() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+class NotATrait {}
+class User {
+    use NotATrait;
+//      ^^^^^^^^^ error: NotATrait is a class, not a trait
+}
+"#,
+    )
+    .await;
 }
 
 #[tokio::test]
