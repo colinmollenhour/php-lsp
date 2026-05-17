@@ -1,6 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use php_ast::visitor::{Visitor, walk_stmt};
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Span, Stmt, StmtKind, UseKind};
 use rayon::prelude::*;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
@@ -264,11 +266,37 @@ fn doc_can_reference_target(doc: &ParsedDoc, word: &str, target_fqn: &str) -> bo
         || (resolved == word && target == format!("\\{word}"))
 }
 
+struct ImportsVisitor {
+    only_kind: Option<UseKind>,
+    out: HashMap<String, String>,
+}
+
+impl<'arena, 'src> Visitor<'arena, 'src> for ImportsVisitor {
+    fn visit_stmt(&mut self, stmt: &Stmt<'arena, 'src>) -> ControlFlow<()> {
+        match &stmt.kind {
+            StmtKind::Use(u) if self.only_kind.is_none_or(|k| u.kind == k) => {
+                for item in u.uses.iter() {
+                    let fqn = item.name.to_string_repr().into_owned();
+                    let short = item
+                        .alias
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| fqn.rsplit('\\').next().unwrap_or(&fqn).to_string());
+                    self.out.insert(short, fqn);
+                }
+                ControlFlow::Continue(())
+            }
+            // walk_stmt recurses into NamespaceBody::Braced automatically.
+            StmtKind::Namespace(_) => walk_stmt(self, stmt),
+            _ => ControlFlow::Continue(()),
+        }
+    }
+}
+
 /// Build a local-name → FQN map from a doc's `use` statements.  Mirrors
 /// `Backend::file_imports` but self-contained so the reference walker can
 /// run without a persistent codebase. Includes all use kinds (class, function,
 /// const) — callers that only want class imports should use `collect_class_imports`.
-pub(crate) fn collect_file_imports(doc: &ParsedDoc) -> std::collections::HashMap<String, String> {
+pub(crate) fn collect_file_imports(doc: &ParsedDoc) -> HashMap<String, String> {
     collect_imports_filtered(doc, None)
 }
 
@@ -280,43 +308,22 @@ pub(crate) fn collect_file_imports(doc: &ParsedDoc) -> std::collections::HashMap
 ///
 /// TODO: upstream fix — have mir's FileAnalyzer auto-load via its ClassResolver
 /// so lsp no longer needs to pre-collect class dependencies manually.
-pub(crate) fn collect_class_imports(doc: &ParsedDoc) -> std::collections::HashMap<String, String> {
+pub(crate) fn collect_class_imports(doc: &ParsedDoc) -> HashMap<String, String> {
     collect_imports_filtered(doc, Some(UseKind::Normal))
 }
 
 fn collect_imports_filtered(
     doc: &ParsedDoc,
     only_kind: Option<UseKind>,
-) -> std::collections::HashMap<String, String> {
-    let mut out = std::collections::HashMap::new();
-    fn walk(
-        stmts: &[Stmt<'_, '_>],
-        only_kind: Option<UseKind>,
-        out: &mut std::collections::HashMap<String, String>,
-    ) {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Use(u) if only_kind.is_none_or(|k| u.kind == k) => {
-                    for item in u.uses.iter() {
-                        let fqn = item.name.to_string_repr().into_owned();
-                        let short = item
-                            .alias
-                            .map(|a| a.to_string())
-                            .unwrap_or_else(|| fqn.rsplit('\\').next().unwrap_or(&fqn).to_string());
-                        out.insert(short, fqn);
-                    }
-                }
-                StmtKind::Namespace(ns) => {
-                    if let NamespaceBody::Braced(inner) = &ns.body {
-                        walk(inner, only_kind, out);
-                    }
-                }
-                _ => {}
-            }
-        }
+) -> HashMap<String, String> {
+    let mut v = ImportsVisitor {
+        only_kind,
+        out: HashMap::new(),
+    };
+    for stmt in doc.program().stmts.iter() {
+        let _ = v.visit_stmt(stmt);
     }
-    walk(&doc.program().stmts, only_kind, &mut out);
-    out
+    v.out
 }
 
 /// Collect every FQN class name (e.g. `\App\Model\Entity`) referenced in a
