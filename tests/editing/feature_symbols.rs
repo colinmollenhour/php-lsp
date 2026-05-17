@@ -97,6 +97,28 @@ async fn workspace_symbol_finds_class_by_short_name() {
     expect!["Class       User @ src/Model/User.php:4"].assert_eq(&out);
 }
 
+/// Regression: workspace/symbol with no matches must return `[]`, not `null`.
+/// Prior to the fix, the server returned JSON `null` for empty results, which
+/// violates the LSP spec (WorkspaceSymbol[] | null — but callers that always
+/// expect an array would break).
+#[tokio::test]
+async fn workspace_symbols_returns_empty_array_not_null_on_no_match() {
+    let mut s = TestServer::new().await;
+    s.open("main.php", "<?php\nclass Foo {}\n").await;
+    let resp = s.workspace_symbols("ThisQueryMatchesNothing").await;
+    assert!(
+        resp["result"].is_array(),
+        "expected result to be an array, got: {}",
+        resp["result"]
+    );
+    assert_eq!(
+        resp["result"].as_array().unwrap().len(),
+        0,
+        "expected empty array, got: {}",
+        resp["result"]
+    );
+}
+
 // --- workspaceSymbol/resolve ---
 
 #[tokio::test]
