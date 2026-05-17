@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use mir_analyzer::PhpVersion;
-use mir_codebase::storage::StubSlice;
+
+use crate::file_index::FileIndex;
 
 /// Opaque file identifier used as a stable key for a source file across edits.
 /// Backend will map `Url` <-> `FileId`; salsa queries key on `SourceFile` which
@@ -18,20 +19,19 @@ pub struct FileId(pub u32);
 /// per-symbol location records keyed by URI without needing a separate
 /// FileId→URI map outside salsa.
 ///
-/// `cached_slice` (Phase K2): when `Some`, holds a pre-computed `StubSlice`
-/// loaded from the on-disk cache. `file_definitions` checks this field
-/// first and returns the cached slice instead of parsing + running
-/// `DefinitionCollector`. Cleared back to `None` on any text edit — see
-/// `DocumentStore::mirror_text` — so a stale cached slice cannot mask a
-/// real change. Seeded by workspace scan via
-/// `DocumentStore::seed_cached_slice` before the first `file_definitions`
-/// call for that file.
+/// `cached_index` (Phase K2): when `Some`, holds a pre-computed `FileIndex`
+/// loaded from the on-disk cache. `file_index` checks this field first and
+/// returns the cached index instead of parsing + extracting. Cleared back to
+/// `None` on any text edit — see `DocumentStore::mirror_text` — so a stale
+/// cached index cannot mask a real change. Seeded by workspace scan via
+/// `DocumentStore::seed_cached_index` before the first `file_index` call for
+/// that file.
 #[salsa::input]
 pub struct SourceFile {
     pub id: FileId,
     pub uri: Arc<str>,
     pub text: Arc<str>,
-    pub cached_slice: Option<Arc<StubSlice>>,
+    pub cached_index: Option<Arc<FileIndex>>,
 }
 
 /// Workspace-level input: the set of files that participate in whole-program

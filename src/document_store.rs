@@ -195,10 +195,14 @@ impl DocumentStore {
             }
             sf.set_text(host.db_mut()).to(text_arc.clone());
             // Phase K2: any text change invalidates a previously-seeded
-            // cached slice. Clearing it forces the fresh-parse branch of
-            // `file_definitions` on the next query, which is correct —
-            // the cached slice no longer matches the new text.
-            sf.set_cached_slice(host.db_mut()).to(None);
+            // cached index. Only bump the revision when a cached index is
+            // actually present — an unconditional set would cause two
+            // revision bumps per edit (one for text, one for cached_index),
+            // which needlessly cancels in-flight `file_index` queries on
+            // every keystroke.
+            if sf.cached_index(host.db()).is_some() {
+                sf.set_cached_index(host.db_mut()).to(None);
+            }
             drop(host);
             self.text_cache.insert(uri.clone(), text_arc);
             sf
@@ -220,30 +224,24 @@ impl DocumentStore {
         self.source_files.get(uri).map(|e| *e)
     }
 
-    /// Phase K2: pre-seed a `StubSlice` loaded from the on-disk cache
-    /// onto the `SourceFile` input for `uri`. The next `file_definitions`
-    /// call for that file returns the cached slice directly, skipping
-    /// parse + `DefinitionCollector`.
+    /// Phase K2: pre-seed a `FileIndex` loaded from the on-disk cache onto
+    /// the `SourceFile` input for `uri`. The next `file_index` call for that
+    /// file returns the cached index directly, skipping parse + extract.
     ///
-    /// Must be called **before** any `file_definitions(db, sf)` call for
-    /// this file — otherwise salsa has already memoized the fresh-parse
-    /// result and setting `cached_slice` now would only bump the revision
-    /// without actually using the cache. In practice the workspace-scan
-    /// path seeds immediately after `mirror_text` and before any query
-    /// runs.
+    /// Must be called **before** any `file_index(db, sf)` call for this file —
+    /// otherwise salsa has already memoized the fresh-parse result and setting
+    /// `cached_index` now would only bump the revision without using the cache.
+    /// In practice the workspace-scan path seeds immediately after `mirror_text`
+    /// and before any query runs.
     ///
     /// Returns `false` when `uri` was not mirrored (caller should mirror
     /// first); returns `true` on success.
-    pub fn seed_cached_slice(
-        &self,
-        uri: &Url,
-        slice: Arc<mir_codebase::storage::StubSlice>,
-    ) -> bool {
+    pub fn seed_cached_index(&self, uri: &Url, index: Arc<FileIndex>) -> bool {
         let Some(sf) = self.source_files.get(uri).map(|e| *e) else {
             return false;
         };
         let mut host = self.host.lock().unwrap();
-        sf.set_cached_slice(host.db_mut()).to(Some(slice));
+        sf.set_cached_index(host.db_mut()).to(Some(index));
         true
     }
 
@@ -290,6 +288,18 @@ impl DocumentStore {
     /// are no longer meaningful.
     pub fn evict_token_cache(&self, uri: &Url) {
         self.token_cache.remove(uri);
+    }
+
+    /// Return the `FileIndex` for `uri` by running `file_index` on a salsa
+    /// snapshot.  Returns `None` when `uri` has not been mirrored.
+    ///
+    /// Test-only — production code uses the salsa query directly via
+    /// `snapshot_query`.
+    #[cfg(test)]
+    pub fn snapshot_query_file_index(&self, uri: &Url) -> Option<crate::file_index::FileIndex> {
+        let sf = self.source_files.get(uri).map(|e| *e)?;
+        let idx = self.snapshot_query(|db| crate::db::index::file_index(db, sf));
+        Some(idx.get().clone())
     }
 
     /// Register a file in the salsa layer without marking it open.
@@ -916,23 +926,15 @@ mod tests {
     /// parsed_cache must stay bounded — inserting more than
     /// `PARSED_CACHE_CAP` unique URLs must not cause unbounded growth.
     /// Eviction is probabilistic, so we only assert the bound, not which
-    /// Phase K2 end-to-end: seed a cached slice through `DocumentStore`,
-    /// confirm the workspace codebase sees the cached fact, then edit the
-    /// text and confirm the cache is cleared (codebase now reflects the
-    /// re-parsed text). Exercises `seed_cached_slice` + `mirror_text`'s
-    /// `set_cached_slice(None)` invalidation together.
-    // Removed `seed_cached_slice_then_edit_invalidates`: the cached_slice
-    // seed path is no longer relevant — mir 0.22's `AnalysisSession` owns
-    // the cache lifecycle internally.
-
-    /// Seeding for a URL that was never mirrored is a no-op (returns `false`)
-    /// — avoids silently allocating SourceFiles outside `mirror_text`'s control.
+    /// Seeding a cached index for a URL that was never mirrored is a no-op
+    /// (returns `false`) — avoids silently allocating SourceFiles outside
+    /// `mirror_text`'s control.
     #[test]
-    fn seed_cached_slice_noops_for_unknown_uri() {
+    fn seed_cached_index_noops_for_unknown_uri() {
         let store = DocumentStore::new();
         let u = uri("/never_mirrored.php");
-        let slice = Arc::new(mir_codebase::storage::StubSlice::default());
-        assert!(!store.seed_cached_slice(&u, slice));
+        let index = Arc::new(crate::file_index::FileIndex::default());
+        assert!(!store.seed_cached_index(&u, index));
     }
 
     /// entries survive.
