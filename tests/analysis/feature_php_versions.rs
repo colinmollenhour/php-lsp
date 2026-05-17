@@ -1,4 +1,4 @@
-use super::common::TestServer;
+use super::*;
 use serde_json::json;
 
 // ── PHP 8.0 functions (str_contains, str_starts_with, str_ends_with) ────────────
@@ -31,18 +31,8 @@ async fn str_contains_defined_on_php80() {
         "diagnostics": { "enabled": true }
     }))
     .await;
-
-    let empty = vec![];
-    let notif = s
-        .open("test.php", "<?php\nstr_contains(\"hello\", \"ell\");\n")
+    s.check_no_diagnostics("<?php\nstr_contains(\"hello\", \"ell\");\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("str_contains")),
-        "Expected no undefined error for str_contains on PHP 8.0"
-    );
 }
 
 #[tokio::test]
@@ -98,21 +88,8 @@ async fn each_defined_on_php74() {
         "diagnostics": { "enabled": true }
     }))
     .await;
-
-    let empty = vec![];
-    let notif = s
-        .open(
-            "test.php",
-            "<?php\n$arr = [1, 2, 3];\n$pair = each($arr);\n",
-        )
+    s.check_no_diagnostics("<?php\n$arr = [1, 2, 3];\n$pair = each($arr);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("each")),
-        "Expected no undefined error for each on PHP 7.4"
-    );
 }
 
 #[tokio::test]
@@ -146,21 +123,8 @@ async fn money_format_defined_on_php74() {
         "diagnostics": { "enabled": true }
     }))
     .await;
-
-    let empty = vec![];
-    let notif = s
-        .open(
-            "test.php",
-            "<?php\n$result = money_format(\"%.2n\", 1234.56);\n",
-        )
+    s.check_no_diagnostics("<?php\n$result = money_format(\"%.2n\", 1234.56);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("money_format")),
-        "Expected no undefined error for money_format on PHP 7.4"
-    );
 }
 
 #[tokio::test]
@@ -240,19 +204,8 @@ async fn array_is_list_defined_on_php81() {
         "diagnostics": { "enabled": true }
     }))
     .await;
-
-    let empty = vec![];
-    let notif = s
-        .open("test.php", "<?php\n$is_list = array_is_list([1, 2, 3]);\n")
+    s.check_no_diagnostics("<?php\n$is_list = array_is_list([1, 2, 3]);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        !diags.iter().any(|d| d["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("array_is_list")),
-        "Expected no undefined error for array_is_list on PHP 8.1"
-    );
 }
 
 // ── PHP 8.4 functions (array_find, array_any, array_all) ────────────────────────
@@ -288,21 +241,8 @@ async fn array_find_defined_on_php84() {
         "diagnostics": { "enabled": true }
     }))
     .await;
-
-    let empty = vec![];
-    let notif = s
-        .open(
-            "test.php",
-            "<?php\n$found = array_find([1, 2, 3], fn ($n) => $n > 1);\n",
-        )
+    s.check_no_diagnostics("<?php\n$found = array_find([1, 2, 3], fn ($n) => $n > 1);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_find")),
-        "Expected no undefined error for array_find on PHP 8.4"
-    );
 }
 
 #[tokio::test]
@@ -383,18 +323,8 @@ async fn array_first_defined_on_php85() {
         "diagnostics": { "enabled": true }
     }))
     .await;
-
-    let empty = vec![];
-    let notif = s
-        .open("test.php", "<?php\n$first = array_first([1, 2, 3]);\n")
+    s.check_no_diagnostics("<?php\n$first = array_first([1, 2, 3]);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_first")),
-        "Expected no undefined error for array_first on PHP 8.5"
-    );
 }
 
 #[tokio::test]
@@ -425,18 +355,8 @@ async fn array_last_defined_on_php85() {
         "diagnostics": { "enabled": true }
     }))
     .await;
-
-    let empty = vec![];
-    let notif = s
-        .open("test.php", "<?php\n$last = array_last([1, 2, 3]);\n")
+    s.check_no_diagnostics("<?php\n$last = array_last([1, 2, 3]);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_last")),
-        "Expected no undefined error for array_last on PHP 8.5"
-    );
 }
 
 // ── Version change re-triggers diagnostics ─────────────────────────────────────
@@ -487,30 +407,10 @@ async fn latest_version_has_all_85_functions() {
         "diagnostics": { "enabled": true }
     }))
     .await;
-
-    let empty = vec![];
-    let notif = s
-        .open(
-            "test.php",
-            "<?php\n$first = array_first([1]);\n$last = array_last([1]);\n$found = array_find([1], fn ($n) => true);\n$any = array_any([1], fn ($n) => true);\n$all = array_all([1], fn ($n) => true);\n",
-        )
-        .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    for func in &[
-        "array_first",
-        "array_last",
-        "array_find",
-        "array_any",
-        "array_all",
-    ] {
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d["message"].as_str().unwrap_or("").contains(func)),
-            "Expected no undefined error for {} on PHP 8.5",
-            func
-        );
-    }
+    s.check_no_diagnostics(
+        "<?php\n$first = array_first([1]);\n$last = array_last([1]);\n$found = array_find([1], fn ($n) => true);\n$any = array_any([1], fn ($n) => true);\n$all = array_all([1], fn ($n) => true);\n",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -521,25 +421,10 @@ async fn all_versions_have_basic_stdlib() {
             "diagnostics": { "enabled": true }
         }))
         .await;
-
-        let empty = vec![];
-        let notif = s
-            .open(
-                "test.php",
-                "<?php\nstrlen(\"test\");\narray_map(fn ($x) => $x, []);\nin_array(1, [1, 2, 3]);\n",
-            )
-            .await;
-        let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-        for func in &["strlen", "array_map", "in_array"] {
-            assert!(
-                !diags
-                    .iter()
-                    .any(|d| d["message"].as_str().unwrap_or("").contains(func)),
-                "Expected {} to be available on PHP {}",
-                func,
-                version
-            );
-        }
+        s.check_no_diagnostics(
+            "<?php\nstrlen(\"test\");\narray_map(fn ($x) => $x, []);\nin_array(1, [1, 2, 3]);\n",
+        )
+        .await;
     }
 }
 
@@ -552,25 +437,6 @@ async fn invalid_version_falls_back_to_latest_stubs() {
         "diagnostics": { "enabled": true }
     }))
     .await;
-
-    let empty = vec![];
-    let notif = s
-        .open(
-            "test.php",
-            "<?php\n$first = array_first([1]);\n$last = array_last([1]);\n",
-        )
+    s.check_no_diagnostics("<?php\n$first = array_first([1]);\n$last = array_last([1]);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_first")),
-        "Expected array_first to be available (invalid version falls back to latest)"
-    );
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_last")),
-        "Expected array_last to be available (invalid version falls back to latest)"
-    );
 }

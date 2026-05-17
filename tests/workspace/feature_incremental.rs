@@ -279,8 +279,14 @@ async fn cross_file_republish_fans_out_to_multiple_dependents() {
         .await;
 
     // Both files must receive diagnostics
-    expect!["true"].assert_eq(&notifs.contains_key(&u1).to_string());
-    expect!["true"].assert_eq(&notifs.contains_key(&u2).to_string());
+    assert!(
+        notifs.contains_key(&u1),
+        "u1_fan.php did not receive publishDiagnostics"
+    );
+    assert!(
+        notifs.contains_key(&u2),
+        "u2_fan.php did not receive publishDiagnostics"
+    );
 
     for (label, uri) in [("u1", &u1), ("u2", &u2)] {
         let notif = notifs
@@ -379,7 +385,10 @@ async fn cross_file_republish_preserves_dependent_parse_errors() {
         .open("broken.php", "<?php\nnew Triggered();\nbroken(;\n")
         .await;
     let original_parse = parse_error_count(&notif);
-    expect!["true"].assert_eq(&(original_parse > 0).to_string());
+    assert!(
+        original_parse > 0,
+        "expected parse errors after opening 'broken(;'"
+    );
 
     server
         .open("trigger.php", "<?php\nclass Triggered {}\n")
@@ -390,5 +399,8 @@ async fn cross_file_republish_preserves_dependent_parse_errors() {
     let final_parse = parse_error_count(&notif);
     // Parse errors must be preserved during cross-file republish, even
     // though the UndefinedClass diagnostic clears once `Triggered` exists.
-    expect!["true"].assert_eq(&(final_parse >= original_parse).to_string());
+    assert_eq!(
+        final_parse, original_parse,
+        "parse error count changed during cross-file republish: expected {original_parse}, got {final_parse}"
+    );
 }
