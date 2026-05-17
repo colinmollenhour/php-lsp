@@ -3,12 +3,12 @@
 use std::ops::ControlFlow;
 
 use php_ast::{
-    CatchClause, ClassMember, ClassMemberKind, EnumMember, EnumMemberKind, Expr, ExprKind, Name,
-    NamespaceBody, Span, Stmt, StmtKind, TraitUseDecl, TypeHint, TypeHintKind, UnaryPostfixOp,
-    UnaryPrefixOp,
+    Attribute, CatchClause, ClassMember, ClassMemberKind, EnumMember, EnumMemberKind, Expr,
+    ExprKind, Name, NamespaceBody, Span, Stmt, StmtKind, TraitUseDecl, TypeHint, TypeHintKind,
+    UnaryPostfixOp, UnaryPrefixOp,
     visitor::{
-        Visitor, walk_catch_clause, walk_class_member, walk_enum_member, walk_expr, walk_stmt,
-        walk_trait_use, walk_type_hint,
+        Visitor, walk_attribute, walk_catch_clause, walk_class_member, walk_enum_member, walk_expr,
+        walk_stmt, walk_trait_use, walk_type_hint,
     },
 };
 use tower_lsp::lsp_types::DocumentHighlightKind;
@@ -739,6 +739,14 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllClassRefsVisitor {
                     self.push_id(id);
                 }
             }
+            ExprKind::AnonymousClass(c) => {
+                if let Some(ext) = &c.extends {
+                    self.push_name(ext);
+                }
+                for iface in c.implements.iter() {
+                    self.push_name(iface);
+                }
+            }
             ExprKind::Binary(b) => {
                 // `$x instanceof Foo` — parser models this as a Binary expr
                 // whose right-hand side is an Identifier.
@@ -764,6 +772,11 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllClassRefsVisitor {
             _ => {}
         }
         walk_expr(self, expr)
+    }
+
+    fn visit_attribute(&mut self, attribute: &Attribute<'arena, 'src>) -> ControlFlow<()> {
+        self.push_name(&attribute.name);
+        walk_attribute(self, attribute)
     }
 
     fn visit_type_hint(&mut self, type_hint: &TypeHint<'arena, 'src>) -> ControlFlow<()> {
@@ -853,6 +866,14 @@ impl<'arena, 'src> Visitor<'arena, 'src> for ClassRefsVisitor<'_> {
                     self.out.push(n.class.span);
                 }
             }
+            ExprKind::AnonymousClass(c) => {
+                if let Some(ext) = &c.extends {
+                    self.collect_name(ext);
+                }
+                for iface in c.implements.iter() {
+                    self.collect_name(iface);
+                }
+            }
             ExprKind::Binary(b) => {
                 if let ExprKind::Identifier(id) = &b.right.kind
                     && id.rsplit('\\').next().unwrap_or(id) == self.class_name
@@ -884,6 +905,11 @@ impl<'arena, 'src> Visitor<'arena, 'src> for ClassRefsVisitor<'_> {
             _ => {}
         }
         walk_expr(self, expr)
+    }
+
+    fn visit_attribute(&mut self, attribute: &Attribute<'arena, 'src>) -> ControlFlow<()> {
+        self.collect_name(&attribute.name);
+        walk_attribute(self, attribute)
     }
 
     fn visit_type_hint(&mut self, type_hint: &TypeHint<'arena, 'src>) -> ControlFlow<()> {
@@ -1289,5 +1315,35 @@ mod tests {
         let doc = parse(src);
         let out = all_class_ref_names_in_stmts(&doc.program().stmts);
         assert_eq!(out.iter().filter(|s| s == &"X").count(), 1);
+    }
+
+    #[test]
+    fn all_class_refs_collects_attribute_names() {
+        let src = "<?php\n#[MyAttr]\nclass Foo {}\n#[ORM\\Entity]\nclass Bar {}";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(
+            out.contains(&"MyAttr".to_string()),
+            "simple attribute — got {out:?}"
+        );
+        assert!(
+            out.contains(&"ORM\\Entity".to_string()),
+            "qualified attribute — got {out:?}"
+        );
+    }
+
+    #[test]
+    fn all_class_refs_collects_anonymous_class_extends_and_implements() {
+        let src = "<?php\n$x = new class extends Base implements Countable {};";
+        let doc = parse(src);
+        let out = all_class_ref_names_in_stmts(&doc.program().stmts);
+        assert!(
+            out.contains(&"Base".to_string()),
+            "anon class extends — got {out:?}"
+        );
+        assert!(
+            out.contains(&"Countable".to_string()),
+            "anon class implements — got {out:?}"
+        );
     }
 }

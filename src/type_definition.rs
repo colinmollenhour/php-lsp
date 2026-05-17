@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint, str_offset_in_range};
 use crate::moniker::resolve_fqn;
-use crate::references::collect_file_imports;
+use crate::references::collect_class_imports;
 use crate::type_map::TypeMap;
 use crate::util::word_at_position;
 
@@ -25,7 +25,7 @@ pub fn goto_type_definition(
 ) -> Option<Location> {
     let word = word_at_position(source, position)?;
 
-    let imports = collect_file_imports(doc);
+    let imports = collect_class_imports(doc);
     let type_map = TypeMap::from_doc_with_meta(doc, None, doc_returns);
     let class_name = if word.starts_with('$') {
         // TypeMap stores the short class name; resolve it to FQN using the
@@ -270,7 +270,7 @@ pub fn goto_type_definition_from_index(
     use crate::util::word_at_position;
     let word = word_at_position(source, position)?;
 
-    let imports = collect_file_imports(doc);
+    let imports = collect_class_imports(doc);
     let type_map = TypeMap::from_doc_with_meta(doc, None, doc_returns);
     let class_name = if word.starts_with('$') {
         let short = type_map.get(&word)?.to_string();

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Span, Stmt, StmtKind};
+use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Span, Stmt, StmtKind, UseKind};
 use rayon::prelude::*;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
@@ -266,13 +266,37 @@ fn doc_can_reference_target(doc: &ParsedDoc, word: &str, target_fqn: &str) -> bo
 
 /// Build a local-name → FQN map from a doc's `use` statements.  Mirrors
 /// `Backend::file_imports` but self-contained so the reference walker can
-/// run without a persistent codebase.
+/// run without a persistent codebase. Includes all use kinds (class, function,
+/// const) — callers that only want class imports should use `collect_class_imports`.
 pub(crate) fn collect_file_imports(doc: &ParsedDoc) -> std::collections::HashMap<String, String> {
+    collect_imports_filtered(doc, None)
+}
+
+/// Like `collect_file_imports` but restricted to `use ClassName` statements
+/// (`UseKind::Normal`). Use this wherever the import map is fed into class
+/// resolution — mixing in `use function` / `use const` entries causes the
+/// resolver to map a function/const short name to the wrong FQN when the same
+/// short name appears as a type hint or class reference.
+///
+/// TODO: upstream fix — have mir's FileAnalyzer auto-load via its ClassResolver
+/// so lsp no longer needs to pre-collect class dependencies manually.
+pub(crate) fn collect_class_imports(doc: &ParsedDoc) -> std::collections::HashMap<String, String> {
+    collect_imports_filtered(doc, Some(UseKind::Normal))
+}
+
+fn collect_imports_filtered(
+    doc: &ParsedDoc,
+    only_kind: Option<UseKind>,
+) -> std::collections::HashMap<String, String> {
     let mut out = std::collections::HashMap::new();
-    fn walk(stmts: &[Stmt<'_, '_>], out: &mut std::collections::HashMap<String, String>) {
+    fn walk(
+        stmts: &[Stmt<'_, '_>],
+        only_kind: Option<UseKind>,
+        out: &mut std::collections::HashMap<String, String>,
+    ) {
         for stmt in stmts {
             match &stmt.kind {
-                StmtKind::Use(u) => {
+                StmtKind::Use(u) if only_kind.is_none_or(|k| u.kind == k) => {
                     for item in u.uses.iter() {
                         let fqn = item.name.to_string_repr().into_owned();
                         let short = item
@@ -284,14 +308,14 @@ pub(crate) fn collect_file_imports(doc: &ParsedDoc) -> std::collections::HashMap
                 }
                 StmtKind::Namespace(ns) => {
                     if let NamespaceBody::Braced(inner) = &ns.body {
-                        walk(inner, out);
+                        walk(inner, only_kind, out);
                     }
                 }
                 _ => {}
             }
         }
     }
-    walk(&doc.program().stmts, &mut out);
+    walk(&doc.program().stmts, only_kind, &mut out);
     out
 }
 
@@ -311,7 +335,7 @@ pub(crate) fn collect_fqn_new_class_refs(doc: &ParsedDoc) -> Vec<String> {
 ///
 /// Returns de-duplicated FQNs with any leading `\` stripped.
 pub(crate) fn collect_referenced_class_fqns(doc: &ParsedDoc) -> Vec<String> {
-    let imports = collect_file_imports(doc);
+    let imports = collect_class_imports(doc);
     let names = all_class_ref_names_in_stmts(&doc.program().stmts);
     let locals = collect_local_type_decl_fqns(doc);
     let mut out: Vec<String> = names
@@ -1723,6 +1747,25 @@ mod tests {
             !refs.is_empty(),
             "strlen() in global-namespace file must be included, got: {:?}",
             refs
+        );
+    }
+
+    #[test]
+    fn collect_class_imports_excludes_function_and_const_imports() {
+        let src = "<?php\nuse App\\Bar;\nuse function App\\helper;\nuse const App\\LIMIT;\n";
+        let doc = ParsedDoc::parse(src.to_string());
+        let imports = collect_class_imports(&doc);
+        assert!(
+            imports.contains_key("Bar"),
+            "class import must be included — got {imports:?}"
+        );
+        assert!(
+            !imports.contains_key("helper"),
+            "function import must be excluded — got {imports:?}"
+        );
+        assert!(
+            !imports.contains_key("LIMIT"),
+            "const import must be excluded — got {imports:?}"
         );
     }
 }
