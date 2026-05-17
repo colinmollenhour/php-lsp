@@ -91,8 +91,7 @@ pub(crate) async fn scan_workspace(
             fn matches_include_prefix(rel_path: &str, patterns: &[String]) -> bool {
                 patterns.iter().any(|pat| {
                     let p = pat.trim_end_matches('*').trim_end_matches('/');
-                    rel_path.starts_with(&format!("{}/", p))
-                        || rel_path == p
+                    rel_path.starts_with(&format!("{}/", p)) || rel_path == p
                 })
             }
 
@@ -111,8 +110,14 @@ pub(crate) async fn scan_workspace(
 
             // Compute a relative path from root so that patterns like
             // "vendor" and "vendor/yiisoft" match correctly.
-            let rel_path = path.strip_prefix(&root)
-                .map(|p| p.to_string_lossy().replace('\\', "/").trim_start_matches('/').to_string())
+            let rel_path = path
+                .strip_prefix(&root)
+                .map(|p| {
+                    p.to_string_lossy()
+                        .replace('\\', "/")
+                        .trim_start_matches('/')
+                        .to_string()
+                })
                 .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
 
             // Determine if this entry is excluded or included.
