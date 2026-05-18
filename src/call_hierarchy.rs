@@ -441,6 +441,13 @@ mod tests {
     use super::*;
 
     // ── range_contains boundary regression tests ─────────────────────────────
+    //
+    // These unit tests cover internal implementation details (helper function
+    // boundary semantics). They are kept as unit tests rather than migrated to
+    // E2E because they test infrastructure mechanics, not user-facing LSP
+    // features. Protocol-wired E2E tests for call hierarchy features are in
+    // tests/navigation/feature_hierarchy.rs and provide comprehensive coverage
+    // of the public API.
 
     #[test]
     fn range_contains_excludes_exact_end_position() {

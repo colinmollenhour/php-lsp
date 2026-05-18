@@ -13,12 +13,12 @@ pub use common::{
     render_workspace_symbols,
 };
 
+#[path = "navigation/feature_call_hierarchy.rs"]
+mod feature_call_hierarchy;
 #[path = "navigation/feature_declaration.rs"]
 mod feature_declaration;
 #[path = "navigation/feature_definition.rs"]
 mod feature_definition;
-#[path = "navigation/feature_hierarchy.rs"]
-mod feature_hierarchy;
 #[path = "navigation/feature_highlight.rs"]
 mod feature_highlight;
 #[path = "navigation/feature_moniker.rs"]
@@ -29,3 +29,5 @@ mod feature_references;
 mod feature_rename;
 #[path = "navigation/feature_type_definition.rs"]
 mod feature_type_definition;
+#[path = "navigation/feature_type_hierarchy.rs"]
+mod feature_type_hierarchy;
