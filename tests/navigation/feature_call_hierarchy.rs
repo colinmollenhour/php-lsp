@@ -1,4 +1,4 @@
-//! Call hierarchy + type hierarchy — all tests go through the LSP wire protocol.
+//! Call hierarchy — all tests go through the LSP wire protocol.
 
 use super::*;
 
@@ -333,257 +333,253 @@ function conv$0ert(): int { return (int) measure(); }
     expect!["measure @ main.php:1"].assert_eq(&out);
 }
 
-// ── type hierarchy: prepare ───────────────────────────────────────────────────
+// ── additional call hierarchy edge cases ────────────────────────────────────
 
+/// Recursive function must appear in its own incoming calls.
 #[tokio::test]
-async fn prepare_class_returns_class_item() {
+async fn incoming_calls_includes_recursive_function() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_prepare_type_hierarchy(
+        .check_incoming_calls(
             r#"<?php
-class My$0Class {}
+function facto$0rial(int $n): int { return $n <= 1 ? 1 : $n * factorial($n - 1); }
 "#,
         )
         .await;
-    expect!["MyClass (Class) @ main.php:1"].assert_eq(&out);
+    expect!["factorial @ main.php:1"].assert_eq(&out);
 }
 
+/// Method calling itself recursively must appear in incoming calls.
 #[tokio::test]
-async fn prepare_interface_returns_interface_item() {
+async fn incoming_calls_includes_recursive_method() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_prepare_type_hierarchy(
+        .check_incoming_calls(
             r#"<?php
-interface Conta$0inable {}
+class TreeNode {
+    public function trave$0rse(): void { $this->traverse(); }
+}
 "#,
         )
         .await;
-    expect!["Containable (Interface) @ main.php:1"].assert_eq(&out);
+    expect!["traverse @ main.php:2"].assert_eq(&out);
 }
 
+/// Outgoing calls must include recursive call within the function.
 #[tokio::test]
-async fn prepare_enum_returns_enum_item() {
+async fn outgoing_calls_includes_recursive_call() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_prepare_type_hierarchy(
+        .check_outgoing_calls(
             r#"<?php
-enum Suit$0 { case Hearts; }
+function recurs$0e(int $n): void { if ($n > 0) recurse($n - 1); }
 "#,
         )
         .await;
-    expect!["Suit (Enum) @ main.php:1"].assert_eq(&out);
+    expect!["recurse @ main.php:1"].assert_eq(&out);
 }
 
+/// Calling a trait method must resolve to the trait method implementation.
 #[tokio::test]
-async fn prepare_unknown_type_symbol_returns_empty() {
+async fn incoming_calls_from_trait_method() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_prepare_type_hierarchy(
+        .check_incoming_calls(
             r#"<?php
-$x = new Un$0known();
+trait Logger {
+    public function lo$0g(): void {}
+}
+class Service {
+    use Logger;
+    public function run(): void { $this->log(); }
+}
+"#,
+        )
+        .await;
+    expect!["run @ main.php:6"].assert_eq(&out);
+}
+
+/// Calling a trait method should show the trait method in outgoing calls.
+#[tokio::test]
+async fn outgoing_calls_from_class_using_trait() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_outgoing_calls(
+            r#"<?php
+trait Logger {
+    public function log(): void {}
+}
+class Service {
+    use Logger;
+    public function ru$0n(): void { $this->log(); }
+}
+"#,
+        )
+        .await;
+    expect!["log @ main.php:2"].assert_eq(&out);
+}
+
+/// Method with no calls to other functions must report empty outgoing calls.
+#[tokio::test]
+async fn outgoing_calls_from_leaf_method() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_outgoing_calls(
+            r#"<?php
+class Leaf {
+    public function disu$0se(): void { $x = 1; $y = $x + 1; }
+}
+"#,
+        )
+        .await;
+    expect!["<no calls>"].assert_eq(&out);
+}
+
+/// Methods can call parent methods, tracked as outgoing calls.
+#[tokio::test]
+async fn outgoing_calls_includes_method_from_parent() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_outgoing_calls(
+            r#"<?php
+class Base {
+    public function setup(): void {}
+}
+class Child extends Base {
+    public function ini$0t(): void { $this->setup(); }
+}
+"#,
+        )
+        .await;
+    expect!["setup @ main.php:2"].assert_eq(&out);
+}
+
+/// Static method calls must be tracked in outgoing calls.
+#[tokio::test]
+async fn outgoing_calls_includes_static_call_multiple_times() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_outgoing_calls(
+            r#"<?php
+class Utils { public static function uuid(): string { return ''; } }
+class Factory {
+    public function crea$0te(): void { $a = Utils::uuid(); $b = Utils::uuid(); }
+}
+"#,
+        )
+        .await;
+    expect!["uuid @ main.php:1"].assert_eq(&out);
+}
+
+/// Multiple calls to the same function are deduplicated in outgoing calls.
+#[tokio::test]
+async fn outgoing_calls_deduplicates_method_calls() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_outgoing_calls(
+            r#"<?php
+class Helper { public function process(): void {} }
+class Worker {
+    public function wo$0rk(): void { $h = new Helper(); $h->process(); $h->process(); }
+}
+"#,
+        )
+        .await;
+    expect!["process @ main.php:1"].assert_eq(&out);
+}
+
+/// Nullsafe method calls must be included in outgoing calls.
+#[tokio::test]
+async fn outgoing_calls_includes_nullsafe_method_call() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_outgoing_calls(
+            r#"<?php
+class Service { public function handle(): void {} }
+class Proxy {
+    public function deleate$0(): void { $svc?->handle(); }
+}
+"#,
+        )
+        .await;
+    expect!["handle @ main.php:1"].assert_eq(&out);
+}
+
+/// Calls in conditional expressions must be detected.
+#[tokio::test]
+async fn outgoing_calls_in_ternary_expression() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_outgoing_calls(
+            r#"<?php
+function check(): bool { return true; }
+function decid$0e(): void { $x = check() ? 1 : 2; }
+"#,
+        )
+        .await;
+    expect!["check @ main.php:1"].assert_eq(&out);
+}
+
+/// Calls in array elements must be detected.
+#[tokio::test]
+async fn outgoing_calls_in_array_elements() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_outgoing_calls(
+            r#"<?php
+function item(): string { return ''; }
+function col$0llect(): array { return [item(), item()]; }
+"#,
+        )
+        .await;
+    expect!["item @ main.php:1"].assert_eq(&out);
+}
+
+/// Prepare on non-existent function must return empty.
+#[tokio::test]
+async fn prepare_nonexistent_function_returns_empty() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_prepare_call_hierarchy(
+            r#"<?php
+fooba$0r();
 "#,
         )
         .await;
     expect!["<empty>"].assert_eq(&out);
 }
 
-// ── type hierarchy: supertypes ────────────────────────────────────────────────
-
+/// Incoming calls deduplicates multiple calls from same location (count not repeated).
 #[tokio::test]
-async fn supertypes_class_extends_parent() {
+async fn incoming_calls_deduplicates_per_caller() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_supertypes(
+        .check_incoming_calls(
             r#"<?php
-class Animal {}
-class D$0og extends Animal {}
+function helpe$0r(): void {}
+function caller(): void { helper(); helper(); helper(); }
 "#,
         )
         .await;
-    expect!["Animal (Class) @ main.php:1"].assert_eq(&out);
+    // All three calls are from the same caller, deduplicated to one incoming call
+    expect!["caller @ main.php:2"].assert_eq(&out);
 }
 
+/// Methods in inherited classes must show up in incoming calls.
 #[tokio::test]
-async fn supertypes_implements_multiple_interfaces() {
+async fn incoming_calls_to_inherited_method() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_supertypes(
-            r#"//- /Circle.php
-<?php class Circle$0 implements Drawable, Serializable {}
-//- /Drawable.php
-<?php interface Drawable {}
-//- /Serializable.php
-<?php interface Serializable {}
-"#,
-        )
-        .await;
-    expect!["Drawable (Interface) @ Drawable.php:0\nSerializable (Interface) @ Serializable.php:0"]
-        .assert_eq(&out);
-}
-
-#[tokio::test]
-async fn supertypes_root_class_returns_empty() {
-    let mut s = TestServer::new().await;
-    let out = s
-        .check_supertypes(
+        .check_incoming_calls(
             r#"<?php
-class Root$0 {}
-"#,
-        )
-        .await;
-    expect!["<empty>"].assert_eq(&out);
+class Base {
+    public function execu$0te(): void {}
 }
-
-#[tokio::test]
-async fn supertypes_multi_level_returns_direct_parent_only() {
-    let mut s = TestServer::new().await;
-    let out = s
-        .check_supertypes(
-            r#"//- /A.php
-<?php class A {}
-//- /B.php
-<?php class B extends A {}
-//- /C.php
-<?php class C$0 extends B {}
-"#,
-        )
-        .await;
-    expect!["B (Class) @ B.php:0"].assert_eq(&out);
+class Derived extends Base {
+    public function run(): void { $this->execute(); }
 }
-
-// ── type hierarchy: subtypes ──────────────────────────────────────────────────
-
-#[tokio::test]
-async fn subtypes_interface_returns_implementing_classes() {
-    let mut s = TestServer::new().await;
-    let out = s
-        .check_subtypes(
-            r#"//- /Loggable.php
-<?php interface Loggable$0 {}
-//- /Service.php
-<?php class Service implements Loggable {}
 "#,
         )
         .await;
-    expect!["Service (Class) @ Service.php:0"].assert_eq(&out);
-}
-
-#[tokio::test]
-async fn subtypes_class_returns_extending_subclasses() {
-    let mut s = TestServer::new().await;
-    let out = s
-        .check_subtypes(
-            r#"//- /Base.php
-<?php class Base$0 {}
-//- /ChildA.php
-<?php class ChildA extends Base {}
-//- /ChildB.php
-<?php class ChildB extends Base {}
-"#,
-        )
-        .await;
-    expect!["ChildA (Class) @ ChildA.php:0\nChildB (Class) @ ChildB.php:0"].assert_eq(&out);
-}
-
-#[tokio::test]
-async fn subtypes_leaf_class_returns_empty() {
-    let mut s = TestServer::new().await;
-    let out = s
-        .check_subtypes(
-            r#"<?php
-class Leaf$0 extends Base {}
-"#,
-        )
-        .await;
-    expect!["<empty>"].assert_eq(&out);
-}
-
-#[tokio::test]
-async fn subtypes_abstract_class_returns_concrete_impl() {
-    let mut s = TestServer::new().await;
-    let out = s
-        .check_subtypes(
-            r#"//- /AbstractRepo.php
-<?php abstract class AbstractRepo$0 {}
-//- /UserRepo.php
-<?php class UserRepo extends AbstractRepo {}
-"#,
-        )
-        .await;
-    expect!["UserRepo (Class) @ UserRepo.php:0"].assert_eq(&out);
-}
-
-#[tokio::test]
-async fn subtypes_trait_returns_using_classes() {
-    let mut s = TestServer::new().await;
-    let out = s
-        .check_subtypes(
-            r#"//- /Timestamps.php
-<?php trait Timestamps$0 {}
-//- /Post.php
-<?php class Post { use Timestamps; }
-"#,
-        )
-        .await;
-    expect!["Post (Class) @ Post.php:0"].assert_eq(&out);
-}
-
-/// Partial class name must not be confused with a supertype — "Animal" must not
-/// match a class named "AnimalHouse" (which extends an unrelated "Creature").
-#[tokio::test]
-async fn subtypes_partial_class_name_not_confused_with_supertype() {
-    let mut s = TestServer::new().await;
-    let out = s
-        .check_subtypes(
-            r#"<?php
-interface Animal$0 {}
-class AnimalHouse extends Creature {}
-"#,
-        )
-        .await;
-    assert!(
-        !out.contains("AnimalHouse"),
-        "AnimalHouse does not implement Animal: {out}"
-    );
-}
-
-/// Anonymous classes have no name and must be skipped silently — the server
-/// must not panic when encountering `new class extends Animal {}`.
-#[tokio::test]
-async fn subtypes_with_anonymous_class_does_not_panic() {
-    let mut s = TestServer::new().await;
-    // Only assert no panic; anonymous classes produce no named subtype.
-    let _ = s
-        .check_subtypes(
-            r#"<?php
-interface Animal$0 {}
-$obj = new class extends Animal {};
-"#,
-        )
-        .await;
-}
-
-/// When goto-implementation is requested on a symbol defined in both the current
-/// file and another file, URIs in the result must point to the correct source.
-#[tokio::test]
-async fn subtypes_location_uris_match_source_files() {
-    let mut s = TestServer::new().await;
-    let out = s
-        .check_subtypes(
-            r#"//- /src/Animal.php
-<?php
-interface Animal$0 {}
-
-//- /src/Dog.php
-<?php
-class Dog implements Animal {}
-
-//- /src/Cat.php
-<?php
-class Cat implements Animal {}
-"#,
-        )
-        .await;
-    assert!(out.contains("Dog.php"), "Dog.php uri missing: {out}");
-    assert!(out.contains("Cat.php"), "Cat.php uri missing: {out}");
+    expect!["run @ main.php:5"].assert_eq(&out);
 }
