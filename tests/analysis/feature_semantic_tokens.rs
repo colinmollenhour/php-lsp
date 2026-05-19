@@ -449,9 +449,9 @@ async fn semantic_tokens_class_properties() {
     expect![[r#"
         1:6 len=1 type=class mods=0b1
         1:17 len=6 type=type mods=0b0
-        1:25 len=4 type=property mods=0b1
+        1:24 len=5 type=property mods=0b1
         1:39 len=3 type=type mods=0b0
-        1:44 len=3 type=property mods=0b1"#]]
+        1:43 len=4 type=property mods=0b1"#]]
     .assert_eq(&out);
 }
 
@@ -481,8 +481,8 @@ async fn semantic_tokens_enum_cases() {
     // Cases use type=property (declaration modifier 0b1).
     expect![[r#"
         1:5 len=6 type=class mods=0b1
-        1:19 len=7 type=property mods=0b1
-        1:33 len=6 type=property mods=0b1"#]]
+        1:19 len=7 type=enumMember mods=0b1
+        1:33 len=6 type=enumMember mods=0b1"#]]
     .assert_eq(&out);
 }
 
@@ -510,9 +510,9 @@ async fn semantic_tokens_backed_enum_string() {
     // Backed enum: cases and their string values should both be tokenized
     expect![[r#"
         1:5 len=6 type=class mods=0b1
-        1:27 len=7 type=property mods=0b1
+        1:27 len=7 type=enumMember mods=0b1
         1:37 len=9 type=string mods=0b0
-        1:53 len=6 type=property mods=0b1
+        1:53 len=6 type=enumMember mods=0b1
         1:62 len=8 type=string mods=0b0"#]]
     .assert_eq(&out);
 }
@@ -541,9 +541,9 @@ async fn semantic_tokens_backed_enum_int() {
     // Backed enum with int values: cases and numbers should be tokenized
     expect![[r#"
         1:5 len=5 type=class mods=0b1
-        1:23 len=3 type=property mods=0b1
+        1:23 len=3 type=enumMember mods=0b1
         1:29 len=1 type=number mods=0b0
-        1:37 len=3 type=property mods=0b1
+        1:37 len=3 type=enumMember mods=0b1
         1:43 len=1 type=number mods=0b0"#]]
     .assert_eq(&out);
 }
@@ -573,8 +573,8 @@ async fn semantic_tokens_enum_case_attributes() {
     expect![[r#"
         1:5 len=6 type=class mods=0b1
         1:16 len=10 type=class mods=0b0
-        1:33 len=3 type=property mods=0b1
-        1:43 len=3 type=property mods=0b1"#]]
+        1:33 len=3 type=enumMember mods=0b1
+        1:43 len=3 type=enumMember mods=0b1"#]]
     .assert_eq(&out);
 }
 
@@ -602,7 +602,7 @@ async fn semantic_tokens_enum_mixed() {
     // Mixed enum: both cases and methods should be tokenized
     expect![[r#"
         1:5 len=6 type=class mods=0b1
-        1:19 len=7 type=property mods=0b1
+        1:19 len=7 type=enumMember mods=0b1
         1:44 len=5 type=method mods=0b1
         1:53 len=6 type=type mods=0b0
         1:69 len=3 type=string mods=0b0"#]]
@@ -634,8 +634,8 @@ async fn semantic_tokens_deprecated_enum_case() {
     expect![[r#"
         1:5 len=6 type=class mods=0b1
         1:14 len=18 type=comment mods=0b0
-        1:38 len=3 type=property mods=0b10001
-        1:48 len=3 type=property mods=0b1"#]]
+        1:38 len=3 type=enumMember mods=0b10001
+        1:48 len=3 type=enumMember mods=0b1"#]]
     .assert_eq(&out);
 }
 
@@ -697,7 +697,7 @@ async fn semantic_tokens_readonly_property() {
     expect![[r#"
         1:6 len=1 type=class mods=0b1
         1:19 len=6 type=type mods=0b0
-        1:27 len=5 type=property mods=0b1"#]]
+        1:26 len=6 type=property mods=0b1001"#]]
     .assert_eq(&out);
 }
 
@@ -724,7 +724,7 @@ async fn semantic_tokens_abstract_method() {
     let out = render_semantic_tokens(&resp, &legend_types);
     // Abstract class and method should have declaration modifier
     expect![[r#"
-        1:15 len=4 type=class mods=0b1
+        1:15 len=4 type=class mods=0b101
         1:40 len=7 type=method mods=0b101
         1:51 len=4 type=type mods=0b0"#]]
     .assert_eq(&out);
@@ -901,7 +901,7 @@ async fn semantic_tokens_enum_mixed_members() {
     // Verify all enum members: name, case, constants (with types), method
     expect![[r#"
         1:5 len=8 type=class mods=0b1
-        2:9 len=7 type=property mods=0b1
+        2:9 len=7 type=enumMember mods=0b1
         3:10 len=3 type=type mods=0b0
         3:14 len=10 type=property mods=0b1
         3:27 len=3 type=number mods=0b0
@@ -1098,4 +1098,269 @@ async fn semantic_tokens_foreach_with_reference() {
         "Should contain variable tokens, got:\n{}",
         out
     );
+}
+
+/// Verify that function call sites emit function tokens without the declaration modifier.
+#[tokio::test]
+async fn semantic_tokens_function_call() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "func_call.php",
+            "<?php\nfunction greet(): void {}\ngreet();\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("func_call.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:9 len=5 type=function mods=0b1
+        1:18 len=4 type=type mods=0b0
+        2:0 len=5 type=function mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that method call sites emit method tokens without the declaration modifier.
+#[tokio::test]
+async fn semantic_tokens_method_call() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open("method_call.php", "<?php\n$obj->run();\n")
+        .await;
+
+    let resp = server.semantic_tokens_full("method_call.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=4 type=variable mods=0b0
+        1:6 len=3 type=method mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that functions inside a namespace are tokenized.
+#[tokio::test]
+async fn semantic_tokens_namespace_contents() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "ns.php",
+            "<?php\nnamespace App;\nfunction boot(): void {}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("ns.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        2:9 len=4 type=function mods=0b1
+        2:17 len=4 type=type mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that a deprecated method gets the deprecated modifier.
+#[tokio::test]
+async fn semantic_tokens_deprecated_method() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "dep_method.php",
+            "<?php\nclass Foo {\n    /** @deprecated */\n    public function old(): void {}\n}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("dep_method.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:6 len=3 type=class mods=0b1
+        2:4 len=18 type=comment mods=0b0
+        3:20 len=3 type=method mods=0b10001
+        3:27 len=4 type=type mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that attribute names on functions are tokenized as class tokens.
+#[tokio::test]
+async fn semantic_tokens_attribute_on_function() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "attr_fn.php",
+            "<?php\n#[Route(\"/home\")]\nfunction index(): void {}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("attr_fn.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:2 len=5 type=class mods=0b0
+        2:9 len=5 type=function mods=0b1
+        2:18 len=4 type=type mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that float literals are tokenized as number tokens.
+#[tokio::test]
+async fn semantic_tokens_float_literal() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server.open("float.php", "<?php\n$x = 3.14;\n").await;
+
+    let resp = server.semantic_tokens_full("float.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=2 type=variable mods=0b0
+        1:5 len=4 type=number mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that single-line `//` comments are tokenized as comment tokens.
+#[tokio::test]
+async fn semantic_tokens_single_line_comment() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open("slcomment.php", "<?php\n// this is a comment\n$x = 1;\n")
+        .await;
+
+    let resp = server.semantic_tokens_full("slcomment.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=20 type=comment mods=0b0
+        2:0 len=2 type=variable mods=0b0
+        2:5 len=1 type=number mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that multi-line `/* ... */` block comments emit per-line comment tokens.
+#[tokio::test]
+async fn semantic_tokens_multiline_comment() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open("mlcomment.php", "<?php\n/* block\n   comment */\n$x = 1;\n")
+        .await;
+
+    let resp = server.semantic_tokens_full("mlcomment.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=8 type=comment mods=0b0
+        2:0 len=13 type=comment mods=0b0
+        3:0 len=2 type=variable mods=0b0
+        3:5 len=1 type=number mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that for-loop init, condition, and update expressions are all tokenized.
+#[tokio::test]
+async fn semantic_tokens_for_loop() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open("forloop.php", "<?php\nfor ($i = 0; $i < 10; $i++) {}\n")
+        .await;
+
+    let resp = server.semantic_tokens_full("forloop.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:5 len=2 type=variable mods=0b0
+        1:10 len=1 type=number mods=0b0
+        1:13 len=2 type=variable mods=0b0
+        1:18 len=2 type=number mods=0b0
+        1:22 len=2 type=variable mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Verify that method return types are tokenized as type tokens.
+#[tokio::test]
+async fn semantic_tokens_method_return_type() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "method_rt.php",
+            "<?php\nclass Foo { public function get(): string { return ''; } }\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("method_rt.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:6 len=3 type=class mods=0b1
+        1:28 len=3 type=method mods=0b1
+        1:35 len=6 type=type mods=0b0
+        1:51 len=2 type=string mods=0b0"#]]
+    .assert_eq(&out);
 }
