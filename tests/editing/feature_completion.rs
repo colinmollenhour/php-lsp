@@ -27,6 +27,7 @@ async fn labels(s: &mut TestServer, src: &str) -> Vec<String> {
 #[tokio::test]
 async fn completion_arrow_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_completion(
             r#"<?php
@@ -48,6 +49,7 @@ $g->h$0
 #[tokio::test]
 async fn completion_arrow_property() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let labels = labels(
         &mut s,
         r#"<?php
@@ -66,6 +68,7 @@ $u->na$0
 #[tokio::test]
 async fn completion_double_colon_static_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_completion(
             r#"<?php
@@ -394,6 +397,7 @@ Reg::$0
 #[tokio::test]
 async fn completion_namespace_prefix() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let labels = labels(
         &mut s,
         r#"//- /src/App/Greeter.php
@@ -416,6 +420,7 @@ $g = new \App\$0
 #[tokio::test]
 async fn completion_keyword_in_top_level() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let labels = labels(
         &mut s,
         r#"<?php
@@ -429,6 +434,7 @@ func$0
 #[tokio::test]
 async fn completion_variable_in_scope() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let labels = labels(
         &mut s,
         r#"<?php
@@ -447,6 +453,7 @@ function f(string $name, int $count): void {
 #[tokio::test]
 async fn completion_method_does_not_leak_to_unrelated_classes() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let labels = labels(
         &mut s,
         r#"<?php
@@ -470,6 +477,7 @@ $a->$0
 #[tokio::test]
 async fn completion_enum_case_access() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let labels = labels(
         &mut s,
         r#"<?php
@@ -492,6 +500,10 @@ Status::$0
 #[tokio::test]
 async fn completion_after_new_offers_class_names() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.validate_syntax(false);
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let labels = labels(
         &mut s,
         r#"<?php
@@ -514,6 +526,7 @@ $x = new $0
 #[tokio::test]
 async fn completion_resolve_function_populates_detail_and_docs() {
     let mut server = TestServer::new().await;
+    server.validate_syntax(false);
     let opened = server
         .open_fixture(
             r#"<?php
@@ -552,6 +565,7 @@ function resolveMe(): void
 #[tokio::test]
 async fn completion_resolve_function_with_docblock_populates_docs() {
     let mut server = TestServer::new().await;
+    server.validate_syntax(false);
     let opened = server
         .open_fixture(
             r#"<?php
@@ -631,6 +645,7 @@ async fn completion_resolve_unknown_symbol_returns_unchanged() {
 #[tokio::test]
 async fn completion_resolve_named_argument_strips_colon_for_lookup() {
     let mut server = TestServer::new().await;
+    server.validate_syntax(false);
     let opened = server
         .open_fixture(
             r#"<?php
@@ -721,6 +736,7 @@ async fn completion_resolve_partial_docs_populates_detail() {
 #[tokio::test]
 async fn completion_this_arrow_includes_trait_methods() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_completion(
             r#"<?php
@@ -749,6 +765,7 @@ class Timer {
 #[tokio::test]
 async fn completion_attribute_bracket_excludes_non_attribute_classes() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_completion(
             r#"<?php
@@ -771,6 +788,7 @@ class PlainClass {}
 #[tokio::test]
 async fn completion_attribute_bracket_cross_file_filters_non_attributes() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_completion(
             r#"//- /src/attrs.php
@@ -798,6 +816,7 @@ class NotAnAttr {}
 #[tokio::test]
 async fn completion_attribute_bracket_target_filters_class_context() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_completion(
             r#"<?php
@@ -828,6 +847,7 @@ class MyClass {}
 #[tokio::test]
 async fn completion_attribute_bracket_excludes_non_class_types() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_completion(
             r#"<?php
@@ -852,6 +872,7 @@ trait MyTrait {}
 #[tokio::test]
 async fn completion_attribute_bracket_target_filters_function_context() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_completion(
             r#"<?php
@@ -882,6 +903,7 @@ function doSomething(): void {}
 #[tokio::test]
 async fn completion_attribute_bracket_returns_only_attribute_classes() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_completion(
             r#"<?php
@@ -908,6 +930,7 @@ class PlainClass {}
 #[tokio::test]
 async fn completion_attribute_bracket_trigger_char_filters_non_attributes() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let opened = s
         .open_fixture(
             r#"<?php
@@ -942,6 +965,7 @@ class NotAnAttr {}
 #[tokio::test]
 async fn completion_resolve_is_idempotent() {
     let mut server = TestServer::new().await;
+    server.validate_syntax(false);
     let opened = server
         .open_fixture(
             r#"<?php

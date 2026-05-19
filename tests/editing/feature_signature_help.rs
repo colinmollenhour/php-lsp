@@ -5,6 +5,7 @@ use expect_test::expect;
 #[tokio::test]
 async fn signature_help_at_first_arg() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -19,6 +20,7 @@ greet($0);
 #[tokio::test]
 async fn signature_help_at_second_arg() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -33,6 +35,7 @@ greet('x', $0);
 #[tokio::test]
 async fn signature_help_for_method_call() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -53,6 +56,7 @@ $g->hello($0);
 #[tokio::test]
 async fn signature_help_nested_call_shows_inner_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -70,6 +74,7 @@ outer(inner($0), 2);
 #[tokio::test]
 async fn signature_help_variadic_stays_active_past_first_arg() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -86,6 +91,7 @@ sum(1, 2, $0);
 #[tokio::test]
 async fn signature_help_static_method_call() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -104,6 +110,7 @@ Math::add($0);
 #[tokio::test]
 async fn signature_help_zero_param_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -118,6 +125,7 @@ ping($0);
 #[tokio::test]
 async fn signature_help_outside_call_returns_no_signature() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -132,6 +140,7 @@ $x = 1$0;
 #[tokio::test]
 async fn signature_help_unknown_function_returns_no_signature() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -145,6 +154,7 @@ unknown($0);
 #[tokio::test]
 async fn signature_help_builtin_strlen() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -158,6 +168,7 @@ strlen($0);
 #[tokio::test]
 async fn signature_help_default_param_values_shown() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -172,6 +183,7 @@ greet($0);
 #[tokio::test]
 async fn signature_help_nested_call_outer() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -187,6 +199,7 @@ outer(inner(1), $0);
 #[tokio::test]
 async fn signature_help_trait_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -203,6 +216,7 @@ log($0);
 #[tokio::test]
 async fn signature_help_enum_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -219,6 +233,7 @@ from($0);
 #[tokio::test]
 async fn signature_help_param_doc_from_docblock() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -237,6 +252,7 @@ greet($0);
 #[tokio::test]
 async fn signature_help_interface_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -253,6 +269,7 @@ log($0);
 #[tokio::test]
 async fn signature_help_fqn_builtin_call() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -266,6 +283,7 @@ async fn signature_help_fqn_builtin_call() {
 #[tokio::test]
 async fn signature_help_constructor_new_expression() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -282,6 +300,7 @@ new Greeter($0);
 #[tokio::test]
 async fn signature_help_builtin_variadic_sprintf() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"<?php
@@ -296,6 +315,7 @@ sprintf('%d %s %d', 1, 'x', $0);
 #[tokio::test]
 async fn signature_help_cross_file_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"
@@ -316,6 +336,7 @@ compute($0);
 #[tokio::test]
 async fn signature_help_cross_file_fqn() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_signature_help(
             r#"

@@ -5,6 +5,7 @@ use super::*;
 #[tokio::test]
 async fn references_nested_function_call() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function gr$0eet(): void {}
@@ -19,6 +20,7 @@ echo(greet());
 #[tokio::test]
 async fn references_function_call_inside_if_body() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function che$0ck(): void {}
@@ -33,6 +35,7 @@ if (true) { check(); }
 #[tokio::test]
 async fn references_function_call_in_for_loop() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function ti$0ck(): void {}
@@ -48,6 +51,7 @@ for (tick(); $i < 10; tick()) {}
 #[tokio::test]
 async fn references_function_call_inside_switch_case() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function ti$0ck(): void {}
@@ -64,6 +68,7 @@ switch ($x) {
 #[tokio::test]
 async fn references_method_call_inside_switch_case() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class Proc {
@@ -82,6 +87,7 @@ switch ($x) {
 #[tokio::test]
 async fn references_function_call_inside_switch_condition() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function cla$0ssify(): string { return ''; }
@@ -96,6 +102,7 @@ switch (classify()) { default: break; }
 #[tokio::test]
 async fn references_function_call_inside_throw() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function makeEx$0ception(): \Exception { return new \Exception(); }
@@ -110,6 +117,7 @@ throw makeException();
 #[tokio::test]
 async fn references_method_call_inside_throw() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class Factory {
@@ -126,6 +134,7 @@ throw $factory->create();
 #[tokio::test]
 async fn references_method_call_inside_unset() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class Obj {

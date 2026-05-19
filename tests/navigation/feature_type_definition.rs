@@ -7,6 +7,7 @@ use expect_test::expect;
 #[tokio::test]
 async fn type_definition_variable_to_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -24,6 +25,7 @@ $obj$0->bar();
 #[tokio::test]
 async fn type_definition_cross_file() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /a.php
@@ -45,6 +47,7 @@ class Mailer {}
 #[tokio::test]
 async fn type_definition_unknown_variable() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -58,6 +61,7 @@ $unknown$0->foo();
 #[tokio::test]
 async fn type_definition_interface_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -76,6 +80,7 @@ class MyList implements Countable {}
 #[tokio::test]
 async fn type_definition_enum_typed_param() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -92,6 +97,7 @@ function process(Status $s): void { $s$0-> }
 #[tokio::test]
 async fn type_definition_trait_typed_param() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -108,6 +114,7 @@ function process(Logger $l): void { $l$0-> }
 #[tokio::test]
 async fn type_definition_variable_from_new_expr() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -125,6 +132,7 @@ echo $w$0;
 #[tokio::test]
 async fn type_definition_non_variable_without_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -139,6 +147,7 @@ gree$0t();
 #[tokio::test]
 async fn type_definition_with_use_import() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Mailer.php
@@ -162,6 +171,7 @@ $m$0->send();
 #[tokio::test]
 async fn type_definition_nullable_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -178,6 +188,7 @@ function process(?User $u$0): void {}
 #[tokio::test]
 async fn type_definition_union_type_not_supported() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -196,6 +207,7 @@ function process(Admin|User $u$0): void {}
 #[tokio::test]
 async fn type_definition_fully_qualified_parameter() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -214,6 +226,7 @@ function process(\App\Service $s$0): void {}
 #[tokio::test]
 async fn type_definition_cursor_on_param_name() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -285,6 +298,7 @@ function create(UserModel $u$0): void {}
 #[tokio::test]
 async fn type_definition_unqualified_param_in_namespace_resolves_correctly() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Logger.php
@@ -314,6 +328,7 @@ class Service {
 #[ignore]
 async fn type_definition_limitation_union_types_not_supported() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -337,6 +352,7 @@ function authenticate(Admin|User $a$0): void {}
 #[ignore]
 async fn type_definition_limitation_intersection_types_not_supported() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -355,6 +371,7 @@ function process(Readable&Writable $rw$0): void {}
 #[tokio::test]
 async fn type_definition_alias_with_use_import() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Model/Account.php
@@ -382,6 +399,7 @@ function create(UserAccount $acc$0): void {}
 #[ignore]
 async fn type_definition_limitation_generic_types_not_supported() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -400,6 +418,7 @@ function process(Collection<User> $items$0): void {}
 #[tokio::test]
 async fn type_definition_enum_method_parameter() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -421,6 +440,7 @@ enum Status {
 #[tokio::test]
 async fn type_definition_prefers_exact_fqn_over_short_name() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Model/User.php
@@ -451,6 +471,7 @@ function create(User $u$0): void {}
 #[tokio::test]
 async fn type_definition_unqualified_name_in_namespace() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Model/User.php
@@ -482,6 +503,7 @@ class UserService {
 #[tokio::test]
 async fn type_definition_var_new_in_namespace_prefers_same_namespace() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Model/Order.php
@@ -514,6 +536,7 @@ $order$0->process();
 #[tokio::test]
 async fn type_definition_var_new_with_use_import_overrides_namespace() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Model/Invoice.php
@@ -546,6 +569,7 @@ $inv$0->total();
 #[tokio::test]
 async fn type_definition_method_param_in_namespaced_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Model/Product.php
@@ -572,6 +596,7 @@ class Cart {
 #[tokio::test]
 async fn type_definition_nullable_type_in_namespace() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Model/Address.php
@@ -602,6 +627,7 @@ function deliver(?Address $addr$0): void {}
 #[tokio::test]
 async fn type_definition_braced_namespace() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Model/Report.php
@@ -634,6 +660,7 @@ namespace App\Service {
 #[tokio::test]
 async fn type_definition_deeply_nested_namespace() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Cmd.php
@@ -710,6 +737,7 @@ function greet(UserModel $u$0): void {}
 #[tokio::test]
 async fn type_definition_unqualified_name_same_namespace() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Logger.php
@@ -738,6 +766,7 @@ async fn type_definition_not_confused_by_use_function_import() {
     // `format $x` where `format` also appears in `use function Lib\format` should
     // resolve to the same-namespace class `App\format`, not to `Lib\format`.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /main.php
@@ -765,6 +794,7 @@ class format {}
 #[tokio::test]
 async fn type_definition_builtin_int_returns_none() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -778,6 +808,7 @@ function count(int $n$0): void {}
 #[tokio::test]
 async fn type_definition_builtin_string_returns_none() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -791,6 +822,7 @@ function message(string $msg$0): void {}
 #[tokio::test]
 async fn type_definition_builtin_bool_returns_none() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -804,6 +836,7 @@ function check(bool $flag$0): void {}
 #[tokio::test]
 async fn type_definition_builtin_mixed_returns_none() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -817,6 +850,7 @@ function handle(mixed $data$0): void {}
 #[tokio::test]
 async fn type_definition_builtin_never_returns_none() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -831,6 +865,7 @@ function crash(never $x$0): void {}
 #[tokio::test]
 async fn type_definition_stdclass_builtin() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -850,6 +885,7 @@ function object_param(stdClass $obj$0): void {}
 #[tokio::test]
 async fn type_definition_array_of_class_via_generic_syntax() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -867,6 +903,7 @@ function batch(array $users$0): void {}
 #[tokio::test]
 async fn type_definition_array_builtin_returns_none() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -886,6 +923,7 @@ function items(array $data$0): void {}
 #[ignore]
 async fn type_definition_variable_assigned_from_other() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -907,6 +945,7 @@ $copy$0->process();
 #[ignore]
 async fn type_definition_nullable_union_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -928,6 +967,7 @@ function handle(Success|Error $result$0): void {}
 #[tokio::test]
 async fn type_definition_self_keyword_in_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -950,6 +990,7 @@ class User {
 #[ignore]
 async fn type_definition_parent_keyword_limitation() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -973,6 +1014,7 @@ class Child extends Base {
 #[ignore]
 async fn type_definition_static_return_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -995,6 +1037,7 @@ class Factory {
 #[tokio::test]
 async fn type_definition_trait_with_class_param() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -1014,6 +1057,7 @@ trait Settings {
 #[tokio::test]
 async fn type_definition_trait_cross_file_param() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/db.php
@@ -1039,6 +1083,7 @@ trait Database {
 #[tokio::test]
 async fn type_definition_backed_enum_int_param() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -1060,6 +1105,7 @@ enum Priority: int {
 #[tokio::test]
 async fn type_definition_backed_enum_as_parameter() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -1082,6 +1128,7 @@ function process(Status $status$0): void {}
 #[tokio::test]
 async fn type_definition_extended_interface() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -1100,6 +1147,7 @@ function adopt(Pet $pet$0): void {}
 #[tokio::test]
 async fn type_definition_multi_interface_param() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -1125,6 +1173,7 @@ function bootstrap(App $app$0): void {}
 #[ignore]
 async fn type_definition_import_with_local_class_same_name() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Logger.php
@@ -1154,6 +1203,7 @@ function log(Logger $l$0): void {}
 #[ignore]
 async fn type_definition_aliased_import_with_local_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"//- /src/Logger.php
@@ -1187,6 +1237,7 @@ function log(AppLogger $l$0): void {}  // Explicitly uses alias
 #[tokio::test]
 async fn type_definition_cursor_on_param_name_value() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php
@@ -1205,6 +1256,7 @@ function process(Handler $h$0andler): void {}
 #[tokio::test]
 async fn type_definition_untyped_variable_in_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_type_definition(
             r#"<?php

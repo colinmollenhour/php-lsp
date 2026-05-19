@@ -15,6 +15,7 @@ async fn check_invariant(s: &mut TestServer, path: &str, src: &str, line: u32, c
 #[tokio::test]
 async fn linked_ranges_cover_same_text_across_fixtures() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     // Function decl + calls.
     check_invariant(
         &mut s,
@@ -26,6 +27,7 @@ async fn linked_ranges_cover_same_text_across_fixtures() {
     .await;
     // Method decl + same-class call.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     check_invariant(
         &mut s,
         "method.php",
@@ -36,6 +38,7 @@ async fn linked_ranges_cover_same_text_across_fixtures() {
     .await;
     // Variable decl + uses.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     check_invariant(
         &mut s,
         "var.php",
@@ -46,6 +49,7 @@ async fn linked_ranges_cover_same_text_across_fixtures() {
     .await;
     // Unicode identifier.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     check_invariant(
         &mut s,
         "cjk.php",
@@ -61,6 +65,7 @@ async fn linked_ranges_cover_same_text_across_fixtures() {
 #[tokio::test]
 async fn class_with_only_declaration_yields_one_range() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nclass Lin$0kedClass {}\n")
         .await;
@@ -75,6 +80,7 @@ async fn class_with_only_declaration_yields_one_range() {
 #[tokio::test]
 async fn function_decl_links_to_all_call_sites() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range(
             r#"<?php
@@ -95,6 +101,7 @@ greet();
 #[tokio::test]
 async fn function_call_links_back_to_decl() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range(
             r#"<?php
@@ -115,6 +122,7 @@ gr$0eet();
 #[tokio::test]
 async fn class_decl_and_new_expression() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nclass F$0oo {}\n$x = new Foo();\n")
         .await;
@@ -128,6 +136,7 @@ async fn class_decl_and_new_expression() {
 #[tokio::test]
 async fn method_decl_and_call() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range(
             r#"<?php
@@ -151,6 +160,7 @@ $c->add();
 #[tokio::test]
 async fn variable_in_scope_links_all_occurrences_with_dollar_pattern() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range(
             r#"<?php
@@ -173,6 +183,7 @@ function f(): void {
 #[tokio::test]
 async fn variable_does_not_cross_function_scope() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range(
             r#"<?php
@@ -190,6 +201,7 @@ function g() { $x = 2; }
 #[tokio::test]
 async fn cursor_on_dollar_sign_still_finds_variable() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nfunction f() { $0$x = 1; echo $x; }\n")
         .await;
@@ -205,6 +217,7 @@ async fn cursor_on_dollar_sign_still_finds_variable() {
 #[tokio::test]
 async fn whitespace_returns_no_linked_editing() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nclass Foo {} $0  $x = 1;\n")
         .await;
@@ -214,6 +227,7 @@ async fn whitespace_returns_no_linked_editing() {
 #[tokio::test]
 async fn unknown_word_returns_no_linked_editing() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\necho 'nob$0ody';\n")
         .await;
@@ -229,6 +243,7 @@ async fn comment_word_matching_class_name_does_not_link() {
     // class declaration and `new Foo()` call. The cursor-on-highlight
     // guard suppresses linked editing here.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\n// uses Fo$0o here\nclass Foo {}\n$x = new Foo();\n")
         .await;
@@ -241,6 +256,7 @@ async fn string_literal_word_matching_function_name_does_not_link() {
     // `'greet'` (not an identifier reference); linked editing would
     // otherwise mirror typing into the string over real call sites.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nfunction greet() {}\n$x = 'gr$0eet';\ngreet();\n")
         .await;
@@ -255,6 +271,7 @@ async fn non_variable_pattern_disallows_dollar_sign() {
     // the LSP client could accept linked-mode typing of `$NewName` and
     // produce invalid PHP.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nclass Fo$0o {}\n")
         .await;
@@ -273,6 +290,7 @@ async fn variable_pattern_requires_dollar_sign() {
     // The pattern returned for a variable must REQUIRE `\$`, otherwise the
     // user could type a name without `$` and break the variable.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nfunction f() { $x$0 = 1; }\n")
         .await;
@@ -294,6 +312,7 @@ async fn method_in_one_class_does_not_link_unrelated_class_with_same_name() {
     // class A must NOT link to `bar` inside class B — typing in linked
     // mode would otherwise corrupt B's method.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range(
             r#"<?php
@@ -318,6 +337,7 @@ async fn class_name_itself_still_links_globally() {
     // class-scope filter must NOT apply (otherwise the `new Foo()` site
     // gets dropped).
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nclass Fo$0o {}\n$x = new Foo();\n")
         .await;
@@ -334,6 +354,7 @@ async fn cjk_identifier_links_correctly() {
     // characters beyond Latin-1 (e.g. CJK) must round-trip. The original
     // `\x80-\xff` byte range silently rejected anything past U+00FF.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nfunction 名$0前() {}\n名前();\n")
         .await;
@@ -347,6 +368,7 @@ async fn cjk_identifier_links_correctly() {
 #[tokio::test]
 async fn utf8_identifier_links_correctly() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_linked_editing_range("<?php\nfunction caf$0é() {}\ncafé();\n")
         .await;

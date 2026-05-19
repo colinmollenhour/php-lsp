@@ -47,6 +47,9 @@ pub struct TestServer {
     /// Kept alive for the life of the server so the fixture copy isn't
     /// reaped mid-test. `None` when the test provided its own root.
     _fixture_dir: Option<tempfile::TempDir>,
+    /// Whether to validate PHP syntax in test fixtures using `php -l`.
+    /// Disabled by default. Enable with `validate_syntax(true)` for tests requiring valid PHP.
+    validate_syntax: bool,
 }
 
 impl TestServer {
@@ -59,6 +62,7 @@ impl TestServer {
             client,
             root: None,
             _fixture_dir: None,
+            validate_syntax: true,
         }
     }
 
@@ -73,6 +77,7 @@ impl TestServer {
             client,
             root: Some(root),
             _fixture_dir: None,
+            validate_syntax: true,
         }
     }
 
@@ -99,6 +104,7 @@ impl TestServer {
             client,
             root: Some(root),
             _fixture_dir: Some(tmp),
+            validate_syntax: true,
         }
     }
 
@@ -146,6 +152,7 @@ impl TestServer {
             client,
             root: None,
             _fixture_dir: None,
+            validate_syntax: true,
         };
         (server, resp)
     }
@@ -178,6 +185,7 @@ impl TestServer {
             client,
             root: Some(root),
             _fixture_dir: Some(tmp),
+            validate_syntax: true,
         }
     }
 
@@ -195,6 +203,7 @@ impl TestServer {
             client,
             root: Some(root),
             _fixture_dir: None,
+            validate_syntax: true,
         }
     }
 
@@ -262,6 +271,37 @@ impl TestServer {
     pub async fn wait_for_index_ready(&mut self) -> &mut Self {
         self.client.wait_for_index_ready().await;
         self
+    }
+
+    /// Enable or disable PHP syntax validation in test fixtures.
+    /// Disabled by default (fixtures contain edge cases that aren't valid standalone PHP).
+    /// When enabled, `open_fixture` and `check_*` methods will validate that all PHP code
+    /// in fixtures is syntactically correct using `php -l`.
+    pub fn validate_syntax(&mut self, enabled: bool) -> &mut Self {
+        self.validate_syntax = enabled;
+        self
+    }
+
+    /// Convenience: create a new server with PHP syntax validation enabled.
+    /// Use for tests that should only use valid, real-world PHP code.
+    pub async fn new_validated() -> Self {
+        let mut s = Self::new().await;
+        s.validate_syntax(true);
+        s
+    }
+
+    /// Convenience: create a new rooted server with validation enabled.
+    pub async fn with_root_validated(root: impl AsRef<std::path::Path>) -> Self {
+        let mut s = Self::with_root(root).await;
+        s.validate_syntax(true);
+        s
+    }
+
+    /// Convenience: create a new server from fixture with validation enabled.
+    pub async fn with_fixture_validated(name: &str) -> Self {
+        let mut s = Self::with_fixture(name).await;
+        s.validate_syntax(true);
+        s
     }
 
     pub async fn wait_until_symbol_present(&mut self, query: &str, timeout: std::time::Duration) {
@@ -1163,8 +1203,18 @@ impl TestServer {
     /// Parse a multi-file fixture string and open every file over the wire.
     /// Waits for one `publishDiagnostics` per file so analysis has settled
     /// by the time this returns.
+    ///
+    /// If `validate_syntax` is enabled, validates each file's cleaned PHP code
+    /// using `php -l` (fixture parsing removes `$0` markers and annotation lines).
     pub async fn open_fixture(&mut self, src: &str) -> OpenedFixture {
         let fx = fixture::parse(src);
+        if self.validate_syntax {
+            for file in &fx.files {
+                if let Err(e) = crate::common::php_syntax::validate(&file.text) {
+                    panic!("invalid PHP syntax in fixture file {}:\n{}", file.path, e);
+                }
+            }
+        }
         let mut diagnostics = std::collections::HashMap::new();
         for file in &fx.files {
             let notif = self.open(&file.path, &file.text).await;
