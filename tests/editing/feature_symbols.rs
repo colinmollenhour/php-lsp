@@ -8,6 +8,7 @@ use serde_json::json;
 #[tokio::test]
 async fn document_symbols_outline() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -30,6 +31,7 @@ function top_level(): void {}
 #[tokio::test]
 async fn document_symbols_nested_enum() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -50,6 +52,7 @@ enum Status {
 #[tokio::test]
 async fn document_symbols_interface() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -68,6 +71,7 @@ interface Writable {
 #[tokio::test]
 async fn workspace_symbols_finds_class_by_query() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_workspace_symbols(
             r#"<?php
@@ -104,6 +108,7 @@ async fn workspace_symbol_finds_class_by_short_name() {
 #[tokio::test]
 async fn workspace_symbols_returns_empty_array_not_null_on_no_match() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open("main.php", "<?php\nclass Foo {}\n").await;
     let resp = s.workspace_symbols("ThisQueryMatchesNothing").await;
     assert!(
@@ -280,6 +285,7 @@ async fn symbol_resolve_is_idempotent() {
 #[tokio::test]
 async fn symbols_range_start_lte_selection_range_start() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open(
         "test.php",
         "<?php\nfunction hello(string $x): int { return 0; }",
@@ -305,6 +311,7 @@ async fn symbols_range_start_lte_selection_range_start() {
 #[tokio::test]
 async fn symbols_partial_ast_on_parse_error_returns_valid_symbols() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -324,6 +331,7 @@ class {
 #[tokio::test]
 async fn symbols_function_range_starts_at_function_keyword_line() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open("test.php", "<?php\nfunction myFunc() {}").await;
     let resp = s.document_symbols("test.php").await;
     let syms = resp["result"].as_array().cloned().unwrap_or_default();
@@ -345,6 +353,7 @@ async fn symbols_function_range_starts_at_function_keyword_line() {
 #[tokio::test]
 async fn document_symbols_trait() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -363,6 +372,7 @@ trait Loggable {
 #[tokio::test]
 async fn document_symbols_namespace() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -382,6 +392,7 @@ class Mailer {
 #[tokio::test]
 async fn document_symbols_class_with_properties() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -402,6 +413,7 @@ class User {
 #[tokio::test]
 async fn document_symbols_class_with_constants() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -422,6 +434,7 @@ class Config {
 #[tokio::test]
 async fn document_symbols_trait_methods() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -442,6 +455,7 @@ trait Serializable {
 #[tokio::test]
 async fn document_symbols_interface_with_constants() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_document_symbols(
             r#"<?php
@@ -462,6 +476,7 @@ interface Limits {
 #[tokio::test]
 async fn document_symbols_deprecated_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open(
         "test.php",
         "<?php\n/** @deprecated */\nfunction oldApi(): void {}\n",
@@ -482,6 +497,7 @@ async fn document_symbols_deprecated_function() {
 #[tokio::test]
 async fn document_symbols_non_deprecated_function_has_no_deprecated_field() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open("test.php", "<?php\nfunction freshApi(): void {}\n")
         .await;
     let resp = s.document_symbols("test.php").await;
@@ -499,6 +515,7 @@ async fn document_symbols_non_deprecated_function_has_no_deprecated_field() {
 #[tokio::test]
 async fn document_symbols_deprecated_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open(
         "test.php",
         "<?php\n/** @deprecated */\nclass LegacyService {}\n",
@@ -519,6 +536,7 @@ async fn document_symbols_deprecated_class() {
 #[tokio::test]
 async fn document_symbols_deprecated_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open(
         "test.php",
         "<?php\nclass Repo {\n    /** @deprecated */\n    public function findAll(): array { return []; }\n}\n",

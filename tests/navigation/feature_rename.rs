@@ -7,6 +7,7 @@ use expect_test::expect;
 #[tokio::test]
 async fn prepare_rename_on_identifier() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_prepare_rename(
             r#"<?php
@@ -20,6 +21,7 @@ function gre$0et(): void {}
 #[tokio::test]
 async fn rename_function_same_file() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -41,6 +43,7 @@ greet();
 #[tokio::test]
 async fn rename_method_across_file() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -65,6 +68,7 @@ $g->hello();
 #[tokio::test]
 async fn rename_variable_inside_enum_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -88,6 +92,7 @@ enum Status {
 #[tokio::test]
 async fn rename_variable_interface_method_param() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -108,6 +113,7 @@ interface Logger {
 #[tokio::test]
 async fn rename_variable_abstract_class_method_param() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -128,6 +134,7 @@ abstract class Processor {
 #[tokio::test]
 async fn rename_variable_abstract_trait_method_param() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -147,6 +154,7 @@ trait Formattable {
 #[tokio::test]
 async fn rename_class_updates_new_sites() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -170,6 +178,7 @@ $b = new Widget();
 #[tokio::test]
 async fn prepare_rename_on_keyword_returns_nothing() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_prepare_rename(
             r#"<?php
@@ -185,6 +194,7 @@ func$0tion greet(): void {}
 #[tokio::test]
 async fn prepare_rename_on_variable() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_prepare_rename(
             r#"<?php
@@ -203,6 +213,7 @@ function f(): void {
 #[tokio::test]
 async fn rename_property_updates_all_access_sites() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -229,6 +240,7 @@ class Counter {
 #[tokio::test]
 async fn rename_class_rewrites_use_import_in_same_file() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -259,6 +271,7 @@ $b = new Widget();
 #[tokio::test]
 async fn rename_class_rewrites_use_imports_across_files() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"//- /src/Widget.php
@@ -298,6 +311,7 @@ $y = new Widget();
 #[tokio::test]
 async fn rename_on_nonexistent_symbol_does_not_error() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open("rn.php", "<?php\n// nothing to rename\n").await;
     let resp = s.rename("rn.php", 1, 5, "NewName").await;
     assert!(resp["error"].is_null(), "rename errored: {resp:?}");
@@ -413,6 +427,7 @@ async fn will_delete_file_strips_use_imports_from_dependents() {
 #[tokio::test]
 async fn rename_does_not_match_partial_words() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -438,6 +453,7 @@ barfoo();
 #[tokio::test]
 async fn rename_variable_does_not_cross_function_boundary() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -458,6 +474,7 @@ function bar() { $x = 2; }
 #[tokio::test]
 async fn rename_property_works_across_files() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"//- /a.php
@@ -488,6 +505,7 @@ echo $foo->coun$0t;
 #[tokio::test]
 async fn rename_property_from_declaration_site_not_supported() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -509,6 +527,7 @@ echo $foo->count;
 #[tokio::test]
 async fn rename_distinguishes_static_from_instance_properties() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -534,6 +553,7 @@ class Config {
 #[tokio::test]
 async fn rename_is_case_sensitive() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -555,6 +575,7 @@ tes$0t();
 #[tokio::test]
 async fn rename_function_multiple_scopes() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -579,6 +600,7 @@ while (true) { process(); break; }
 #[tokio::test]
 async fn rename_variable_deep_scopes() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -610,6 +632,7 @@ function outer() {
 #[tokio::test]
 async fn rename_limitation_property_from_declaration_site() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -633,6 +656,7 @@ echo $foo->count;
 #[tokio::test]
 async fn rename_property_from_access_site_works() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -660,6 +684,7 @@ echo $foo->count;
 #[tokio::test]
 async fn rename_limitation_callable_types() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -684,6 +709,7 @@ function process(callable $callback$0): void {
 #[tokio::test]
 async fn rename_allows_superglobal_rename() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -711,6 +737,7 @@ if (isset($_GET$0['id'])) {
 #[tokio::test]
 async fn rename_variable_in_arrow_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -735,6 +762,7 @@ function process(): void {
 #[tokio::test]
 async fn rename_variable_in_nested_arrow_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -760,6 +788,7 @@ function compute(): void {
 #[tokio::test]
 async fn rename_variable_in_arrow_in_array() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -792,6 +821,7 @@ function process(): void {
 #[tokio::test]
 async fn rename_variable_in_closure_use_clause() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -818,6 +848,7 @@ function greet(): void {
 #[tokio::test]
 async fn rename_variable_in_closure_use_by_reference() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -846,6 +877,7 @@ function counter(): void {
 #[tokio::test]
 async fn rename_variable_in_closure_multiple_use_vars() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -881,6 +913,7 @@ function process(): void {
 #[tokio::test]
 async fn rename_within_namespace_scope() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -906,6 +939,7 @@ function create() {
 #[tokio::test]
 async fn rename_aliased_use_import() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php
@@ -928,6 +962,7 @@ $l = new Log$0();
 #[tokio::test]
 async fn rename_with_multiple_use_imports() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_rename(
             r#"<?php

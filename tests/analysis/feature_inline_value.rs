@@ -94,6 +94,7 @@ async fn lone_dollar_without_identifier_is_skipped() {
     // `$` followed by a non-identifier char (e.g. whitespace, operator) is
     // not a variable. Make sure the scanner doesn't emit a zero-length lookup.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s.check_inline_value("<?php\n$0$ = 1;$0\n").await;
     expect!["<no inline values>"].assert_eq(&out);
 }

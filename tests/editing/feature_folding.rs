@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 #[tokio::test]
 async fn folding_interface() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -21,6 +22,7 @@ interface Countable {
 #[tokio::test]
 async fn folding_trait_and_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -41,6 +43,7 @@ trait Loggable {
 #[tokio::test]
 async fn folding_braced_namespace() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -56,6 +59,7 @@ namespace App {
 #[tokio::test]
 async fn folding_single_line_construct_produces_no_fold() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s.check_folding("<?php\nclass Inline {}\n").await;
     expect!["<no folds>"].assert_eq(&out);
 }
@@ -63,6 +67,7 @@ async fn folding_single_line_construct_produces_no_fold() {
 #[tokio::test]
 async fn folding_empty_file_produces_no_fold() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s.check_folding("<?php\n").await;
     expect!["<no folds>"].assert_eq(&out);
 }
@@ -70,6 +75,7 @@ async fn folding_empty_file_produces_no_fold() {
 #[tokio::test]
 async fn folding_if_statement() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -85,6 +91,7 @@ if (true) {
 #[tokio::test]
 async fn folding_foreach_statement() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -100,6 +107,7 @@ foreach ([1, 2, 3] as $i) {
 #[tokio::test]
 async fn folding_try_catch() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -117,6 +125,7 @@ try {
 #[tokio::test]
 async fn folding_multiline_doc_comment() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -134,6 +143,7 @@ function foo(int $x): void {}
 #[tokio::test]
 async fn folding_region_endregion() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -149,6 +159,7 @@ $a = 1;
 #[tokio::test]
 async fn folding_consecutive_use_statements() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -164,6 +175,7 @@ use C\ClassC;
 #[tokio::test]
 async fn folding_nested_constructs_both_returned() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -187,6 +199,7 @@ class Container {
 #[tokio::test]
 async fn folding_single_line_function_not_folded() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding("<?php\nfunction tiny(): void { echo 1; }\n")
         .await;
@@ -196,6 +209,7 @@ async fn folding_single_line_function_not_folded() {
 #[tokio::test]
 async fn folding_enum_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -217,6 +231,7 @@ enum Status {
 #[tokio::test]
 async fn folding_ranges_cover_function_body() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -234,6 +249,7 @@ function f(): void {
 #[tokio::test]
 async fn folding_ranges_cover_class_and_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_folding(
             r#"<?php
@@ -254,6 +270,7 @@ class Folded {
 #[tokio::test]
 async fn code_lens_for_function_with_reference() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_code_lens(
             r#"<?php
@@ -268,6 +285,7 @@ lensed();
 #[tokio::test]
 async fn code_lens_for_class_with_references() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_code_lens(
             r#"<?php

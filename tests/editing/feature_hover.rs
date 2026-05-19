@@ -7,6 +7,7 @@ use expect_test::expect;
 #[tokio::test]
 async fn hover_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s.check_hover(r#"<?php function gr$0eet(): void {}"#).await;
     expect![[r#"
         ```php
@@ -18,6 +19,7 @@ async fn hover_function() {
 #[tokio::test]
 async fn hover_function_with_signature() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(r#"<?php function gr$0eet(string $name, int $count = 1): string {}"#)
         .await;
@@ -31,6 +33,7 @@ async fn hover_function_with_signature() {
 #[tokio::test]
 async fn hover_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -49,6 +52,7 @@ class Greeter {
 #[tokio::test]
 async fn hover_static_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -67,6 +71,7 @@ class Registry {
 #[tokio::test]
 async fn hover_class_identifier() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -84,6 +89,7 @@ class Gre$0eter {}
 #[tokio::test]
 async fn hover_enum_identifier() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -101,6 +107,7 @@ enum Stat$0us { case Active; case Inactive; }
 #[tokio::test]
 async fn hover_interface_identifier() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -118,6 +125,7 @@ interface Writ$0able { public function write(): void; }
 #[tokio::test]
 async fn hover_docblock_annotated_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -147,6 +155,7 @@ function gr$0eet(string $name): string { return $name; }
 #[tokio::test]
 async fn hover_method_call_resolves_receiver_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -167,6 +176,7 @@ $mailer->pro$0cess('');
 #[tokio::test]
 async fn hover_variable_is_scoped_to_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -185,6 +195,7 @@ class Service {
 #[tokio::test]
 async fn hover_missing_symbol_returns_nothing() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s.check_hover(r#"<?php fo$0o();"#).await;
     expect!["<no hover>"].assert_eq(&v);
 }
@@ -234,6 +245,7 @@ async fn hover_class_as_param_type_cross_file() {
 #[tokio::test]
 async fn hover_across_files_via_use() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"//- /src/Greeter.php
@@ -261,6 +273,7 @@ $g->hel$0lo();
 #[tokio::test]
 async fn hover_property_access() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -285,6 +298,7 @@ echo $u->na$0me;
 #[tokio::test]
 async fn hover_enum_case_declaration() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -304,6 +318,7 @@ enum Status { case Acti$0ve; case Inactive; }
 #[tokio::test]
 async fn hover_class_constant() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -325,6 +340,7 @@ class Config {
 #[tokio::test]
 async fn hover_nullable_param_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -343,6 +359,7 @@ function sho$0w(?string $label): void {}
 #[tokio::test]
 async fn hover_trait_identifier() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -360,6 +377,7 @@ trait Logg$0able { public function log(): void {} }
 #[tokio::test]
 async fn hover_trait_inherited_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -387,6 +405,7 @@ class Greeter {
 #[tokio::test]
 async fn hover_multi_trait_alpha() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -410,6 +429,7 @@ class Both {
 #[tokio::test]
 async fn hover_multi_trait_beta() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -433,6 +453,7 @@ class Both {
 #[tokio::test]
 async fn hover_on_empty_file_returns_null_not_error() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open("empty.php", "").await;
     let resp = s.hover("empty.php", 0, 0).await;
     assert!(
@@ -449,6 +470,7 @@ async fn hover_on_empty_file_returns_null_not_error() {
 #[tokio::test]
 async fn hover_past_eof_does_not_crash() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.open("short.php", "<?php\nfunction f(): void {}\n").await;
     let resp = s.hover("short.php", 500, 500).await;
     assert!(resp["error"].is_null(), "hover past EOF errored: {resp:?}");
@@ -465,6 +487,7 @@ async fn hover_past_eof_does_not_crash() {
 #[tokio::test]
 async fn hover_backed_enum_shows_backing_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -483,6 +506,7 @@ enum Stat$0us: string { case Active = 'active'; }
 #[tokio::test]
 async fn hover_backed_int_enum_shows_backing_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -502,6 +526,7 @@ enum Priorit$0y: int { case Low = 1; case High = 2; }
 #[tokio::test]
 async fn hover_abstract_class_shows_keyword() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -519,6 +544,7 @@ abstract class Bas$0eHandler {}
 #[tokio::test]
 async fn hover_final_class_shows_keyword() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -536,6 +562,7 @@ final class Concret$0eService {}
 #[tokio::test]
 async fn hover_readonly_class_shows_keyword() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -557,6 +584,7 @@ readonly class Poi$0nt { public function __construct(public float $x, public flo
 #[tokio::test]
 async fn hover_use_alias_resolves_to_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -580,6 +608,7 @@ $s = new Send$0er();
 #[tokio::test]
 async fn hover_static_call_resolves_correct_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -600,6 +629,7 @@ Worker::ru$0n(4);
 #[tokio::test]
 async fn hover_self_static_call_resolves_enclosing_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -624,6 +654,7 @@ class Builder {
 #[tokio::test]
 async fn hover_second_method_call_on_same_line_picks_correct_receiver() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -650,6 +681,7 @@ $a->handle('x'); $b->hand$0le(1);
 #[tokio::test]
 async fn hover_trait_method_picks_correct_class_not_unrelated_one() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -673,6 +705,7 @@ $s->pin$0g();
 #[tokio::test]
 async fn hover_inherited_method_shows_child_class_name() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -696,6 +729,7 @@ $d->speak();
 #[tokio::test]
 async fn hover_child_receiver_resolves_parent_method_correctly() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -720,6 +754,7 @@ $d->spea$0k();
 #[tokio::test]
 async fn hover_abstract_method_shows_modifiers() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -739,6 +774,7 @@ abstract class Base {
 #[tokio::test]
 async fn hover_final_method_shows_modifiers() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -758,6 +794,7 @@ class Locked {
 #[tokio::test]
 async fn hover_readonly_property_shows_modifier() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -779,6 +816,7 @@ echo $p->$0x;
 #[tokio::test]
 async fn hover_deprecated_function_shows_banner() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -801,6 +839,7 @@ function ol$0dGreet(): void {}
 #[tokio::test]
 async fn hover_function_with_throws_shows_tag() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -825,6 +864,7 @@ function ri$0sky(): void {}
 #[tokio::test]
 async fn hover_static_property() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -845,6 +885,7 @@ Config::$ver$0sion;
 #[tokio::test]
 async fn hover_static_property_cross_file() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"//- /caller.php
@@ -871,6 +912,7 @@ class Config {
 #[tokio::test]
 async fn hover_first_class_callable_builtin() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s.check_hover(r#"<?php $fn = str$0len(...);"#).await;
     expect![[r#"
         ```php
@@ -884,6 +926,7 @@ async fn hover_first_class_callable_builtin() {
 #[tokio::test]
 async fn hover_first_class_callable_user_function() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(r#"<?php function double(int $n): int {} $fn = dou$0ble(...);"#)
         .await;
@@ -899,6 +942,7 @@ async fn hover_first_class_callable_user_function() {
 #[tokio::test]
 async fn hover_inheritdoc_shows_parent_description() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -929,6 +973,7 @@ $c->sen$0d();
 #[tokio::test]
 async fn hover_inheritdoc_at_tag_form() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -959,6 +1004,7 @@ $c->fet$0ch();
 #[tokio::test]
 async fn hover_real_docblock_not_overwritten_by_inheritdoc() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -991,6 +1037,7 @@ $c->ru$0n();
 #[tokio::test]
 async fn hover_keyword_match() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s.check_hover(r#"<?php $x = mat$0ch($y) {};"#).await;
     expect![["`match` — evaluates an expression against a set of arms (PHP 8.0)"]].assert_eq(&v);
 }
@@ -998,6 +1045,7 @@ async fn hover_keyword_match() {
 #[tokio::test]
 async fn hover_keyword_null() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s.check_hover(r#"<?php $x = nu$0ll;"#).await;
     expect![["`null` — the null value; a variable has no value"]].assert_eq(&v);
 }
@@ -1005,6 +1053,7 @@ async fn hover_keyword_null() {
 #[tokio::test]
 async fn hover_keyword_true() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s.check_hover(r#"<?php $x = tr$0ue;"#).await;
     expect![["`true` — boolean true"]].assert_eq(&v);
 }
@@ -1012,6 +1061,7 @@ async fn hover_keyword_true() {
 #[tokio::test]
 async fn hover_keyword_false() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s.check_hover(r#"<?php $x = fal$0se;"#).await;
     expect![["`false` — boolean false"]].assert_eq(&v);
 }
@@ -1019,6 +1069,7 @@ async fn hover_keyword_false() {
 #[tokio::test]
 async fn hover_keyword_readonly() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(r#"<?php class Foo { readon$0ly string $x; }"#)
         .await;
@@ -1029,6 +1080,7 @@ async fn hover_keyword_readonly() {
 #[tokio::test]
 async fn hover_keyword_never() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(r#"<?php function fail(): nev$0er { throw new \Exception(); }"#)
         .await;
@@ -1041,6 +1093,7 @@ async fn hover_static_keyword_in_static_call_not_intercepted() {
     // `static::method()` — hovering `static` should NOT return the keyword doc,
     // it should fall through to the self/static class resolution.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1065,6 +1118,7 @@ class Base {
 #[tokio::test]
 async fn hover_attribute_class_name() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1086,6 +1140,7 @@ class Foo {}
 async fn hover_attribute_with_args() {
     // Cursor on attribute class name when the attribute has constructor arguments.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1108,6 +1163,7 @@ class Controller {}
 #[tokio::test]
 async fn hover_attribute_with_docblock() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1133,6 +1189,7 @@ class Mailer {}
 #[tokio::test]
 async fn hover_attribute_via_use_alias() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1158,6 +1215,7 @@ class Api {}
 async fn hover_named_arg_builtin_function() {
     // PHP 8.0 named arg on a user-defined function matching a known param name.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1176,6 +1234,7 @@ greet(coun$0t: 3);
 #[tokio::test]
 async fn hover_named_arg_with_docblock() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1202,6 +1261,7 @@ register(na$0me: 'Alice', age: 30);
 #[tokio::test]
 async fn hover_named_arg_method_call() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1223,6 +1283,7 @@ $m->send(subje$0ct: 'Hello', to: 'a@b.com');
 #[tokio::test]
 async fn hover_named_arg_static_method() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1244,6 +1305,7 @@ DB::query(lim$0it: 10);
 async fn hover_named_arg_nested_call() {
     // Named arg inside a nested function call — cursor on inner call's arg.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1265,6 +1327,7 @@ outer(a: inner(x$0: 1));
 #[tokio::test]
 async fn hover_closure_keyword() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(r#"<?php $fn = fun$0ction(int $x, string $y): bool { return true; };"#)
         .await;
@@ -1278,6 +1341,7 @@ async fn hover_closure_keyword() {
 #[tokio::test]
 async fn hover_arrow_function_keyword() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(r#"<?php $f = f$0n(int $a): string => 'hello';"#)
         .await;
@@ -1291,6 +1355,7 @@ async fn hover_arrow_function_keyword() {
 #[tokio::test]
 async fn hover_closure_no_params_no_return() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(r#"<?php $fn = fun$0ction() { return 1; };"#)
         .await;
@@ -1305,6 +1370,7 @@ async fn hover_closure_no_params_no_return() {
 async fn hover_closure_as_argument() {
     // Cursor on `function` keyword passed as a callback argument.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1326,6 +1392,7 @@ async fn hover_named_function_keyword_not_intercepted() {
     // should not trigger the closure hover — returns nothing for the keyword itself.
     // Hover on the function *name* (not keyword) to get the signature.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s.check_hover(r#"<?php fun$0ction greet(): void {}"#).await;
     expect!["<no hover>"].assert_eq(&v);
 }
@@ -1334,6 +1401,7 @@ async fn hover_named_function_keyword_not_intercepted() {
 async fn hover_closure_inside_if_body() {
     // Closure nested inside an if body — the walker must recurse into if branches.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1354,6 +1422,7 @@ if (true) {
 #[tokio::test]
 async fn hover_on_constructor_call() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1375,6 +1444,7 @@ $svc = new Serv$0ice('db://localhost');
 #[tokio::test]
 async fn hover_union_type_property() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1401,6 +1471,7 @@ echo $c->se$0tting;
 #[tokio::test]
 async fn hover_enum_case_in_match_arm() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1423,6 +1494,7 @@ match ($status) {
 #[tokio::test]
 async fn hover_class_const_in_static_access() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1444,6 +1516,7 @@ if (Config::DEB$0UG) { }
 #[tokio::test]
 async fn hover_backed_enum_case_in_match_arm() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1465,6 +1538,7 @@ match ($p) {
 #[tokio::test]
 async fn hover_static_method_in_match_not_broken() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1491,6 +1565,7 @@ match ($x) {
 #[tokio::test]
 async fn hover_method_after_instanceof_narrows_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1514,6 +1589,7 @@ function process(mixed $x) {
 #[tokio::test]
 async fn hover_method_after_instanceof_with_param_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1539,6 +1615,7 @@ function handle(object $obj) {
 #[tokio::test]
 async fn hover_method_without_instanceof_does_not_narrow() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1564,6 +1641,7 @@ function test(mixed $obj) {
 #[tokio::test]
 async fn hover_function_with_template_shows_template_in_docblock() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1593,6 +1671,7 @@ function identi$0ty($value) { return $value; }
 #[tokio::test]
 async fn hover_template_param_type_in_signature() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php
@@ -1620,6 +1699,7 @@ $result = box$0('hello');
 #[tokio::test]
 async fn hover_template_at_call_site_shows_literal_t() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let v = s
         .check_hover(
             r#"<?php

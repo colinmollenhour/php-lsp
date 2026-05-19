@@ -1318,6 +1318,7 @@ interface Orphan$0 {}
 #[tokio::test]
 async fn implementation_braced_namespace_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_implementation(
             r#"<?php
@@ -1334,6 +1335,7 @@ namespace App {
 #[tokio::test]
 async fn implementation_unbraced_namespace_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_implementation(
             r#"<?php

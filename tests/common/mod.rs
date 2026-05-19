@@ -9,6 +9,7 @@
 
 mod client;
 pub mod fixture;
+pub mod php_syntax;
 pub mod render;
 mod server;
 

@@ -11,6 +11,7 @@ use expect_test::expect;
 #[tokio::test]
 async fn every_chain_satisfies_parent_contains_child() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let src = r#"<?php
 namespace App;
 class Foo {
@@ -38,6 +39,7 @@ class Foo {
 #[tokio::test]
 async fn empty_php_file_returns_file_range_only() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s.check_selection_range("<?php$0\n").await;
     expect!["0:0-1:0"].assert_eq(&out);
 }
@@ -45,6 +47,7 @@ async fn empty_php_file_returns_file_range_only() {
 #[tokio::test]
 async fn cursor_outside_any_construct_returns_only_file_range() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range("<?php\n$0// only a comment\n")
         .await;
@@ -54,6 +57,7 @@ async fn cursor_outside_any_construct_returns_only_file_range() {
 #[tokio::test]
 async fn end_character_is_real_line_length_not_u32_max() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range("<?php\nfunction hello(): void {$0}\n")
         .await;
@@ -68,6 +72,7 @@ async fn end_character_is_real_line_length_not_u32_max() {
 #[tokio::test]
 async fn cursor_in_function_body_includes_function_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -88,6 +93,7 @@ function greet() {
 #[tokio::test]
 async fn cursor_in_method_body_walks_class_method_body_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -110,6 +116,7 @@ class Foo {
 #[tokio::test]
 async fn cursor_on_class_member_outside_method_body() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -130,6 +137,7 @@ class Foo {
 #[tokio::test]
 async fn interface_member_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -149,6 +157,7 @@ interface Greeter {
 #[tokio::test]
 async fn trait_method_body_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -171,6 +180,7 @@ trait Greets {
 #[tokio::test]
 async fn enum_case_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -191,6 +201,7 @@ enum Color {
 #[tokio::test]
 async fn enum_method_body_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -216,6 +227,7 @@ enum Color {
 #[tokio::test]
 async fn nested_if_while_foreach_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -248,6 +260,7 @@ function f(array $xs): void {
 #[tokio::test]
 async fn try_catch_finally_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -275,6 +288,7 @@ function f(): void {
 #[tokio::test]
 async fn try_finally_block_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -299,6 +313,7 @@ function f(): void {
 #[tokio::test]
 async fn for_and_do_while_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -326,6 +341,7 @@ function f(): void {
 #[tokio::test]
 async fn elseif_branch_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -354,6 +370,7 @@ function f(int $x): void {
 #[tokio::test]
 async fn else_branch_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -381,6 +398,7 @@ function f(int $x): void {
 #[tokio::test]
 async fn braced_namespace_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -405,6 +423,7 @@ namespace App {
 #[tokio::test]
 async fn utf16_column_uses_utf16_units_for_supplementary_chars() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     // "🦀" is one UTF-16 surrogate pair = 2 code units. The cursor sits after
     // it inside a string literal; the chain should use UTF-16 columns
     // throughout, including the file-level outermost range.
@@ -425,6 +444,7 @@ async fn utf16_column_uses_utf16_units_for_supplementary_chars() {
 #[tokio::test]
 async fn multiple_positions_yield_independent_chains() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range_at(
             r#"<?php
@@ -450,6 +470,7 @@ function b() { echo 2; }
 #[tokio::test]
 async fn chain_is_strictly_nested() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     // Locks the exact ordering for a deeply nested cursor; the snapshot is
     // also a regression guard against the parent-must-cover-child invariant.
     let out = s
@@ -480,6 +501,7 @@ class C {
 #[tokio::test]
 async fn closure_body_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -502,6 +524,7 @@ $f = function (int $n) use ($x): int {
 #[tokio::test]
 async fn arrow_function_body_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range("<?php\n$square = fn(int $n): int => $n *$0 $n;\n")
         .await;
@@ -517,6 +540,7 @@ async fn arrow_function_body_chain() {
 #[tokio::test]
 async fn anonymous_class_method_body_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -544,6 +568,7 @@ $obj = new class {
 #[tokio::test]
 async fn interpolated_string_expression_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             "<?php\nfunction f(int $x): string {\n    return \"value: {$x +$0 1}\";\n}\n",
@@ -563,6 +588,7 @@ async fn interpolated_string_expression_chain() {
 #[tokio::test]
 async fn throw_statement_expression_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -584,6 +610,7 @@ function f(): void {
 #[tokio::test]
 async fn simple_namespace_chain_includes_subsequent_class() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -609,6 +636,7 @@ class Foo {
 #[tokio::test]
 async fn switch_case_body_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -636,6 +664,7 @@ function f(int $x): void {
 #[tokio::test]
 async fn binary_expression_inside_return_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -656,6 +685,7 @@ function add(int $x): int {
 #[tokio::test]
 async fn match_arm_body_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -682,6 +712,7 @@ function f(int $x): string {
 #[tokio::test]
 async fn function_call_argument_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -703,6 +734,7 @@ function f(): void {
 #[tokio::test]
 async fn array_element_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_selection_range(
             r#"<?php
@@ -724,6 +756,7 @@ function f(): array {
 #[tokio::test]
 async fn parameter_chain() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     // Cursor lands inside the type hint of the second parameter so the
     // chain pulls in the parameter span (not just the function).
     let out = s

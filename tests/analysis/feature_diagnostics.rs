@@ -1316,6 +1316,7 @@ new Point(x: 0, y: 1, x: 2);
 #[tokio::test]
 async fn positional_after_named_arg() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_diagnostics(
         r#"<?php
 function bar(int $a, int $b): void {}
@@ -1428,6 +1429,7 @@ function _wrap(): void {
 #[tokio::test]
 async fn user_unconditional_redefinition_does_not_break_call() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_diagnostics(
         r#"//- /src/redef.php
 <?php

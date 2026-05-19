@@ -6,6 +6,7 @@ use super::*;
 async fn references_no_partial_name_match() {
     // `greet` must not include occurrences of `greeting`.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function gr$0eet(): void {}
@@ -26,6 +27,7 @@ async fn references_class_includes_type_hints_and_extends() {
     // present so the codebase fast path (which only tracks instantiation sites)
     // falls back to the AST walker that catches all class references.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class Ev$0ent {}
@@ -48,6 +50,7 @@ async fn references_class_type_hint_with_new_call() {
     // must include ALL sites — not just the new call. This is the regression case where
     // the salsa fast path returned only `new Widget()` and silently dropped type hints.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class Wi$0dget {}
@@ -65,6 +68,7 @@ $x = new Widget();
 #[tokio::test]
 async fn references_class_used_as_attribute() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class Ro$0ute {}
@@ -80,6 +84,7 @@ class HomeController {}
 #[tokio::test]
 async fn references_class_as_anonymous_class_base() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class Ba$0se {}
@@ -95,6 +100,7 @@ $x = new class extends Base {};
 async fn references_method_excludes_cross_file_free_function() {
     // Method refs on C::add must not include the free-function `add()`.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"//- /a.php
 <?php
@@ -117,6 +123,7 @@ $c->add();
 #[tokio::test]
 async fn references_class_in_property_default() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class Sta$0tus {
@@ -135,6 +142,7 @@ class Foo {
 #[tokio::test]
 async fn references_static_method_call_in_class_property_default() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class C {
@@ -153,6 +161,7 @@ class C {
 #[tokio::test]
 async fn references_static_method_call_in_trait_property_default() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 trait T {
@@ -173,6 +182,7 @@ async fn references_function_decl_excludes_method_with_same_name() {
     // Symmetric to references_on_method_decl_returns_method_refs_not_function_refs:
     // cursor on free-function declaration — method decl and method call must be excluded.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function a$0dd(): void {}
@@ -190,6 +200,7 @@ $c->add();
 async fn references_function_call_inside_enum_method() {
     // A free-function call inside an enum method body must be found by references.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function hel$0per(): void {}
@@ -207,6 +218,7 @@ enum Status {
 async fn references_function_decl_excludes_interface_method() {
     // kind=Function must not return the interface method declaration.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 function a$0dd(): void {}
@@ -225,6 +237,7 @@ interface I {
 async fn references_interface_method_excluded_with_include_declaration_false() {
     // With includeDeclaration=false the interface method declaration must not appear.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let opened = s
         .open_fixture(
             r#"<?php
@@ -261,6 +274,7 @@ async fn references_method_refs_only_when_class_and_method_share_name() {
     // Cursor on the method call — only the method declaration and call should appear;
     // the class declaration must not be returned as an extra reference.
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     s.check_references_annotated(
         r#"<?php
 class get {

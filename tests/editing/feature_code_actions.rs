@@ -8,6 +8,7 @@ use expect_test::expect;
 #[tokio::test]
 async fn code_actions_offers_generate_constructor() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_code_actions(
             r#"<?php
@@ -28,6 +29,7 @@ class U$0ser$0 {
 #[tokio::test]
 async fn code_actions_offers_extract_variable_on_expression() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_code_actions(
             r#"<?php
@@ -43,6 +45,7 @@ function f(): int {
 #[tokio::test]
 async fn code_actions_offers_add_return_type() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_code_actions(
             r#"<?php
@@ -60,6 +63,7 @@ function $0noReturn$0() { return 42; }
 #[tokio::test]
 async fn code_actions_offers_implement_missing_methods() {
     let mut s = TestServer::new().await;
+    s.validate_syntax(false);
     let out = s
         .check_code_actions(
             r#"<?php
@@ -505,6 +509,7 @@ class Foo {
 #[tokio::test]
 async fn promote_action_not_offered_without_visibility_modifier() {
     let mut server = TestServer::new().await;
+    server.validate_syntax(false);
     let out = server
         .check_code_actions(
             r#"<?php
