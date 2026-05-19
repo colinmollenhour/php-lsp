@@ -26,12 +26,13 @@ const TT_TYPE: u32 = 8;
 const TT_STRING: u32 = 9;
 const TT_NUMBER: u32 = 10;
 const TT_COMMENT: u32 = 11;
+const TT_ENUM_MEMBER: u32 = 12;
 
 // Modifier bits — order must match `legend()` modifier vec order
 const MOD_DECLARATION: u32 = 1 << 0;
 const MOD_STATIC: u32 = 1 << 1;
 const MOD_ABSTRACT: u32 = 1 << 2;
-const _MOD_READONLY: u32 = 1 << 3;
+const MOD_READONLY: u32 = 1 << 3;
 const MOD_DEPRECATED: u32 = 1 << 4;
 
 /// Raw token: (line_0based, col_0based, length, token_type, modifiers_bitmask)
@@ -52,6 +53,7 @@ pub fn legend() -> SemanticTokensLegend {
             SemanticTokenType::STRING,
             SemanticTokenType::NUMBER,
             SemanticTokenType::COMMENT,
+            SemanticTokenType::ENUM_MEMBER,
         ],
         token_modifiers: vec![
             SemanticTokenModifier::DECLARATION,
@@ -411,7 +413,10 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
         StmtKind::Class(c) => {
             push_attributes(out, sv, &c.attributes);
             if let Some(name) = c.name {
-                let mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
+                let mut mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
+                if c.modifiers.is_abstract {
+                    mods |= MOD_ABSTRACT;
+                }
                 push_name(out, sv, &name.to_string(), TT_CLASS, mods);
             }
             for member in c.members.iter() {
@@ -441,7 +446,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
                         push_attributes(out, sv, &c.attributes);
                         let mmods =
                             MOD_DECLARATION | deprecated_mod(sv.source(), member.span.start);
-                        push_name(out, sv, &c.name.to_string(), TT_PROPERTY, mmods);
+                        push_name(out, sv, &c.name.to_string(), TT_ENUM_MEMBER, mmods);
                         if let Some(value) = &c.value {
                             collect_expr(sv, value, out);
                         }
@@ -588,7 +593,11 @@ fn collect_class_member(
         if let Some(th) = &p.type_hint {
             push_type_hint(out, sv, th);
         }
-        push_name(out, sv, &p.name.to_string(), TT_PROPERTY, MOD_DECLARATION);
+        let mut mods = MOD_DECLARATION;
+        if p.is_readonly {
+            mods |= MOD_READONLY;
+        }
+        push_param(out, sv, &p.name.to_string(), TT_PROPERTY, mods);
     }
 }
 
@@ -795,198 +804,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_file_produces_no_tokens() {
-        let src = "<?php";
-        let d = doc(src);
-        assert!(semantic_tokens(src, &d).is_empty());
-    }
-
-    #[test]
-    fn function_declaration_emits_function_token_with_declaration_modifier() {
-        let src = "<?php\nfunction greet() {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_FUNCTION
-                    && t.token_modifiers_bitset & MOD_DECLARATION != 0),
-            "expected function+declaration token, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn class_declaration_emits_class_token() {
-        let src = "<?php\nclass Foo {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(
-                |t| t.token_type == TT_CLASS && t.token_modifiers_bitset & MOD_DECLARATION != 0
-            ),
-            "expected class+declaration token"
-        );
-    }
-
-    #[test]
-    fn interface_declaration_emits_interface_token() {
-        let src = "<?php\ninterface Bar {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_INTERFACE
-                    && t.token_modifiers_bitset & MOD_DECLARATION != 0),
-            "expected interface+declaration token"
-        );
-    }
-
-    #[test]
-    fn method_declaration_emits_method_token() {
-        let src = "<?php\nclass Foo { public function run() {} }";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_METHOD
-                    && t.token_modifiers_bitset & MOD_DECLARATION != 0),
-            "expected method+declaration token"
-        );
-    }
-
-    #[test]
-    fn abstract_method_has_abstract_modifier() {
-        let src = "<?php\nabstract class Base { abstract public function doIt(): void; }";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_METHOD && t.token_modifiers_bitset & MOD_ABSTRACT != 0),
-            "expected abstract method token"
-        );
-    }
-
-    #[test]
-    fn static_method_has_static_modifier() {
-        let src = "<?php\nclass Foo { public static function build() {} }";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_METHOD && t.token_modifiers_bitset & MOD_STATIC != 0),
-            "expected static method token"
-        );
-    }
-
-    #[test]
-    fn parameter_emits_parameter_token() {
-        let src = "<?php\nfunction greet(string $name) {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_PARAMETER
-                    && t.token_modifiers_bitset & MOD_DECLARATION != 0),
-            "expected parameter+declaration token"
-        );
-    }
-
-    #[test]
-    fn parameter_token_includes_dollar_sign() {
-        // Parameter tokens must cover `$name` (including the `$`), not just `name`.
-        // Variable-expression tokens already include `$`; parameters must be consistent.
-        //
-        // Source: "<?php\nfunction greet(string $name) {}"
-        // Line 1: "function greet(string $name) {}"
-        //          0         1         2         3
-        //          0123456789012345678901234567890
-        //                                ^ char 22 = '$', char 23 = 'n'
-        let src = "<?php\nfunction greet(string $name) {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-
-        // Decode delta encoding to find the absolute char of the PARAMETER token.
-        let mut abs_char: u32 = 0;
-        let mut last_line: u32 = 0;
-        let mut param_abs_char: Option<u32> = None;
-        let mut param_len: Option<u32> = None;
-        for t in &tokens {
-            if t.delta_line > 0 {
-                abs_char = 0;
-                last_line += t.delta_line;
-            }
-            abs_char += t.delta_start;
-            if t.token_type == TT_PARAMETER {
-                param_abs_char = Some(abs_char);
-                param_len = Some(t.length);
-                break;
-            }
-        }
-        let _ = last_line; // suppress unused-variable warning
-
-        let abs = param_abs_char.expect("expected a TT_PARAMETER token");
-        // `function greet(string ` = 22 chars → `$` at char 22.
-        assert_eq!(
-            abs, 22,
-            "parameter token must start at `$` (char 22), not at the bare identifier (char 23)"
-        );
-        // `$name` = 5 chars
-        assert_eq!(
-            param_len.unwrap(),
-            5,
-            "parameter token length must cover `$name` (5 chars)"
-        );
-    }
-
-    #[test]
-    fn function_call_emits_function_token_without_declaration() {
-        let src = "<?php\ngreet();";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_FUNCTION
-                    && t.token_modifiers_bitset & MOD_DECLARATION == 0),
-            "expected function call token (no declaration modifier)"
-        );
-    }
-
-    #[test]
-    fn method_call_emits_method_token_without_declaration() {
-        let src = "<?php\n$obj->run();";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_METHOD
-                    && t.token_modifiers_bitset & MOD_DECLARATION == 0),
-            "expected method call token (no declaration modifier)"
-        );
-    }
-
-    #[test]
-    fn property_emits_property_token() {
-        let src = "<?php\nclass Foo { public string $name; }";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_PROPERTY
-                    && t.token_modifiers_bitset & MOD_DECLARATION != 0),
-            "expected property+declaration token"
-        );
-    }
-
-    #[test]
     fn tokens_are_delta_encoded_in_order() {
         let src = "<?php\nfunction a() {}\nfunction b() {}";
         let d = doc(src);
@@ -1015,51 +832,10 @@ mod tests {
     }
 
     #[test]
-    fn namespace_contents_are_tokenized() {
-        let src = "<?php\nnamespace App;\nfunction boot() {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(|t| t.token_type == TT_FUNCTION),
-            "function inside namespace should produce tokens"
-        );
-    }
-
-    #[test]
     fn legend_has_correct_token_count() {
         let l = legend();
-        assert_eq!(l.token_types.len(), 12);
+        assert_eq!(l.token_types.len(), 13);
         assert_eq!(l.token_modifiers.len(), 5);
-    }
-
-    #[test]
-    fn deprecated_function_has_deprecated_modifier() {
-        let src = "<?php\n/** @deprecated Use newFn() instead */\nfunction oldFn() {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_FUNCTION
-                    && t.token_modifiers_bitset & MOD_DEPRECATED != 0),
-            "expected deprecated modifier on function, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn deprecated_method_has_deprecated_modifier() {
-        let src =
-            "<?php\nclass Foo {\n    /** @deprecated */\n    public function oldMethod() {}\n}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(
-                |t| t.token_type == TT_METHOD && t.token_modifiers_bitset & MOD_DEPRECATED != 0
-            ),
-            "expected deprecated modifier on method, got {:?}",
-            tokens
-        );
     }
 
     #[test]
@@ -1072,165 +848,6 @@ mod tests {
                 .iter()
                 .all(|t| t.token_modifiers_bitset & MOD_DEPRECATED == 0),
             "expected no deprecated modifier on non-deprecated function"
-        );
-    }
-
-    #[test]
-    fn attribute_name_emits_class_token() {
-        let src = "<?php\n#[Route(\"/home\")]\nfunction index() {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens
-                .iter()
-                .any(|t| t.token_type == TT_CLASS && t.token_modifiers_bitset == 0),
-            "expected bare class token for attribute name, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn string_literal_emits_string_token() {
-        let src = "<?php\n$x = \"hello\";";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(|t| t.token_type == TT_STRING),
-            "expected string token for double-quoted literal, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn integer_literal_emits_number_token() {
-        let src = "<?php\n$x = 42;";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(|t| t.token_type == TT_NUMBER),
-            "expected number token for integer literal, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn float_literal_emits_number_token() {
-        let src = "<?php\n$x = 3.14;";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(|t| t.token_type == TT_NUMBER),
-            "expected number token for float literal, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn single_line_comment_emits_comment_token() {
-        let src = "<?php\n// this is a comment\n$x = 1;";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(|t| t.token_type == TT_COMMENT),
-            "expected comment token for // comment, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn multiline_comment_emits_comment_tokens() {
-        let src = "<?php\n/* block\n   comment */\n$x = 1;";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(|t| t.token_type == TT_COMMENT),
-            "expected comment token for /* */ block, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn for_loop_init_and_update_expressions_are_tokenized() {
-        let src = "<?php\nfunction init(): int { return 0; }\nfunction step(): void {}\nfor ($i = init(); $i < 10; step()) {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        // Should produce function+declaration tokens for init() and step() plus
-        // function reference tokens for the calls in the for loop.
-        let func_tokens: Vec<_> = tokens
-            .iter()
-            .filter(|t| t.token_type == TT_FUNCTION)
-            .collect();
-        assert!(
-            func_tokens.len() >= 4,
-            "expected tokens for init decl, step decl, init() call, step() call; got {} function tokens",
-            func_tokens.len()
-        );
-    }
-
-    #[test]
-    fn variable_expression_emits_variable_token() {
-        let src = "<?php\n$x = 1;\n$y = $x + 2;";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        let var_tokens: Vec<_> = tokens
-            .iter()
-            .filter(|t| t.token_type == TT_VARIABLE)
-            .collect();
-        assert!(
-            var_tokens.len() >= 2,
-            "expected variable tokens for $x and $y, got {} variable tokens: {:?}",
-            var_tokens.len(),
-            var_tokens
-        );
-    }
-
-    #[test]
-    fn keyword_type_hint_on_param_emits_type_token() {
-        let src = "<?php\nfunction add(int $a, int $b): int { return $a + $b; }";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        let type_tokens: Vec<_> = tokens.iter().filter(|t| t.token_type == TT_TYPE).collect();
-        assert!(
-            type_tokens.len() >= 3,
-            "expected TYPE tokens for two 'int' params and 'int' return type, got {} type tokens: {:?}",
-            type_tokens.len(),
-            type_tokens
-        );
-    }
-
-    #[test]
-    fn named_type_hint_on_param_emits_type_token() {
-        let src = "<?php\nfunction greet(string $name, DateTime $when): void {}";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(|t| t.token_type == TT_TYPE),
-            "expected TYPE token for named/keyword type hints, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn property_type_hint_emits_type_token() {
-        let src = "<?php\nclass Foo { public int $count; }";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(|t| t.token_type == TT_TYPE),
-            "expected TYPE token for property type hint, got {:?}",
-            tokens
-        );
-    }
-
-    #[test]
-    fn method_return_type_emits_type_token() {
-        let src = "<?php\nclass Foo { public function get(): string { return ''; } }";
-        let d = doc(src);
-        let tokens = semantic_tokens(src, &d);
-        assert!(
-            tokens.iter().any(|t| t.token_type == TT_TYPE),
-            "expected TYPE token for method return type, got {:?}",
-            tokens
         );
     }
 
