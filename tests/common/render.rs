@@ -363,6 +363,43 @@ pub fn render_completion(resp: &Value) -> String {
         .join("\n")
 }
 
+/// Full-detail completion snapshot that includes kind, label, sortText, and detail.
+/// Items are sorted by sortText for deterministic snapshots. Use this for
+/// comprehensive assertions that verify all completion properties and ordering.
+pub fn render_completion_ordered(resp: &Value) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let items: Vec<Value> = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    if items.is_empty() {
+        return "<no completions>".to_owned();
+    }
+    let mut rows: Vec<(String, String)> = items
+        .iter()
+        .map(|i| {
+            let label = i["label"].as_str().unwrap_or("?");
+            let kind = completion_kind_name(i["kind"].as_u64().unwrap_or(0));
+            let sort = i["sortText"].as_str().unwrap_or(label).to_owned();
+            let detail = i["detail"].as_str().unwrap_or("");
+            let detail_suffix = if detail.is_empty() {
+                String::new()
+            } else {
+                format!(" | {detail}")
+            };
+            (sort.clone(), format!("{kind:<11} {label}{detail_suffix}"))
+        })
+        .collect();
+    rows.sort();
+    rows.into_iter()
+        .map(|(_, r)| r)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(crate) fn render_signature_help(resp: &Value) -> String {
     if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
         return format!("error: {err}");

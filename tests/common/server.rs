@@ -10,10 +10,11 @@ use super::fixture::{self, Cursor, Fixture, Range as FixtureRange};
 use super::render::{
     assert_highlights_match, assert_locations_match, canonicalize_workspace_edit,
     collect_navigation_annotations, render_call_hierarchy, render_code_actions, render_code_lens,
-    render_completion, render_document_symbols, render_folding_ranges, render_hover,
-    render_inlay_hints, render_inline_value, render_linked_editing_range, render_locations,
-    render_moniker, render_prepare_call_hierarchy, render_prepare_rename, render_selection_range,
-    render_semantic_tokens, render_signature_help, render_type_hierarchy, render_workspace_symbols,
+    render_completion, render_completion_ordered, render_document_symbols, render_folding_ranges,
+    render_hover, render_inlay_hints, render_inline_value, render_linked_editing_range,
+    render_locations, render_moniker, render_prepare_call_hierarchy, render_prepare_rename,
+    render_selection_range, render_semantic_tokens, render_signature_help, render_type_hierarchy,
+    render_workspace_symbols,
 };
 
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
@@ -1258,6 +1259,16 @@ impl TestServer {
         let c = opened.cursor().clone();
         let resp = self.completion(&c.path, c.line, c.character).await;
         render_completion(&resp)
+    }
+
+    /// Completion at `$0` with full ordered snapshot: kind, label, and detail.
+    /// Items are sorted by sortText for deterministic, reproducible snapshots.
+    /// Use this for comprehensive ordering and completeness assertions.
+    pub async fn check_completion_ordered(&mut self, src: &str) -> String {
+        let opened = self.open_fixture(src).await;
+        let c = opened.cursor().clone();
+        let resp = self.completion(&c.path, c.line, c.character).await;
+        render_completion_ordered(&resp)
     }
 
     /// Go-to-definition at `$0`, rendered as one `path:line:col-line:col` line
