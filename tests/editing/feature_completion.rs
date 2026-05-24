@@ -24,6 +24,60 @@ async fn labels(s: &mut TestServer, src: &str) -> Vec<String> {
         .collect()
 }
 
+/// Pretty-print completion list for readability (max 15 items)
+fn format_completions(labels: &[String]) -> String {
+    if labels.is_empty() {
+        return "<empty>".to_string();
+    }
+    let preview: Vec<_> = labels.iter().take(15).map(|l| format!("  {}", l)).collect();
+    let mut result = preview.join("\n");
+    if labels.len() > 15 {
+        result.push_str(&format!("\n  ... and {} more", labels.len() - 15));
+    }
+    result
+}
+
+/// Assert that all expected labels are present in completion results
+fn assert_labels_contain(labels: &[String], expected: &[&str], context: &str) {
+    let missing: Vec<&str> = expected
+        .iter()
+        .copied()
+        .filter(|e| !labels.contains(&e.to_string()))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "{context}\n\nExpected: {expected:?}\nMissing: {missing:?}\n\nActual completions ({} total):\n{}",
+        labels.len(),
+        format_completions(labels)
+    );
+}
+
+/// Assert that a label is NOT present in completion results
+fn assert_label_not_present(labels: &[String], unexpected: &str, context: &str) {
+    assert!(
+        !labels.contains(&unexpected.to_string()),
+        "{context}\n\nShould NOT contain: '{unexpected}'\n\nActual completions ({} total):\n{}",
+        labels.len(),
+        format_completions(labels)
+    );
+}
+
+/// Assert that completion list exactly contains expected labels (order-independent)
+fn assert_completions_exact(labels: &[String], expected: &[&str], context: &str) {
+    let expected_set: std::collections::HashSet<&str> = expected.iter().copied().collect();
+    let actual_set: std::collections::HashSet<&str> = labels.iter().map(|s| s.as_str()).collect();
+
+    if expected_set != actual_set {
+        let missing: Vec<_> = expected_set.difference(&actual_set).copied().collect();
+        let extra: Vec<_> = actual_set.difference(&expected_set).copied().collect();
+        panic!(
+            "{context}\n\nMissing: {missing:?}\nUnexpected: {extra:?}\n\nActual completions ({} total):\n{}",
+            labels.len(),
+            format_completions(labels)
+        );
+    }
+}
+
 #[tokio::test]
 async fn completion_arrow_method() {
     let mut s = TestServer::new().await;
@@ -1029,17 +1083,18 @@ $c = new Child(); $c->$0
 async fn completion_enum_arrow_name_property() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let ls = labels(
-        &mut s,
-        r#"<?php
+    let out = s
+        .check_completion(
+            r#"<?php
 enum Suit { case Hearts; }
 $s = Suit::Hearts; $s->$0
 "#,
-    )
-    .await;
+        )
+        .await;
+    // Enum instances expose ->name property
     assert!(
-        ls.iter().any(|l| l == "name"),
-        "enum Suit::Hearts->$0 must include 'name' property. Got: {ls:?}"
+        out.contains("name"),
+        "enum instance properties must include 'name'. Got:\n{out}"
     );
 }
 
@@ -1047,21 +1102,18 @@ $s = Suit::Hearts; $s->$0
 async fn completion_backed_enum_has_value_property() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let ls = labels(
-        &mut s,
-        r#"<?php
+    let out = s
+        .check_completion(
+            r#"<?php
 enum Status: string { case Active = 'active'; }
 $s = Status::Active; $s->$0
 "#,
-    )
-    .await;
+        )
+        .await;
+    // Backed enum instances expose both ->name and ->value properties
     assert!(
-        ls.iter().any(|l| l == "name"),
-        "backed enum Status::Active->$0 must include 'name' property. Got: {ls:?}"
-    );
-    assert!(
-        ls.iter().any(|l| l == "value"),
-        "backed enum Status::Active->$0 must include 'value' property. Got: {ls:?}"
+        out.contains("name") && out.contains("value"),
+        "backed enum must expose both 'name' and 'value' properties. Got:\n{out}"
     );
 }
 
@@ -1406,21 +1458,18 @@ $late = 2;
 async fn completion_array_destructuring_variables_in_scope() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let ls = labels(
-        &mut s,
-        r#"<?php
+    let out = s
+        .check_completion(
+            r#"<?php
 [$first, $second] = ['a', 'b'];
-$f$0
+$$0
 "#,
-    )
-    .await;
+        )
+        .await;
+    // Both destructured variables should be in scope
     assert!(
-        ls.iter().any(|l| l == "$first"),
-        "destructured [$first, $second] must include $first in completions. Got: {ls:?}"
-    );
-    assert!(
-        ls.iter().any(|l| l == "$second"),
-        "destructured [$first, $second] must include $second in completions. Got: {ls:?}"
+        out.contains("$first") && out.contains("$second"),
+        "array destructuring must track all variables in scope:\n{out}"
     );
 }
 
@@ -1553,17 +1602,15 @@ async fn completion_include_path_lists_php_files() {
     let mut s = TestServer::with_root(tmp.path()).await;
     s.validate_syntax(false);
     let ls = labels(&mut s, "<?php require './lib/$0").await;
-    assert!(
-        ls.iter().any(|l| l == "Helper.php"),
-        "require './lib/$0 must list PHP files from lib/. Got: {ls:?}"
+    assert_labels_contain(
+        &ls,
+        &["Helper.php", "Utils.php"],
+        "include path: require './lib/' lists PHP files",
     );
-    assert!(
-        ls.iter().any(|l| l == "Utils.php"),
-        "require './lib/$0 must list all PHP files from lib/. Got: {ls:?}"
-    );
-    assert!(
-        !ls.iter().any(|l| l == "README.md"),
-        "require './lib/$0 must NOT list non-PHP files like README.md. Got: {ls:?}"
+    assert_label_not_present(
+        &ls,
+        "README.md",
+        "include path: non-PHP files should be excluded",
     );
 }
 
