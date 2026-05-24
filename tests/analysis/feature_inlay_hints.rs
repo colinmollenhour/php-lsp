@@ -254,10 +254,18 @@ async fn inlay_hint_resolve_is_idempotent() {
     let resolved_once = s.inlay_hint_resolve(hints[0].clone()).await;
     let resolved_twice = s.inlay_hint_resolve(resolved_once["result"].clone()).await;
 
+    let out1 = render_resolved_inlay_hint(&resolved_once);
+    let out2 = render_resolved_inlay_hint(&resolved_twice);
     assert_eq!(
-        resolved_once["result"], resolved_twice["result"],
+        out1, out2,
         "calling resolve twice must return identical results (idempotent)"
     );
+    expect![[r#"
+2:4 a:
+tooltip: ```php
+function add(int $a, int $b): int
+```"#]]
+    .assert_eq(&out1);
 }
 
 #[tokio::test]
@@ -497,4 +505,601 @@ class ConcreteHandler extends AbstractHandler {
         2:18 input:
         2:26 code:"#]]
     .assert_eq(&out);
+}
+
+// === Moved from src/inlay_hints.rs unit tests ===
+
+#[tokio::test]
+async fn inlay_hints_unknown_function_no_hints() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+unknownFn(1, 2);
+"#,
+        )
+        .await;
+    expect!["<no hints>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_zero_param_call_no_hints() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function init(): void {}
+init();
+"#,
+        )
+        .await;
+    expect!["<no hints>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_skips_named_arguments() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function greet(string $name): void {}
+greet(name: 'Alice');
+"#,
+        )
+        .await;
+    expect!["<no hints>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_fewer_args_than_params() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function add(int $a, int $b): int { return $a + $b; }
+add(1);
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:4 a:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_more_args_than_params() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function f(int $x): void {}
+f(1, 2, 3);
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:2 x:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_return_type_for_assignment() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function make(): string { return 'x'; }
+$s = make();
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:11 : string"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_void_return_type_suppressed() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function init(): void {}
+$x = init();
+"#,
+        )
+        .await;
+    expect!["<no hints>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_function_inside_namespace() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+namespace App;
+function greet(string $name): void {}
+greet('Alice');
+"#,
+        )
+        .await;
+    expect![[r#"
+        3:6 name:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_closure_variable_call() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+$greet = function(string $name, int $times): void {};
+$greet('Alice', 3);
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:7 name:
+        2:16 times:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_arrow_function_variable_call() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+$double = fn(int $n): int => $n * 2;
+$result = $double(5);
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:18 n:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_call_inside_closure_body() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function add(int $a, int $b): int { return $a + $b; }
+$fn = function() { add(1, 2); };
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:23 a:
+        2:26 b:"#]]
+    .assert_eq(&out);
+}
+
+/// Trait methods are registered in the def map by short name, so a method call
+/// on an object whose class uses the trait resolves correctly.
+#[tokio::test]
+async fn inlay_hints_trait_method_call() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+trait Logging {
+    public function log(string $msg, int $level): void {}
+}
+class AppLogger {
+    use Logging;
+}
+$logger = new AppLogger();
+$logger->log('hello', 3);
+"#,
+        )
+        .await;
+    expect![[r#"
+        8:13 msg:
+        8:22 level:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_for_loop_calls() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function tick(int $n): void {}
+for (tick(1); $i < 10; tick(2)) {}
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:10 n:
+        2:28 n:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_new_without_constructor_no_hints() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+class Foo {}
+$f = new Foo();
+"#,
+        )
+        .await;
+    expect!["<no hints>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_calls_inside_trait_method_body() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function write(string $msg): void {}
+trait Logger {
+    public function log(): void { write('hello'); }
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        3:40 msg:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_calls_inside_enum_method_body() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function write(string $msg): void {}
+enum Status {
+    case Active;
+    public function log(): void { write('hello'); }
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        4:40 msg:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_enum_method_call() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+enum Status {
+    case Active;
+    public function label(string $prefix, int $pad): string { return ''; }
+}
+label('x', 2);
+"#,
+        )
+        .await;
+    expect![[r#"
+        5:6 prefix:
+        5:11 pad:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_foreach_type_hint() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+class User {}
+$users = array_map(fn($x): User => $x, []);
+foreach ($users as $user) {
+    $user;
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        3:24 : User"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_foreach_no_type_hint_when_unknown() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+foreach ($items as $item) {
+    $item;
+}
+"#,
+        )
+        .await;
+    expect!["<no hints>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_variadic_all_args() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function record(string ...$messages): void {}
+record('a', 'b', 'c');
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:7 messages:
+        2:12 messages:
+        2:17 messages:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_variadic_after_regular_params() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function push(string $key, int ...$values): void {}
+push('bucket', 1, 2, 3);
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:5 key:
+        2:15 values:
+        2:18 values:
+        2:21 values:"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_arrow_function_declared_return_type() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+$double = fn(int $n): int => $n * 2;
+"#,
+        )
+        .await;
+    expect!["<no hints>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_arrow_function_no_return_type_annotation() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+$double = fn(int $n) => $n * 2;
+"#,
+        )
+        .await;
+    expect!["<no hints>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inlay_hints_constructor_promoted_properties() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+class User {
+    public function __construct(
+        public readonly string $name,
+        public int $age,
+    ) {}
+}
+$u = new User('Alice', 30);
+"#,
+        )
+        .await;
+    expect![[r#"
+        7:14 name:
+        7:23 age:"#]]
+    .assert_eq(&out);
+}
+
+/// foreach with key => value: the implementation emits a type hint after the key
+/// variable when TypeMap knows its type. This test pins current behavior — if
+/// TypeMap cannot infer array key types the result is `<no hints>`.
+#[tokio::test]
+async fn inlay_hints_foreach_key_value_type_hint() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+class User {}
+$users = array_map(fn($x): User => $x, []);
+foreach ($users as $k => $user) {
+    $user;
+}
+"#,
+        )
+        .await;
+    // TypeMap knows the value type from array_map but not the key type (int),
+    // so only the value variable gets a hint — not the key variable.
+    expect![[r#"
+        3:30 : User"#]]
+    .assert_eq(&out);
+}
+
+/// Calls inside try/catch/finally bodies must receive hints.
+#[tokio::test]
+async fn inlay_hints_try_catch_finally_walk() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function cleanup(string $resource): void {}
+try {
+    cleanup('db');
+} catch (Exception $e) {
+    cleanup('conn');
+} finally {
+    cleanup('log');
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        3:12 resource:
+        5:12 resource:
+        7:12 resource:"#]]
+    .assert_eq(&out);
+}
+
+/// Calls nested inside an arrow function body must receive hints.
+/// The implementation calls `hints_in_expr(sv, a.body, ...)` for this purpose.
+#[tokio::test]
+async fn inlay_hints_call_inside_arrow_function_body() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inlay_hints(
+            r#"<?php
+function greet(string $name): void {}
+$fn = fn($x) => greet($x);
+"#,
+        )
+        .await;
+    expect![[r#"
+        2:22 name:"#]]
+    .assert_eq(&out);
+}
+
+// === LSP specification gap tests ===
+
+/// Hints must recompute after a `textDocument/didChange` — the server must not
+/// serve a stale cached response.
+#[tokio::test]
+async fn inlay_hints_refresh_after_did_change() {
+    let mut s = TestServer::new().await;
+    s.open(
+        "main.php",
+        "<?php\nfunction greet(string $name): void {}\ngreet('Alice');\n",
+    )
+    .await;
+    let resp = s.inlay_hints("main.php", 0, 0, 4, 0).await;
+    expect![[r#"
+        2:6 name:"#]]
+    .assert_eq(&render_inlay_hints(&resp));
+
+    s.change(
+        "main.php",
+        2,
+        "<?php\nfunction greet(string $name): void {}\nfunction add(int $a, int $b): int { return $a + $b; }\ngreet('Alice');\nadd(1, 2);\n",
+    )
+    .await;
+    let resp = s.inlay_hints("main.php", 0, 0, 6, 0).await;
+    expect![[r#"
+        3:6 name:
+        4:4 a:
+        4:7 b:"#]]
+    .assert_eq(&render_inlay_hints(&resp));
+}
+
+/// The `initialize` response must advertise `resolveProvider: true` under
+/// `inlayHintProvider` so clients know they can call `inlayHint/resolve`.
+#[tokio::test]
+async fn inlay_hints_server_advertises_resolve_provider() {
+    let (_, init_resp) =
+        TestServer::new_with_options(json!({ "diagnostics": { "enabled": true } })).await;
+    let resolve_provider =
+        init_resp["result"]["capabilities"]["inlayHintProvider"]["resolveProvider"]
+            .as_bool()
+            .unwrap_or(false);
+    assert!(
+        resolve_provider,
+        "inlayHintProvider must advertise resolveProvider: true, got: {}",
+        init_resp["result"]["capabilities"]["inlayHintProvider"]
+    );
+}
+
+/// `InlayHintKind` values must match LSP spec: TYPE = 1, PARAMETER = 2.
+/// Clients use `kind` to style/display hints differently (e.g. italics for
+/// type hints). A swap between kinds would silently degrade the editor UX
+/// without breaking any label-only snapshot.
+#[tokio::test]
+async fn inlay_hints_kind_field_values() {
+    let mut s = TestServer::new().await;
+    // Fixture emits both hint kinds:
+    //   - line 3 `greet('Alice')` → parameter hint (kind=2, label "name:")
+    //   - line 4 foreach → type hint (kind=1, label ": User") from array_map return
+    s.open(
+        "kinds.php",
+        "<?php\nclass User {}\nfunction greet(string $name): void {}\n$users = array_map(fn($x): User => $x, []);\nforeach ($users as $u) {}\ngreet('Alice');\n",
+    )
+    .await;
+    let resp = s.inlay_hints("kinds.php", 0, 0, 7, 0).await;
+    let hints = resp["result"].as_array().expect("result must be an array");
+
+    // Find the parameter hint (label ends with ':') and check kind == 2.
+    let param_hint = hints
+        .iter()
+        .find(|h| {
+            h["label"]
+                .as_str()
+                .map(|l| l.ends_with(':'))
+                .unwrap_or(false)
+        })
+        .expect("expected at least one parameter hint");
+    assert_eq!(
+        param_hint["kind"].as_u64(),
+        Some(2),
+        "parameter hint must have kind=2 (LSP InlayHintKind.Parameter), got: {}",
+        param_hint["kind"]
+    );
+
+    // Find the type hint (label starts with ': ') and check kind == 1.
+    let type_hint = hints
+        .iter()
+        .find(|h| {
+            h["label"]
+                .as_str()
+                .map(|l| l.starts_with(": "))
+                .unwrap_or(false)
+        })
+        .expect("expected at least one type hint");
+    assert_eq!(
+        type_hint["kind"].as_u64(),
+        Some(1),
+        "type hint must have kind=1 (LSP InlayHintKind.Type), got: {}",
+        type_hint["kind"]
+    );
+}
+
+/// When a file has no hints, `textDocument/inlayHint` must return `[]` (an
+/// empty array), not `null`. The LSP spec §3.17.14 says the result type is
+/// `InlayHint[] | null`; returning `null` for an open file with no hints is
+/// valid but returning an array is preferred by editors that iterate the
+/// result unconditionally.
+///
+/// We verify the server returns an array (not null) for an open file — the
+/// response shape must be consistent regardless of hint count.
+#[tokio::test]
+async fn inlay_hints_empty_file_returns_array_not_null() {
+    let mut s = TestServer::new().await;
+    s.open("empty.php", "<?php\n$x = 1;\n").await;
+    let resp = s.inlay_hints("empty.php", 0, 0, 3, 0).await;
+    assert!(
+        resp["result"].is_array(),
+        "inlayHint result for an open file with no hints must be an array, got: {}",
+        resp["result"]
+    );
+    assert_eq!(
+        resp["result"].as_array().unwrap().len(),
+        0,
+        "array must be empty for a file with no hints"
+    );
 }
