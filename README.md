@@ -74,53 +74,6 @@ See **[docs/configuration.md](docs/configuration.md)** for all options including
 
 ---
 
-## Comparison
-
-| Server | Language | License | Maintained |
-|---|---|---|---|
-| **php-lsp** | Rust | ✅ Free/OSS | ✅ Active |
-| Intelephense | TypeScript | ⚠️ Freemium | ✅ Active |
-| PHPantom | Rust | ✅ Free/OSS | ✅ Active |
-| Phpactor | PHP | ✅ Free/OSS | ✅ Active |
-| DEVSENSE | .NET | ⚠️ Freemium | ✅ Active |
-| Psalm LSP | PHP | ✅ Free/OSS | ✅ Active |
-| phpls | Go | ✅ Free/OSS | ✅ Active |
-| felixfbecker | PHP | ✅ Free/OSS | ❌ Abandoned |
-
-**Feature matrix:**
-
-| Feature | php-lsp | Intelephense | PHPantom | Phpactor | DEVSENSE | Psalm |
-|---|---|---|---|---|---|---|
-| Completion | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ limited |
-| Hover | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Go-to-definition | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Go-to-declaration | ✅ | 🔒 Premium | ✅ | ✅ | ✅ | ❌ |
-| Go-to-type-definition | ✅ | 🔒 Premium | ✅ | ❌ | ✅ | ❌ |
-| Find references | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Rename | ✅ | 🔒 Premium | ✅ | ✅ | ✅ | ❌ |
-| Call hierarchy | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| Type hierarchy | ✅ | 🔒 Premium | ✅ | ❌ | ✅ | ❌ |
-| Implementations | ✅ | 🔒 Premium | ✅ | ✅ | ✅ | ❌ |
-| Semantic tokens | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
-| Inlay hints | ✅ | 🔒 Premium | ✅ | ✅ | ✅ | ❌ |
-| Code lens | ✅ | 🔒 Premium | ✅ | ❌ | ✅ | ❌ |
-| Signature help | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Selection range | ✅ | 🔒 Premium | ✅ | ✅ | ✅ | ❌ |
-| Document highlight | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ |
-| Folding | ✅ | 🔒 Premium | ✅ | ❌ | ✅ | ❌ |
-| On-type formatting | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| Document links | ✅ | 🔒 Premium | ✅ | ❌ | ✅ | ❌ |
-| PSR-4 autoload | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| PhpStorm meta | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Static analysis | ✅ | ✅ | ✅ | ✅ | ✅ | ✅✅ |
-| Embedded HTML/JS/CSS | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ |
-| Linked editing | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
-| Laravel/framework aware | ❌ | ⚠️ plugin | ✅ built-in | ❌ | ⚠️ plugin | ❌ |
-| Debugger | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| Deep generics / PHPStan types | ⚠️ partial | ⚠️ partial | ✅ | ❌ | ✅ | ✅ |
-
----
-
 ## Contributing
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)**. Open an issue before starting non-trivial work. PRs require clean `cargo test` and `cargo clippy -- -D warnings`.
