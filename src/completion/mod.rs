@@ -453,10 +453,10 @@ pub fn filtered_completions_at(
             if let (Some(src), Some(pos), Some(uri)) = (source, position, doc_uri)
                 && let Some(prefix) = include_path_prefix(src, pos)
             {
+                // When in include/require context, return path completions (even if empty)
+                // instead of falling back to keywords/symbols
                 let items = include_path_completions(uri, &prefix);
-                if !items.is_empty() {
-                    return items;
-                }
+                return items;
             }
 
             // Feature 3: Sub-namespace \ completions outside use statement
@@ -762,8 +762,8 @@ fn match_arm_completions(
 /// so that absolute-path strings are left alone.
 fn include_path_prefix(source: &str, position: Position) -> Option<String> {
     let line = source.lines().nth(position.line as usize)?;
-    let trimmed = line.trim_start();
-    if !trimmed.starts_with("include") && !trimmed.starts_with("require") {
+    // Check if line contains include/require keyword (may be after <?php)
+    if !line.contains("include") && !line.contains("require") {
         return None;
     }
     // Find the string being typed
