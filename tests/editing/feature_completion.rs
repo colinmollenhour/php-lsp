@@ -999,3 +999,635 @@ test$0
         "calling resolve twice must return identical results (idempotent)"
     );
 }
+
+// === Arrow completion with type inference ===
+
+#[tokio::test]
+async fn completion_inherited_methods_via_arrow() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+class Base { public function baseMethod() {} }
+class Child extends Base { public function childMethod() {} }
+$c = new Child(); $c->$0
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l == "baseMethod"),
+        "missing inherited method"
+    );
+    assert!(
+        ls.iter().any(|l| l == "childMethod"),
+        "missing child method"
+    );
+}
+
+#[tokio::test]
+async fn completion_enum_arrow_name_property() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+enum Suit { case Hearts; }
+$s = Suit::Hearts; $s->$0
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l == "name"),
+        "enum must have ->name property"
+    );
+}
+
+#[tokio::test]
+async fn completion_backed_enum_has_value_property() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+enum Status: string { case Active = 'active'; }
+$s = Status::Active; $s->$0
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l == "name"),
+        "backed enum must have ->name"
+    );
+    assert!(
+        ls.iter().any(|l| l == "value"),
+        "backed enum must have ->value"
+    );
+}
+
+#[tokio::test]
+async fn completion_pure_enum_no_value_property() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+enum Suit { case Hearts; }
+$s = Suit::Hearts; $s->$0
+"#,
+    )
+    .await;
+    assert!(
+        !ls.iter().any(|l| l == "value"),
+        "pure enum must NOT have ->value property"
+    );
+}
+
+#[tokio::test]
+async fn completion_instanceof_narrows_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+class Foo { public function doFoo() {} }
+if ($x instanceof Foo) { $x->$0 }
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l == "doFoo"),
+        "instanceof narrowing must enable method completion"
+    );
+}
+
+#[tokio::test]
+async fn completion_constructor_chain_arrow() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+class Builder { public function build() {} public function reset() {} }
+(new Builder())->$0
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l == "build"),
+        "constructor chain must complete"
+    );
+    assert!(
+        ls.iter().any(|l| l == "reset"),
+        "constructor chain must complete"
+    );
+}
+
+#[tokio::test]
+async fn completion_nullsafe_arrow() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+class Service { public function run() {} public string $status = ''; }
+$s = new Service(); $s?->$0
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l == "run") || ls.iter().any(|l| l.contains("run")),
+        "nullsafe arrow must complete methods"
+    );
+}
+
+// === Named argument completions ===
+
+#[tokio::test]
+async fn completion_named_argument_after_open_paren() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function connect(string $host, int $port): void {}
+connect($0
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let uri = s.uri(&c.path);
+    let resp = s
+        .client()
+        .request(
+            "textDocument/completion",
+            serde_json::json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": c.line, "character": c.character },
+                "context": { "triggerKind": 2, "triggerCharacter": "(" },
+            }),
+        )
+        .await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let item_labels: Vec<String> = items
+        .iter()
+        .filter_map(|i| i["label"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        item_labels.contains(&"host:".to_owned()),
+        "named args must include host:"
+    );
+    assert!(
+        item_labels.contains(&"port:".to_owned()),
+        "named args must include port:"
+    );
+}
+
+// === Insert-text format (snippet vs plain call) ===
+
+#[tokio::test]
+async fn completion_function_with_params_gets_snippet() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function process(string $input): void {}
+pro$0
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let resp = s.completion(&c.path, c.line, c.character).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let process_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("process"))
+        .expect("process function not in completions");
+    assert_eq!(
+        process_item["insertTextFormat"].as_u64(),
+        Some(2),
+        "function with params must have SNIPPET format"
+    );
+    assert_eq!(
+        process_item["insertText"].as_str(),
+        Some("process($1)"),
+        "snippet text must have placeholder"
+    );
+}
+
+#[tokio::test]
+async fn completion_function_without_params_plain_call() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function doThing(): void {}
+doT$0
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let resp = s.completion(&c.path, c.line, c.character).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("doThing"))
+        .expect("doThing not in completions");
+    assert_eq!(
+        item["insertText"].as_str(),
+        Some("doThing()"),
+        "zero-param function must have plain call"
+    );
+    assert_ne!(
+        item["insertTextFormat"].as_u64(),
+        Some(2),
+        "zero-param function must not be snippet"
+    );
+}
+
+// === Use auto-import additionalTextEdits ===
+
+#[tokio::test]
+async fn completion_cross_file_class_adds_use_import() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"//- /main.php
+<?php
+namespace App;
+$x = new $0
+
+//- /lib/Mailer.php
+<?php
+namespace Lib;
+class Mailer {}
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let resp = s.completion(&c.path, c.line, c.character).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let mailer_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("Mailer"))
+        .expect("Mailer class not in completions");
+    let edits = mailer_item["additionalTextEdits"]
+        .as_array()
+        .expect("Mailer must have additionalTextEdits");
+    assert!(
+        !edits.is_empty(),
+        "must have edits for cross-namespace class"
+    );
+    let edit_text = edits[0]["newText"]
+        .as_str()
+        .expect("edit must have newText");
+    assert!(
+        edit_text.contains("use") && edit_text.contains("Mailer"),
+        "edit must contain use statement"
+    );
+}
+
+#[tokio::test]
+async fn completion_same_namespace_no_use_import() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"//- /main.php
+<?php
+namespace Lib;
+$x = new $0
+
+//- /Mailer.php
+<?php
+namespace Lib;
+class Mailer {}
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let resp = s.completion(&c.path, c.line, c.character).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let mailer_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("Mailer"))
+        .expect("Mailer must be in completions");
+    assert!(
+        mailer_item["additionalTextEdits"].is_null()
+            || mailer_item["additionalTextEdits"]
+                .as_array()
+                .map(|a| a.is_empty())
+                .unwrap_or(true),
+        "same-namespace class must not get use edit"
+    );
+}
+
+// === Readonly property detail ===
+
+#[tokio::test]
+async fn completion_readonly_property_shows_detail() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+class Config { public readonly string $name = ''; }
+$c = new Config(); $c->$0
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let resp = s.completion(&c.path, c.line, c.character).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let name_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("$name") || i["label"].as_str() == Some("name"))
+        .expect("$name property must be in completions");
+    assert_eq!(
+        name_item["detail"].as_str(),
+        Some("readonly"),
+        "readonly property must have detail"
+    );
+}
+
+// === Variable cursor-line scoping ===
+
+#[tokio::test]
+async fn completion_variable_after_cursor_excluded() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+$early = 1;
+$0
+$late = 2;
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l == "$early") || ls.iter().any(|l| l.contains("early")),
+        "$early before cursor must be in completions"
+    );
+    assert!(
+        !ls.iter().any(|l| l.contains("late")),
+        "$late after cursor must NOT be in completions"
+    );
+}
+
+#[tokio::test]
+async fn completion_array_destructuring_variables_in_scope() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+[$first, $second] = ['a', 'b'];
+$f$0
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l == "$first") || ls.iter().any(|l| l.contains("first")),
+        "destructured $first must be in completions"
+    );
+    assert!(
+        ls.iter().any(|l| l == "$second") || ls.iter().any(|l| l.contains("second")),
+        "destructured $second must be in completions"
+    );
+}
+
+#[tokio::test]
+async fn completion_array_destructuring_after_cursor_excluded() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+$0
+[$first] = ['a'];
+"#,
+    )
+    .await;
+    assert!(
+        !ls.iter().any(|l| l.contains("first")),
+        "destructured $first after cursor must NOT be in completions"
+    );
+}
+
+// === Match arm completions ===
+
+#[tokio::test]
+async fn completion_match_arm_suggests_enum_cases() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+enum Status { case Active; case Inactive; case Pending; }
+$s = Status::Active;
+match ($s) {
+    $0
+}
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l.contains("Active")),
+        "match arm must suggest enum cases"
+    );
+}
+
+// === Magic methods in class body ===
+
+#[tokio::test]
+async fn completion_magic_methods_in_class_body() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+class App {
+    $0
+}
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l == "__construct") || ls.iter().any(|l| l.contains("__construct")),
+        "class body must suggest __construct"
+    );
+    assert!(
+        ls.iter().any(|l| l == "__toString") || ls.iter().any(|l| l.contains("__toString")),
+        "class body must suggest __toString"
+    );
+}
+
+// === Union type completions ===
+
+#[tokio::test]
+async fn completion_union_type_param_both_methods() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+class Foo { public function fooMethod() {} }
+class Bar { public function barMethod() {} }
+function process(Foo|Bar $x): void { $x->$0 }
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l.contains("fooMethod")),
+        "union type must complete both class methods"
+    );
+    assert!(
+        ls.iter().any(|l| l.contains("barMethod")),
+        "union type must complete both class methods"
+    );
+}
+
+// === Use statement FQN completions ===
+
+#[tokio::test]
+async fn completion_use_statement_fqn_suggestions() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"//- /main.php
+<?php
+use $0
+
+//- /App/Services/Mailer.php
+<?php
+namespace App\Services;
+class Mailer {}
+"#,
+    )
+    .await;
+    assert!(
+        ls.iter().any(|l| l.contains("Mailer")),
+        "use statement must suggest FQN classes"
+    );
+}
+
+// === Include/require path completions ===
+
+#[tokio::test]
+async fn completion_include_path_lists_php_files() {
+    use std::fs;
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("lib")).unwrap();
+    fs::write(tmp.path().join("lib/Helper.php"), "<?php").unwrap();
+    fs::write(tmp.path().join("lib/Utils.php"), "<?php").unwrap();
+    fs::write(tmp.path().join("lib/README.md"), "# readme").unwrap();
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    let ls = labels(&mut s, "<?php require './lib/$0").await;
+    assert!(
+        ls.iter().any(|l| l == "Helper.php"),
+        "include completions must list PHP files"
+    );
+    assert!(
+        ls.iter().any(|l| l == "Utils.php"),
+        "include completions must list PHP files"
+    );
+    assert!(
+        !ls.iter().any(|l| l == "README.md"),
+        "include completions must NOT list non-PHP files"
+    );
+}
+
+#[tokio::test]
+async fn completion_include_path_insert_text_includes_prefix() {
+    use std::fs;
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/Boot.php"), "<?php").unwrap();
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    let opened = s.open_fixture("<?php require './src/$0").await;
+    let c = opened.cursor().clone();
+    let resp = s.completion(&c.path, c.line, c.character).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let boot_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("Boot.php"))
+        .expect("Boot.php must be in completions");
+    assert_eq!(
+        boot_item["insertText"].as_str(),
+        Some("./src/Boot.php"),
+        "insert text must include directory prefix"
+    );
+}
+
+#[tokio::test]
+async fn completion_include_path_nonexistent_dir_empty() {
+    use std::fs;
+    let tmp = tempfile::tempdir().unwrap();
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    let out = s.check_completion("<?php require './no-such-dir/$0").await;
+    assert_eq!(out, "<no completions>", "nonexistent dir must return empty");
+}
+
+#[tokio::test]
+async fn completion_include_path_folder_has_folder_kind() {
+    use std::fs;
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("modules")).unwrap();
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    let opened = s.open_fixture("<?php require '$0").await;
+    let c = opened.cursor().clone();
+    let resp = s.completion(&c.path, c.line, c.character).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let folder_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("modules") || i["label"].as_str() == Some("modules/"))
+        .expect("modules folder must be in completions");
+    assert_eq!(
+        folder_item["kind"].as_u64(),
+        Some(19),
+        "folder must have kind FOLDER (19)"
+    );
+    let insert = folder_item["insertText"].as_str().unwrap_or("");
+    assert!(insert.ends_with('/'), "folder insertText must end with /");
+}
