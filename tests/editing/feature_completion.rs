@@ -1039,7 +1039,7 @@ $s = Suit::Hearts; $s->$0
     .await;
     assert!(
         ls.iter().any(|l| l == "name"),
-        "enum must have ->name property"
+        "enum Suit::Hearts->$0 must include 'name' property. Got: {ls:?}"
     );
 }
 
@@ -1057,11 +1057,11 @@ $s = Status::Active; $s->$0
     .await;
     assert!(
         ls.iter().any(|l| l == "name"),
-        "backed enum must have ->name"
+        "backed enum Status::Active->$0 must include 'name' property. Got: {ls:?}"
     );
     assert!(
         ls.iter().any(|l| l == "value"),
-        "backed enum must have ->value"
+        "backed enum Status::Active->$0 must include 'value' property. Got: {ls:?}"
     );
 }
 
@@ -1415,12 +1415,12 @@ $f$0
     )
     .await;
     assert!(
-        ls.iter().any(|l| l == "$first") || ls.iter().any(|l| l.contains("first")),
-        "destructured $first must be in completions"
+        ls.iter().any(|l| l == "$first"),
+        "destructured [$first, $second] must include $first in completions. Got: {ls:?}"
     );
     assert!(
-        ls.iter().any(|l| l == "$second") || ls.iter().any(|l| l.contains("second")),
-        "destructured $second must be in completions"
+        ls.iter().any(|l| l == "$second"),
+        "destructured [$first, $second] must include $second in completions. Got: {ls:?}"
     );
 }
 
@@ -1437,8 +1437,8 @@ $0
     )
     .await;
     assert!(
-        !ls.iter().any(|l| l.contains("first")),
-        "destructured $first after cursor must NOT be in completions"
+        !ls.iter().any(|l| l == "$first"),
+        "destructuring [$first] after cursor should NOT be in scope. Got: {ls:?}"
     );
 }
 
@@ -1555,15 +1555,15 @@ async fn completion_include_path_lists_php_files() {
     let ls = labels(&mut s, "<?php require './lib/$0").await;
     assert!(
         ls.iter().any(|l| l == "Helper.php"),
-        "include completions must list PHP files"
+        "require './lib/$0 must list PHP files from lib/. Got: {ls:?}"
     );
     assert!(
         ls.iter().any(|l| l == "Utils.php"),
-        "include completions must list PHP files"
+        "require './lib/$0 must list all PHP files from lib/. Got: {ls:?}"
     );
     assert!(
         !ls.iter().any(|l| l == "README.md"),
-        "include completions must NOT list non-PHP files"
+        "require './lib/$0 must NOT list non-PHP files like README.md. Got: {ls:?}"
     );
 }
 
@@ -1586,11 +1586,15 @@ async fn completion_include_path_insert_text_includes_prefix() {
     let boot_item = items
         .iter()
         .find(|i| i["label"].as_str() == Some("Boot.php"))
-        .expect("Boot.php must be in completions");
+        .expect(&format!(
+            "Boot.php must be in completions for require './src/$0. Got items: {:#?}",
+            items
+        ));
     assert_eq!(
         boot_item["insertText"].as_str(),
         Some("./src/Boot.php"),
-        "insert text must include directory prefix"
+        "insertText for Boot.php must preserve path prefix './src/'. Got: {:?}",
+        boot_item["insertText"]
     );
 }
 
@@ -1601,7 +1605,10 @@ async fn completion_include_path_nonexistent_dir_empty() {
     let mut s = TestServer::with_root(tmp.path()).await;
     s.validate_syntax(false);
     let out = s.check_completion("<?php require './no-such-dir/$0").await;
-    assert_eq!(out, "<no completions>", "nonexistent dir must return empty");
+    assert_eq!(
+        out, "<no completions>",
+        "require './no-such-dir/$0 must return no completions (dir doesn't exist). Got: {out}"
+    );
 }
 
 #[tokio::test]
@@ -1622,12 +1629,19 @@ async fn completion_include_path_folder_has_folder_kind() {
     let folder_item = items
         .iter()
         .find(|i| i["label"].as_str() == Some("modules") || i["label"].as_str() == Some("modules/"))
-        .expect("modules folder must be in completions");
+        .expect(&format!(
+            "require '$0 must include 'modules' folder. Got items: {:#?}",
+            items
+        ));
     assert_eq!(
         folder_item["kind"].as_u64(),
         Some(19),
-        "folder must have kind FOLDER (19)"
+        "modules folder must have kind FOLDER (19). Got kind: {:?}",
+        folder_item["kind"]
     );
     let insert = folder_item["insertText"].as_str().unwrap_or("");
-    assert!(insert.ends_with('/'), "folder insertText must end with /");
+    assert!(
+        insert.ends_with('/'),
+        "modules folder insertText must end with '/'. Got: {insert:?}"
+    );
 }

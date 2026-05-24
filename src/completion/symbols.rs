@@ -194,7 +194,21 @@ fn collect_from_expression(expr: &php_ast::Expr<'_, '_>, items: &mut Vec<Complet
             // Array destructuring: [$a, $b] = ... or list($a, $b) = ...
             ExprKind::Array(elements) => {
                 for elem in elements.iter() {
+                    // Variables can be in the value (for indexed arrays) or as value/key pairs
                     if let ExprKind::Variable(name) = &elem.value.kind {
+                        let label = format!("${}", name.as_str());
+                        if label != "$this" {
+                            items.push(CompletionItem {
+                                label,
+                                kind: Some(CompletionItemKind::VARIABLE),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                    // Also check key (for associative destructuring like [key => $var])
+                    if let Some(key) = &elem.key
+                        && let ExprKind::Variable(name) = &key.kind
+                    {
                         let label = format!("${}", name.as_str());
                         if label != "$this" {
                             items.push(CompletionItem {
