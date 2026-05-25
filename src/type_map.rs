@@ -1,6 +1,7 @@
 /// Single-pass type inference: collects `$var = new ClassName()` assignments
 /// to map variable names to class names.  Used to scope method completions
-/// after `->`.
+/// after `->`. Also tracks method return types, function return types, and
+/// static method return types for factory patterns and method chaining.
 use std::collections::HashMap;
 
 use php_ast::{
@@ -12,6 +13,13 @@ use tower_lsp::lsp_types::Position;
 use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView};
 use crate::docblock::{docblock_before, parse_docblock};
 use crate::phpstorm_meta::PhpStormMeta;
+
+/// Maps function name → return class name. Used for function call return type resolution.
+pub type FunctionReturnsMap = HashMap<String, String>;
+
+/// Maps class name → static method name → return class name. Similar to MethodReturnsMap
+/// but for static methods, allowing factory method patterns like `Foo::create(): self`.
+pub type StaticMethodReturnsMap = HashMap<String, HashMap<String, String>>;
 
 /// Maps variable name (with `$`) → class name.
 #[derive(Debug, Default, Clone)]
@@ -131,9 +139,23 @@ pub fn build_method_returns(doc: &ParsedDoc) -> MethodReturnsMap {
     out
 }
 
+/// Pre-build a map of function_name → return_class_name for a single doc.
+pub fn build_function_returns(doc: &ParsedDoc) -> FunctionReturnsMap {
+    let mut out = HashMap::new();
+    collect_function_returns_stmts(doc.source(), &doc.program().stmts, &mut out);
+    out
+}
+
+/// Pre-build a map of class_name → static_method_name → return_class_name for a single doc.
+pub fn build_static_method_returns(doc: &ParsedDoc) -> StaticMethodReturnsMap {
+    let mut out = HashMap::new();
+    collect_static_method_returns_stmts(doc.source(), &doc.program().stmts, &mut out);
+    out
+}
+
 /// Look up `class.method() -> return_class` across a stack of per-doc maps.
 /// Returns the first match — later docs override earlier ones, matching the
-/// previous merge-based behavior.
+/// previous merge-based behavior. Works for both instance and static methods.
 fn lookup_method_return<'a>(
     maps: &'a [&'a MethodReturnsMap],
     class_name: &str,
@@ -147,6 +169,18 @@ fn lookup_method_return<'a>(
         }
     }
     None
+}
+
+/// Look up `class::method() -> return_class` in the method returns map.
+/// This handles static method calls like `Foo::create(): Foo`.
+/// Since collect_method_returns_stmts collects both instance and static methods,
+/// we can use the same lookup with the class name and static method name.
+fn lookup_static_method_return<'a>(
+    maps: &'a [&'a MethodReturnsMap],
+    class_name: &str,
+    method_name: &str,
+) -> Option<&'a str> {
+    lookup_method_return(maps, class_name, method_name)
 }
 
 fn collect_method_returns_stmts(
@@ -208,6 +242,62 @@ fn collect_method_returns_stmts(
     }
 }
 
+fn collect_function_returns_stmts(
+    source: &str,
+    stmts: &[Stmt<'_, '_>],
+    out: &mut FunctionReturnsMap,
+) {
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Function(f) => {
+                if let Some(ret) = extract_function_return_class(source, stmt.span.start, f) {
+                    out.insert(f.name.to_string(), ret);
+                }
+            }
+            StmtKind::Namespace(ns) => {
+                if let NamespaceBody::Braced(inner) = &ns.body {
+                    collect_function_returns_stmts(source, inner, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_static_method_returns_stmts(
+    source: &str,
+    stmts: &[Stmt<'_, '_>],
+    out: &mut StaticMethodReturnsMap,
+) {
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Class(c) => {
+                let class_name = match c.name {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                };
+                for member in c.members.iter() {
+                    if let ClassMemberKind::Method(m) = &member.kind
+                        && m.is_static
+                        && let Some(ret) =
+                            extract_method_return_class(source, member.span.start, m, &class_name)
+                    {
+                        out.entry(class_name.clone())
+                            .or_default()
+                            .insert(m.name.to_string(), ret);
+                    }
+                }
+            }
+            StmtKind::Namespace(ns) => {
+                if let NamespaceBody::Braced(inner) = &ns.body {
+                    collect_static_method_returns_stmts(source, inner, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn extract_method_return_class(
     source: &str,
     member_start: u32,
@@ -230,6 +320,34 @@ fn extract_method_return_class(
                 if short == "self" || short == "static" {
                     return Some(enclosing_class.to_string());
                 }
+                let first = short.chars().next().unwrap_or('_');
+                if first.is_uppercase() && !matches!(short, "void" | "never" | "null") {
+                    return Some(short.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_function_return_class(
+    source: &str,
+    function_start: u32,
+    f: &php_ast::FunctionDecl<'_, '_>,
+) -> Option<String> {
+    // 1. AST return type hint takes priority
+    if let Some(hint) = &f.return_type
+        && let Some(s) = type_hint_to_class_string(hint, None)
+    {
+        return Some(s);
+    }
+    // 2. @return docblock fallback
+    if let Some(raw) = docblock_before(source, function_start) {
+        let db = parse_docblock(&raw);
+        if let Some(ret) = db.return_type {
+            for part in ret.type_hint.split('|') {
+                let part = part.trim().trim_start_matches('\\').trim_start_matches('?');
+                let short = part.rsplit('\\').next().unwrap_or(part);
                 let first = short.chars().next().unwrap_or('_');
                 if first.is_uppercase() && !matches!(short, "void" | "never" | "null") {
                     return Some(short.to_string());
@@ -644,6 +762,19 @@ fn collect_types_expr(
                     && let Some(obj_class) = map.get(&format!("${}", obj_var.as_str())).cloned()
                     && let Some(ret_type) =
                         lookup_method_return(method_returns, &obj_class, method_name.as_str())
+                {
+                    map.insert(format!("${}", var_name.as_str()), ret_type.to_string());
+                }
+                // $result = SomeClass::staticMethod() — infer from static method return type.
+                // This handles factory methods like Foo::create(): Foo or Factory::make(): static
+                if let ExprKind::StaticMethodCall(smc) = &assign.value.kind
+                    && let ExprKind::Identifier(class_name) = &smc.class.kind
+                    && let Some(method_name) = smc.method.name_str()
+                    && let Some(ret_type) = lookup_static_method_return(
+                        method_returns,
+                        class_name.as_str(),
+                        method_name,
+                    )
                 {
                     map.insert(format!("${}", var_name.as_str()), ret_type.to_string());
                 }
