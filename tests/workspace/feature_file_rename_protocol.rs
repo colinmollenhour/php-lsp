@@ -117,7 +117,7 @@ class Class {}
         )
         .await;
     // Function imports should be recognized
-    expect!["<no hover>"].assert_eq(&hover);
+    expect![[r#"`use function App\helper;`"#]].assert_eq(&hover);
 }
 
 #[tokio::test]

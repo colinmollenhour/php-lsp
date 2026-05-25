@@ -248,12 +248,21 @@ pub fn hover_at(
     // cursor may be past the last word boundary.
     if let Some(line_text) = source.lines().nth(position.line as usize) {
         let trimmed = line_text.trim();
-        if trimmed.starts_with("use ") && !trimmed.starts_with("use function ") {
-            let fqn = trimmed
-                .strip_prefix("use ")
-                .unwrap_or("")
-                .trim_end_matches(';')
-                .trim();
+        if trimmed.starts_with("use ") {
+            let (prefix, content) = if trimmed.starts_with("use function ") {
+                (
+                    "use function ",
+                    trimmed.strip_prefix("use function ").unwrap_or(""),
+                )
+            } else if trimmed.starts_with("use const ") {
+                (
+                    "use const ",
+                    trimmed.strip_prefix("use const ").unwrap_or(""),
+                )
+            } else {
+                ("use ", trimmed.strip_prefix("use ").unwrap_or(""))
+            };
+            let fqn = content.trim_end_matches(';').trim();
             if !fqn.is_empty() {
                 let maybe_word = word_at_position(source, position);
                 let alias = fqn.rsplit('\\').next().unwrap_or(fqn);
@@ -265,7 +274,7 @@ pub fn hover_at(
                     return Some(Hover {
                         contents: HoverContents::Markup(MarkupContent {
                             kind: MarkupKind::Markdown,
-                            value: format!("`use {};`", fqn),
+                            value: format!("`{}{};`", prefix, fqn),
                         }),
                         range: hover_range,
                     });
