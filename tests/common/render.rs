@@ -1325,3 +1325,81 @@ pub fn render_workspace_diagnostic(resp: &Value, root_uri: &str) -> String {
 
     out.trim_end().to_owned()
 }
+
+/// Render a resolved `codeAction/resolve` response as snapshot-friendly text.
+/// Shows title, kind, and whether an edit was resolved.
+pub fn render_resolved_code_action(resp: &Value, root_uri: &str) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let result = &resp["result"];
+    if result.is_null() {
+        return "<unresolved>".to_owned();
+    }
+
+    let title = result["title"].as_str().unwrap_or("?");
+    let kind = result["kind"].as_str().unwrap_or("QuickFix");
+    let has_edit = !result["edit"].is_null();
+
+    let edit_summary = if has_edit {
+        if let Some(changes) = result["edit"]["changes"].as_object() {
+            let file_count = changes.len();
+            format!("edit: {file_count} file(s) modified")
+        } else {
+            "edit: (no changes)".to_owned()
+        }
+    } else {
+        "edit: (unresolved)".to_owned()
+    };
+
+    format!("{title} ({kind})\n{edit_summary}")
+}
+
+/// Render a resolved `codeLens/resolve` response as snapshot-friendly text.
+/// Shows range, command title, and command name.
+pub fn render_resolved_code_lens(resp: &Value) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let result = &resp["result"];
+    if result.is_null() {
+        return "<unresolved>".to_owned();
+    }
+
+    let line = result["range"]["start"]["line"].as_u64().unwrap_or(0);
+    let char = result["range"]["start"]["character"].as_u64().unwrap_or(0);
+    let title = result["command"]["title"].as_str().unwrap_or("?");
+    let cmd = result["command"]["command"].as_str().unwrap_or("?");
+
+    format!("L{line}:{char} {title} [{cmd}]")
+}
+
+/// Render a resolved `documentLink/resolve` response as snapshot-friendly text.
+/// Shows range and target URI.
+pub fn render_resolved_document_link(resp: &Value, root_uri: &str) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let result = &resp["result"];
+    if result.is_null() {
+        return "<unresolved>".to_owned();
+    }
+
+    let line = result["range"]["start"]["line"].as_u64().unwrap_or(0);
+    let char = result["range"]["start"]["character"].as_u64().unwrap_or(0);
+    let target = result["target"].as_str().unwrap_or("?");
+
+    // Strip root prefix if it's a file URI
+    let display_target = if target.starts_with("file://") {
+        let prefix = if root_uri.ends_with('/') {
+            root_uri.to_owned()
+        } else {
+            format!("{root_uri}/")
+        };
+        target.strip_prefix(&prefix).unwrap_or(target)
+    } else {
+        target
+    };
+
+    format!("L{line}:{char} -> {display_target}")
+}
