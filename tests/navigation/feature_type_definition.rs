@@ -1251,7 +1251,6 @@ function test(User $u$0): void {}
 /// Factory method returns: `Foo::create()` should resolve to Foo's type.
 /// This is a common pattern where static factory methods return instances of their class.
 #[tokio::test]
-#[ignore]
 async fn type_definition_factory_method_returns_self_type() {
     let mut s = TestServer::new().await;
     let out = s
@@ -1273,7 +1272,6 @@ $b$0->build();
 
 /// Factory method with explicit class return: `Factory::make()` returns `static`.
 #[tokio::test]
-#[ignore]
 async fn type_definition_factory_method_returns_static() {
     let mut s = TestServer::new().await;
     let out = s
@@ -1295,7 +1293,6 @@ $f$0->process();
 
 /// Factory method with explicit return type annotation.
 #[tokio::test]
-#[ignore]
 async fn type_definition_factory_method_with_explicit_return_type() {
     let mut s = TestServer::new().await;
     let out = s
