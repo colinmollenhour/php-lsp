@@ -13,6 +13,18 @@ pub use common::{
     render_workspace_symbols,
 };
 
+#[path = "editing/feature_code_action_extract_constant.rs"]
+mod feature_code_action_extract_constant;
+#[path = "editing/feature_code_action_extract_variable.rs"]
+mod feature_code_action_extract_variable;
+#[path = "editing/feature_code_action_implement_interface.rs"]
+mod feature_code_action_implement_interface;
+#[path = "editing/feature_code_action_inline_variable.rs"]
+mod feature_code_action_inline_variable;
+#[path = "editing/feature_code_action_phpdoc.rs"]
+mod feature_code_action_phpdoc;
+#[path = "editing/feature_code_action_return_type.rs"]
+mod feature_code_action_return_type;
 #[path = "editing/feature_code_actions.rs"]
 mod feature_code_actions;
 #[path = "editing/feature_completion.rs"]
