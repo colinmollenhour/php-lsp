@@ -1361,78 +1361,11 @@ impl TestServer {
         render_code_actions(&resp)
     }
 
-    /// Fire `textDocument/codeAction` at the fixture's selection or cursor, find the action
-    /// matching `title`, then return its edit rendered via `canonicalize_workspace_edit`.
-    /// Handles both eager actions (edit embedded in the initial response) and deferred actions
-    /// (resolved via `codeAction/resolve`). Returns an error message if no matching action exists.
-    pub async fn check_code_action_edit(&mut self, src: &str, title: &str) -> String {
-        let opened = self.open_fixture(src).await;
-        let resp = if let Some(r) = opened.fixture.range.clone() {
-            self.code_action_at(&r).await
-        } else {
-            let c = opened.cursor().clone();
-            self.code_action(&c.path, c.line, c.character, c.line, c.character)
-                .await
-        };
-
-        let Some(action) = resp["result"]
-            .as_array()
-            .and_then(|arr| arr.iter().find(|a| a["title"].as_str() == Some(title)))
-            .cloned()
-        else {
-            return format!("<action not found: {title}>");
-        };
-
-        // Eager: edit already present in the initial response
-        if action["edit"].is_object() {
-            return canonicalize_workspace_edit(&action["edit"], &self.uri(""));
-        }
-
-        // Deferred: needs codeAction/resolve
-        let resolved = self.code_action_resolve(action).await;
-        if let Some(err) = resolved.get("error").filter(|e| !e.is_null()) {
-            return format!("<resolve error: {err}>");
-        }
-        canonicalize_workspace_edit(&resolved["result"]["edit"], &self.uri(""))
-    }
-
     /// Fire `textDocument/codeAction`, find the action matching `title`, and return the
     /// complete final file content after applying all edits. Snapshot-asserts the full
     /// transformed file, not just the diffs.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let mut s = TestServer::new().await;
-    /// let content = s.check_code_action_new_file(
-    ///     r#"<?php class Greeter {
-    ///     public function greet(): string {
-    ///         return $0"Hello"$0;
-    ///     }
-    /// }"#,
-    ///     "Extract constant",
-    ///     "main.php"
-    /// ).await;
-    /// expect![[r#"<?php
-    /// class Greeter {
-    ///     private const HELLO = "Hello";
-    ///
-    ///     public function greet(): string {
-    ///         return self::HELLO;
-    ///     }
-    /// }"#]].assert_eq(&content);
-    /// ```
-    ///
-    /// Returns the complete file content after all code action edits have been applied.
-    /// This allows snapshot assertions to verify the full transformed result.
-    pub async fn check_code_action_new_file(
-        &mut self,
-        src: &str,
-        title: &str,
-        filename: &str,
-    ) -> String {
+    pub async fn check_code_action_apply(&mut self, src: &str, title: &str) -> String {
         let opened = self.open_fixture(src).await;
-
-        // Get the original file content (need it to apply edits properly)
         let original_content = opened.fixture.files[0].text.clone();
 
         let resp = if let Some(r) = opened.fixture.range.clone() {
@@ -1451,7 +1384,6 @@ impl TestServer {
             return format!("<action not found: {title}>");
         };
 
-        // Get the edit (eager or deferred)
         let edit = if action["edit"].is_object() {
             action["edit"].clone()
         } else {
@@ -1462,29 +1394,15 @@ impl TestServer {
             resolved["result"]["edit"].clone()
         };
 
-        // Find the file in the changes
         let Some(changes) = edit.get("changes").and_then(|c| c.as_object()) else {
             return "<no changes in edit>".to_string();
         };
 
-        // Look for the file matching the filename (may be URI or relative path)
-        let file_uri = changes
-            .keys()
-            .find(|uri| uri.contains(filename) || uri.ends_with(filename))
-            .cloned();
-
-        let Some(_uri) = file_uri else {
-            let files: Vec<_> = changes.keys().collect();
-            return format!("<file not found: {filename}. Available: {:?}>", files);
+        let Some(text_edits) = changes.values().next().and_then(|e| e.as_array()) else {
+            return "<no text edits>".to_string();
         };
 
-        let Some(text_edits) = changes.get(&_uri).and_then(|e| e.as_array()) else {
-            return "<no text edits for file>".to_string();
-        };
-
-        // Parse TextEdit objects and apply them to the original content
-        // Sort edits in reverse order (by position) to maintain indices during replacement
-        let mut edits_with_pos: Vec<_> = text_edits
+        let mut edits: Vec<_> = text_edits
             .iter()
             .filter_map(|edit| {
                 let range = edit.get("range")?;
@@ -1497,40 +1415,30 @@ impl TestServer {
             })
             .collect();
 
-        // Sort in reverse order so we can apply from end to start
-        edits_with_pos.sort_by(|a, b| (b.0.0, b.0.1).cmp(&(a.0.0, a.0.1)));
+        edits.sort_by(|a, b| (b.0.0, b.0.1).cmp(&(a.0.0, a.0.1)));
 
-        // Compute byte offsets for all edits first (before borrowing original_content)
         let lines: Vec<&str> = original_content.lines().collect();
-        let edits_with_bytes: Vec<_> = edits_with_pos
-            .into_iter()
-            .map(|((start_line, start_char, end_line, end_char), new_text)| {
-                // Convert line/char to byte offsets
-                let mut byte_start = 0;
-                for (i, line) in lines.iter().enumerate() {
-                    if i == start_line {
-                        byte_start += start_char;
-                        break;
-                    }
-                    byte_start += line.len() + 1; // +1 for newline
-                }
-
-                let mut byte_end = 0;
-                for (i, line) in lines.iter().enumerate() {
-                    if i == end_line {
-                        byte_end += end_char;
-                        break;
-                    }
-                    byte_end += line.len() + 1;
-                }
-
-                ((byte_start, byte_end), new_text)
-            })
-            .collect();
-
-        // Apply edits using computed byte offsets
         let mut result = original_content.clone();
-        for ((byte_start, byte_end), new_text) in edits_with_bytes {
+
+        for ((start_line, start_char, end_line, end_char), new_text) in edits {
+            let mut byte_start = 0;
+            for (i, line) in lines.iter().enumerate() {
+                if i == start_line {
+                    byte_start += start_char;
+                    break;
+                }
+                byte_start += line.len() + 1;
+            }
+
+            let mut byte_end = 0;
+            for (i, line) in lines.iter().enumerate() {
+                if i == end_line {
+                    byte_end += end_char;
+                    break;
+                }
+                byte_end += line.len() + 1;
+            }
+
             if byte_end <= result.len() && byte_start <= byte_end {
                 result.replace_range(byte_start..byte_end, &new_text);
             }

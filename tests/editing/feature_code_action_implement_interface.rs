@@ -9,7 +9,7 @@ async fn implement_single_interface_method() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 interface Logger { public function log(string $msg): void; }
 class $0App$0 implements Logger {}
@@ -18,7 +18,15 @@ class $0App$0 implements Logger {}
         )
         .await;
     expect![[r#"
-        // main.php
-        2:29-2:29 → "\n    public function log(string $msg): void\n    {\n        throw new \\RuntimeException('Not implemented');\n    }\n\n""#]]
-        .assert_eq(&out);
+        <?php
+        interface Logger { public function log(string $msg): void; }
+        class App implements Logger {
+            public function log(string $msg): void
+            {
+                throw new \RuntimeException('Not implemented');
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
 }

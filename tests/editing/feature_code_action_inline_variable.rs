@@ -9,7 +9,7 @@ async fn inline_variable_single_use() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 $greeting = $0"Hello"$0;
 echo $greeting;
