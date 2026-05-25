@@ -980,3 +980,84 @@ $p = new Parser();
         2:9-2:15 → "Reporter""#]]
     .assert_eq(&out);
 }
+
+/// Edge case: UTF-16 multibyte character handling in FQN.
+/// PHP supports Unicode identifiers. This test verifies that rename correctly
+/// calculates character positions when the FQN contains multibyte characters.
+/// Critical: must use UTF-16 code unit offsets, not byte offsets.
+/// Bug scenario: If using raw byte length instead of UTF-16 length, the end
+/// position would be wrong and the rename would truncate or extend incorrectly.
+#[tokio::test]
+async fn rename_multibyte_unicode_in_use_statement() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    // FQN "App\Été\OldName": contains Unicode characters É and é
+    // Each is 1 UTF-16 code unit but 2 bytes in UTF-8
+    let out = s
+        .check_rename(
+            r#"<?php
+use App\Été\OldName;
+$obj = new OldName$0();
+"#,
+            "NewName",
+        )
+        .await;
+    // Should correctly rename only the class name part (OldName → NewName)
+    // The use statement line should show the replacement position accounting for UTF-16
+    expect![[r#"
+        // main.php
+        1:12-1:19 → "NewName"
+        2:11-2:18 → "NewName""#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: FQN doesn't match due to partial name overlap.
+/// When renaming App\Services\Foo, should NOT match App\Services\FooExtra.
+/// This verifies the rename operation correctly enforces name boundaries.
+#[tokio::test]
+async fn rename_does_not_match_partial_fqn() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_rename(
+            r#"<?php
+use App\Services\FooExtra;
+use App\Services\Foo;
+$obj = new Foo$0();
+"#,
+            "Bar",
+        )
+        .await;
+    // Only Foo should be renamed to Bar; FooExtra stays untouched
+    // Line 1 (FooExtra) is not in the output because it's not renamed
+    // Line 2 (Foo) and Line 3 (usage) are renamed
+    expect![[r#"
+        // main.php
+        2:17-2:20 → "Bar"
+        3:11-3:14 → "Bar""#]]
+    .assert_eq(&out);
+}
+
+/// Edge case: Compound use statement with multiple imports.
+/// `use A, B;` when renaming A should only affect A, not B.
+#[tokio::test]
+async fn rename_multiple_imports_in_single_use_statement() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_rename(
+            r#"<?php
+use App\Logger, App\Parser;
+$l = new Logger$0();
+$p = new Parser();
+"#,
+            "Reporter",
+        )
+        .await;
+    // Only Logger should be renamed to Reporter; Parser stays the same
+    expect![[r#"
+        // main.php
+        1:8-1:14 → "Reporter"
+        2:9-2:15 → "Reporter""#]]
+    .assert_eq(&out);
+}
