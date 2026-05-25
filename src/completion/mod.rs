@@ -408,6 +408,31 @@ pub fn filtered_completions_at(
                             }
                         }
                         if !items.is_empty() {
+                            // Apply fuzzy filtering based on the typed prefix
+                            let prefix = before.strip_prefix(pre_arrow).unwrap_or("").to_string();
+                            if !prefix.is_empty() {
+                                items.retain(|i| {
+                                    // For properties (label starts with $), match against the
+                                    // name without the $. For methods/other items, match the
+                                    // label directly.
+                                    let match_against = if i.label.starts_with('$') {
+                                        i.label.strip_prefix('$').unwrap_or(&i.label)
+                                    } else {
+                                        &i.label
+                                    };
+                                    crate::util::fuzzy_camel_match(&prefix, match_against)
+                                });
+                                for item in &mut items {
+                                    let match_against = if item.label.starts_with('$') {
+                                        item.label.strip_prefix('$').unwrap_or(&item.label)
+                                    } else {
+                                        &item.label
+                                    };
+                                    item.sort_text =
+                                        Some(crate::util::camel_sort_key(&prefix, match_against));
+                                    item.filter_text = Some(item.label.clone());
+                                }
+                            }
                             return items;
                         }
                     }
@@ -530,6 +555,11 @@ pub fn filtered_completions_at(
                 normal_items.extend(superglobal_completions());
                 normal_items.extend(symbol_completions(doc));
                 all.extend(normal_items);
+
+                // Deduplicate by label (first occurrence wins)
+                let mut seen = std::collections::HashSet::new();
+                all.retain(|i| seen.insert(i.label.clone()));
+
                 return all;
             }
 

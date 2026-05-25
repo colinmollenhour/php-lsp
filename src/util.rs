@@ -30,10 +30,11 @@ pub(crate) fn fuzzy_camel_match(query: &str, candidate: &str) -> bool {
     let mut ci = 0usize;
     while qi < qchars.len() && ci < cchars.len() {
         let qc = qchars[qi];
-        // A "word boundary" in the candidate is: position 0, after '_', or
+        // A "word boundary" in the candidate is: position 0, after '_' or '$', or
         // an uppercase letter after a lowercase letter (camelCase transition).
         let is_boundary = ci == 0
             || cchars[ci - 1] == '_'
+            || cchars[ci - 1] == '$'
             || (cchars[ci].is_uppercase() && ci > 0 && cchars[ci - 1].is_lowercase());
         if is_boundary && cchars[ci].to_lowercase().next() == Some(qc) {
             qi += 1;
