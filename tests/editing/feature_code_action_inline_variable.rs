@@ -109,3 +109,44 @@ foreach ($0$items$0 as $item) {
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn inline_variable_with_complex_expression() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$result = $this->getValue() + 10 * 2;
+echo $0$result$0;
+"#,
+            "Inline variable '$result'",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        echo $this->getValue() + 10 * 2;
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inline_variable_multiple_uses_same_line() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$x = 5;
+echo $0$x$0 + $x;
+"#,
+            "Inline variable '$x'",
+        )
+        .await;
+    // Both uses should be replaced
+    expect![[r#"
+        <?php
+        echo 5 + 5;
+    "#]]
+    .assert_eq(&out);
+}

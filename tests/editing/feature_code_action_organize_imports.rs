@@ -294,3 +294,80 @@ $l2 = implode(",", []);$0
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn organize_imports_handles_uses_in_comments() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+use DateTime;
+use Unused;
+
+/**
+ * Working with DateTime class
+ * The DateTime is a built-in class
+ */
+class Handler {
+    public function create() {
+        return new DateTime();
+    }
+}$0
+"#,
+            "Organize imports",
+        )
+        .await;
+    // DateTime should be kept (used in code), Unused removed
+    // Comment mentions of DateTime should not affect removal
+    expect![[r#"
+        <?php
+        use DateTime;
+
+        /**
+         * Working with DateTime class
+         * The DateTime is a built-in class
+         */
+        class Handler {
+            public function create() {
+                return new DateTime();
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn organize_imports_handles_uses_in_strings() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+use Logger;
+use Unused;
+
+class Service {
+    public function log() {
+        $msg = "Using Logger class for logging";
+        return new Logger();
+    }
+}$0
+"#,
+            "Organize imports",
+        )
+        .await;
+    // Logger is used (new Logger() call), string mention shouldn't prevent removal of Unused
+    expect![[r#"
+        <?php
+        use Logger;
+
+        class Service {
+            public function log() {
+                $msg = "Using Logger class for logging";
+                return new Logger();
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}

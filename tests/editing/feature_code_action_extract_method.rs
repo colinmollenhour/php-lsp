@@ -222,3 +222,39 @@ class Processor {
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn extract_method_with_comments_in_selection() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class Logger {
+    public function log(): void {
+        $0// Start logging
+        echo "test";
+        // End logging$0
+    }
+}
+"#,
+            "Extract method",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        class Logger {
+            public function log(): void {
+                        $this->extractedMethod();
+
+            }
+
+            private function extractedMethod(): void
+            {
+                // Start logging
+                echo "test";
+                // End logging
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}
