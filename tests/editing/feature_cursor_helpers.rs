@@ -110,12 +110,16 @@ class MyClass {
     public string $name = 'test';
 }
 $obj = new MyClass();
-$obj->nam$0;
+echo $obj->nam$0e;
 "#,
         )
         .await;
     // Should show property info when hovering after ->
-    expect!["<no hover>"].assert_eq(&hover);
+    expect![[r#"
+        ```php
+        (property) public MyClass::$name: string
+        ```"#]]
+    .assert_eq(&hover);
 }
 
 // ── cursor_is_on_method_decl tests ──────────────────────────────────────
@@ -230,7 +234,11 @@ enum Status {
         )
         .await;
     // Should recognize enum method
-    expect!["<no hover>"].assert_eq(&hover);
+    expect![[r#"
+        ```php
+        public function label(): string
+        ```"#]]
+    .assert_eq(&hover);
 }
 
 #[tokio::test]
