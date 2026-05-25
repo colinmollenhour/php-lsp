@@ -37,6 +37,8 @@ mod feature_folding;
 mod feature_formatting;
 #[path = "editing/feature_hover.rs"]
 mod feature_hover;
+#[path = "editing/feature_item_resolve.rs"]
+mod feature_item_resolve;
 #[path = "editing/feature_linked_editing.rs"]
 mod feature_linked_editing;
 #[path = "editing/feature_selection_range.rs"]

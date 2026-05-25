@@ -625,6 +625,14 @@ impl TestServer {
         self.client.request("codeAction/resolve", action).await
     }
 
+    pub async fn code_lens_resolve(&mut self, lens: Value) -> Value {
+        self.client.request("codeLens/resolve", lens).await
+    }
+
+    pub async fn document_link_resolve(&mut self, link: Value) -> Value {
+        self.client.request("documentLink/resolve", link).await
+    }
+
     pub async fn rename(&mut self, path: &str, line: u32, character: u32, new_name: &str) -> Value {
         let uri = self.uri(path);
         self.client
