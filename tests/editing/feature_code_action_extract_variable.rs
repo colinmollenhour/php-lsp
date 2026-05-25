@@ -105,3 +105,36 @@ class Handler {
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn extract_variable_preserves_indentation_nested() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class Service {
+    public function process() {
+        if (true) {
+            return $01 + 2$0;
+        }
+    }
+}
+"#,
+            "Extract variable",
+        )
+        .await;
+    // Should create $extracted at the correct indentation level
+    expect![[r#"
+        <?php
+        class Service {
+            public function process() {
+                if (true) {
+                    $extracted = 1 + 2;
+                    return $extracted;
+                }
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}

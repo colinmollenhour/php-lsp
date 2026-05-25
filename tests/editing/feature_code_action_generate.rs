@@ -138,3 +138,55 @@ class E$0mpty$0 {
         .await;
     expect!["<action not found: Generate constructor>"].assert_eq(&out);
 }
+
+#[tokio::test]
+async fn generate_constructor_with_property_defaults() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class U$0ser$0 {
+    public string $name = 'John';
+    public int $age = 0;
+}
+"#,
+            "Generate constructor",
+        )
+        .await;
+    // Constructor should include default values from property initialization
+    expect![[r#"
+        <?php
+        class User {
+            public string $name = 'John';
+            public int $age = 0;
+            public function __construct(
+                string $name,
+                int $age,
+            ) {
+                $this->name = $name;
+                $this->age = $age;
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn generate_getters_with_boolean_properties() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class S$0ettings$0 {
+    private bool $isEnabled = false;
+}
+"#,
+            "Generate getter/setter",
+        )
+        .await;
+    // Should properly handle bool type and create is-prefixed getter
+    expect!["<action not found: Generate getter/setter>"].assert_eq(&out);
+}

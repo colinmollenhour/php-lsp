@@ -148,3 +148,65 @@ class $0ConsoleLogger$0 implements Logger {
         .await;
     expect!["<action not found: Implement missing method>"].assert_eq(&out);
 }
+
+#[tokio::test]
+async fn implement_interface_with_static_methods() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+interface Factory {
+    public static function create(): self;
+}
+class $0DefaultFactory$0 implements Factory {}
+"#,
+            "Implement missing method",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        interface Factory {
+            public static function create(): self;
+        }
+        class DefaultFactory implements Factory {
+            public static function create(): self
+            {
+                throw new \RuntimeException('Not implemented');
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implement_interface_with_variadic_parameters() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+interface Logger {
+    public function log(string ...$messages): void;
+}
+class $0ConsoleLogger$0 implements Logger {}
+"#,
+            "Implement missing method",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        interface Logger {
+            public function log(string ...$messages): void;
+        }
+        class ConsoleLogger implements Logger {
+            public function log(string ...$messages): void
+            {
+                throw new \RuntimeException('Not implemented');
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
+}
