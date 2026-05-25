@@ -5,17 +5,107 @@ use super::*;
 use expect_test::expect;
 
 #[tokio::test]
-async fn inline_variable_single_use() {
+async fn inline_variable_simple_expression() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
         .check_code_action_apply(
             r#"<?php
-$greeting = $0"Hello"$0;
-echo $greeting;
+$greeting = "Hello";
+echo $0$greeting$0;
 "#,
             "Inline variable '$greeting'",
         )
         .await;
-    expect!["<action not found: Inline variable '$greeting'>"].assert_eq(&out);
+    expect![[r#"
+        <?php
+        echo "Hello";
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inline_variable_numeric_expression() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$count = 42;
+$total = $0$count$0 * 2;
+"#,
+            "Inline variable '$count'",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        $total = 42 * 2;
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inline_variable_removes_assignment() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$x = 5;
+echo $0$x$0;
+echo $x;
+"#,
+            "Inline variable '$x'",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        echo 5;
+        echo 5;
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inline_variable_function_call() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$name = getName();
+echo "Hello " . $0$name$0;
+"#,
+            "Inline variable '$name'",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        echo "Hello " . getName();
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inline_variable_array_expression() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$items = [1, 2, 3];
+foreach ($0$items$0 as $item) {
+    echo $item;
+}
+"#,
+            "Inline variable '$items'",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        foreach ([1, 2, 3] as $item) {
+            echo $item;
+        }
+    "#]]
+    .assert_eq(&out);
 }
