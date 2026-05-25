@@ -25,6 +25,8 @@ mod feature_highlight;
 mod feature_moniker;
 #[path = "navigation/feature_references.rs"]
 mod feature_references;
+#[path = "navigation/feature_references_imports.rs"]
+mod feature_references_imports;
 #[path = "navigation/feature_rename.rs"]
 mod feature_rename;
 #[path = "navigation/feature_type_definition.rs"]
