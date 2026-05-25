@@ -9,7 +9,7 @@ async fn add_return_type_infers_int() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 function $0getCount$0() {
     return 42;
@@ -26,7 +26,7 @@ async fn add_return_type_void_when_no_return() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 function $0doSomething$0() {
     echo "hello";
@@ -36,8 +36,11 @@ function $0doSomething$0() {
         )
         .await;
     expect![[r#"
-        // main.php
-        1:22-1:22 → ": void""#]]
+        <?php
+        function doSomething(): void {
+            echo "hello";
+        }
+    "#]]
     .assert_eq(&out);
 }
 
@@ -46,7 +49,7 @@ async fn add_return_type_infers_string() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 function $0getName$0() {
     return "Alice";

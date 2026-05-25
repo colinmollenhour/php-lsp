@@ -8,7 +8,7 @@ use expect_test::expect;
 async fn extract_constant_string_in_class() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 class Greeter {
     public function greet(): string {
@@ -20,9 +20,14 @@ class Greeter {
         )
         .await;
     expect![[r#"
-        // main.php
-        2:0-2:0 → "    private const HELLO_WORLD = \"Hello, World!\";\n"
-        3:15-3:30 → "self::HELLO_WORLD""#]]
+        <?php
+        class Greeter {
+            private const HELLO_WORLD = "Hello, World!";
+            public function greet(): string {
+                return self::HELLO_WORLD;
+            }
+        }
+    "#]]
     .assert_eq(&out);
 }
 
@@ -30,7 +35,7 @@ class Greeter {
 async fn extract_constant_integer_in_class() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 class Timer {
     public function delay(): void {
@@ -42,9 +47,14 @@ class Timer {
         )
         .await;
     expect![[r#"
-        // main.php
-        2:0-2:0 → "    private const CONSTANT_42 = 42;\n"
-        3:14-3:16 → "self::CONSTANT_42""#]]
+        <?php
+        class Timer {
+            private const CONSTANT_42 = 42;
+            public function delay(): void {
+                sleep(self::CONSTANT_42);
+            }
+        }
+    "#]]
     .assert_eq(&out);
 }
 
@@ -52,7 +62,7 @@ class Timer {
 async fn extract_constant_float_in_class() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 class Calculator {
     public function ratio(): float {
@@ -64,9 +74,14 @@ class Calculator {
         )
         .await;
     expect![[r#"
-        // main.php
-        2:0-2:0 → "    private const CONSTANT_3_14 = 3.14;\n"
-        3:15-3:19 → "self::CONSTANT_3_14""#]]
+        <?php
+        class Calculator {
+            private const CONSTANT_3_14 = 3.14;
+            public function ratio(): float {
+                return self::CONSTANT_3_14;
+            }
+        }
+    "#]]
     .assert_eq(&out);
 }
 
@@ -74,7 +89,7 @@ class Calculator {
 async fn extract_constant_at_file_scope() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 function getName() {
     return $0"app"$0;
@@ -84,9 +99,12 @@ function getName() {
         )
         .await;
     expect![[r#"
-        // main.php
-        1:0-1:0 → "const APP = \"app\";\n"
-        2:11-2:16 → "APP""#]]
+        <?php
+        const APP = "app";
+        function getName() {
+            return APP;
+        }
+    "#]]
     .assert_eq(&out);
 }
 
@@ -94,7 +112,7 @@ function getName() {
 async fn extract_constant_in_interface() {
     let mut s = TestServer::new().await;
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 interface Status {
     const ACTIVE = $0true$0;

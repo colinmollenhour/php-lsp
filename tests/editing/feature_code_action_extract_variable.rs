@@ -9,7 +9,7 @@ async fn extract_variable_from_expression() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
-        .check_code_action_edit(
+        .check_code_action_apply(
             r#"<?php
 function calc() {
     echo $01 + 2$0;
@@ -19,8 +19,11 @@ function calc() {
         )
         .await;
     expect![[r#"
-        // main.php
-        2:0-2:0 → "    $extracted = 1 + 2;\n"
-        2:9-2:14 → "$extracted""#]]
+        <?php
+        function calc() {
+            $extracted = 1 + 2;
+            echo $extracted;
+        }
+    "#]]
     .assert_eq(&out);
 }
