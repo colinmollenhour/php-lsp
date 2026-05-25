@@ -1242,3 +1242,153 @@ function test(User $u$0): void {}
         src/Model/User.php:4:0-4:0"#]]
     .assert_eq(&out);
 }
+
+// ── Factory Method & Method Chaining (Phase 2A Improvements) ────────────
+// TODO: These require implementing support for tracking static method and
+// function call return types in the type_map module. Currently TypeMap only
+// tracks direct `new ClassName()` assignments.
+
+/// Factory method returns: `Foo::create()` should resolve to Foo's type.
+/// This is a common pattern where static factory methods return instances of their class.
+#[tokio::test]
+#[ignore]
+async fn type_definition_factory_method_returns_self_type() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Builder {
+    public static function create(): self { return new self(); }
+}
+$b = Builder::create();
+$b$0->build();
+"#,
+        )
+        .await;
+    // Should resolve Builder::create() return type (self) to Builder class
+    expect![[r#"
+        main.php:1:6-1:13"#]]
+    .assert_eq(&out);
+}
+
+/// Factory method with explicit class return: `Factory::make()` returns `static`.
+#[tokio::test]
+#[ignore]
+async fn type_definition_factory_method_returns_static() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Factory {
+    public static function make(): static { return new static(); }
+}
+$f = Factory::make();
+$f$0->process();
+"#,
+        )
+        .await;
+    // Should resolve Factory::make() return type (static) to Factory class
+    expect![[r#"
+        main.php:1:6-1:13"#]]
+    .assert_eq(&out);
+}
+
+/// Factory method with explicit return type annotation.
+#[tokio::test]
+#[ignore]
+async fn type_definition_factory_method_with_explicit_return_type() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class User {}
+class UserFactory {
+    public static function create(string $name): User {
+        return new User();
+    }
+}
+$u = UserFactory::create('Alice');
+$u$0->save();
+"#,
+        )
+        .await;
+    // Should resolve UserFactory::create() return type to User class
+    expect![[r#"
+        main.php:1:6-1:10"#]]
+    .assert_eq(&out);
+}
+
+/// Method chaining: `$obj->method1()->method2()` should resolve based on method1's return type.
+#[tokio::test]
+#[ignore]
+async fn type_definition_method_chaining_simple() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class QueryBuilder {
+    public function select(string $col): self { return $this; }
+    public function where(string $cond): self { return $this; }
+}
+$q = new QueryBuilder();
+$q->select('id')->where('active')$0->execute();
+"#,
+        )
+        .await;
+    // Should resolve the second ->where() call to QueryBuilder
+    expect![[r#"
+        main.php:1:6-1:18"#]]
+    .assert_eq(&out);
+}
+
+/// Method chaining with different return type: fluent interface returning different class.
+#[tokio::test]
+#[ignore]
+async fn type_definition_method_chaining_different_return_types() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Request {
+    public function withHeader(string $name): self { return $this; }
+}
+class Response {
+    public function withStatus(int $code): self { return $this; }
+}
+class Client {
+    public function request(): Request { return new Request(); }
+    public function response(): Response { return new Response(); }
+}
+$c = new Client();
+$r = $c->request()->withHeader('auth')$0->send();
+"#,
+        )
+        .await;
+    // Should resolve ->withHeader() to Request class
+    expect![[r#"
+        main.php:1:6-1:13"#]]
+    .assert_eq(&out);
+}
+
+/// Function call return type: `getValue()` should resolve based on return type annotation.
+#[tokio::test]
+#[ignore]
+async fn type_definition_function_call_return_type() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Document {}
+function getDocument(): Document {
+    return new Document();
+}
+$doc = getDocument();
+$doc$0->render();
+"#,
+        )
+        .await;
+    // Should resolve getDocument() return type to Document class
+    expect![[r#"
+        main.php:1:6-1:14"#]]
+    .assert_eq(&out);
+}

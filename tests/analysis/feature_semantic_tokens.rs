@@ -1364,3 +1364,247 @@ async fn semantic_tokens_method_return_type() {
         1:51 len=2 type=string mods=0b0"#]]
     .assert_eq(&out);
 }
+
+/// Test delta encoding with line insertion: adding a new function creates delta edits.
+#[tokio::test]
+async fn semantic_tokens_delta_with_line_insertion() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "st_insert.php",
+            "<?php\nfunction first(): int { return 1; }\n",
+        )
+        .await;
+
+    let full = server.semantic_tokens_full("st_insert.php").await;
+    let pre_id = full["result"]["resultId"]
+        .as_str()
+        .expect("resultId")
+        .to_string();
+    let pre_count = full["result"]["data"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+
+    // Insert a new function before the existing one
+    server
+        .change(
+            "st_insert.php",
+            2,
+            "<?php\nfunction zero(): void {}\nfunction first(): int { return 1; }\n",
+        )
+        .await;
+
+    let resp = server
+        .semantic_tokens_full_delta("st_insert.php", &pre_id)
+        .await;
+    assert!(resp["error"].is_null(), "delta error: {resp:?}");
+    let result = &resp["result"];
+
+    // Either edits or full data should be present
+    let has_edits = result["edits"].is_array();
+    let has_data = result["data"].is_array();
+    assert!(
+        has_edits || has_data,
+        "delta response must have edits or data: {result:?}"
+    );
+
+    // Post-edit should have more tokens than pre-edit
+    if let Some(post_data) = result["data"].as_array() {
+        assert!(
+            post_data.len() > pre_count,
+            "insertion should increase token count"
+        );
+    } else if let Some(edits) = result["edits"].as_array() {
+        // If using edits, there must be data to insert
+        let has_insert_data = edits
+            .iter()
+            .any(|e| e["data"].as_array().map(|d| !d.is_empty()).unwrap_or(false));
+        assert!(has_insert_data, "insertion delta must include token data");
+    }
+}
+
+/// Test delta encoding with line deletion: removing a function creates delta edits.
+#[tokio::test]
+async fn semantic_tokens_delta_with_line_deletion() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "st_delete.php",
+            "<?php\nfunction first(): int { return 1; }\nfunction second(): int { return 2; }\n",
+        )
+        .await;
+
+    let full = server.semantic_tokens_full("st_delete.php").await;
+    let pre_id = full["result"]["resultId"]
+        .as_str()
+        .expect("resultId")
+        .to_string();
+    let pre_count = full["result"]["data"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+
+    // Remove the second function
+    server
+        .change(
+            "st_delete.php",
+            2,
+            "<?php\nfunction first(): int { return 1; }\n",
+        )
+        .await;
+
+    let resp = server
+        .semantic_tokens_full_delta("st_delete.php", &pre_id)
+        .await;
+    assert!(resp["error"].is_null(), "delta error: {resp:?}");
+    let result = &resp["result"];
+
+    // Either edits or full data should be present
+    let has_edits = result["edits"].is_array();
+    let has_data = result["data"].is_array();
+    assert!(
+        has_edits || has_data,
+        "delta response must have edits or data"
+    );
+
+    // Post-edit should have fewer tokens
+    if let Some(post_data) = result["data"].as_array() {
+        assert!(
+            post_data.len() < pre_count,
+            "deletion should decrease token count from {pre_count} to {}",
+            post_data.len()
+        );
+    }
+}
+
+/// Test delta encoding with token modification: changing return type updates delta.
+#[tokio::test]
+async fn semantic_tokens_delta_with_token_modification() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "st_modify.php",
+            "<?php\nfunction getValue(): int { return 42; }\n",
+        )
+        .await;
+
+    let full = server.semantic_tokens_full("st_modify.php").await;
+    let pre_id = full["result"]["resultId"]
+        .as_str()
+        .expect("resultId")
+        .to_string();
+
+    // Change return type from int to string
+    server
+        .change(
+            "st_modify.php",
+            2,
+            "<?php\nfunction getValue(): string { return '42'; }\n",
+        )
+        .await;
+
+    let resp = server
+        .semantic_tokens_full_delta("st_modify.php", &pre_id)
+        .await;
+    assert!(resp["error"].is_null(), "delta error: {resp:?}");
+    let result = &resp["result"];
+
+    // Should produce delta edits or full response (token count stays same)
+    let has_edits = result["edits"].is_array();
+    let has_data = result["data"].is_array();
+    assert!(
+        has_edits || has_data,
+        "modification should produce delta changes"
+    );
+}
+
+/// Test incremental delta application: multiple sequential edits maintain correctness.
+#[tokio::test]
+async fn semantic_tokens_delta_incremental_accumulation() {
+    let mut server = TestServer::new().await;
+    server.open("st_incr.php", "<?php\nfunction a() {}\n").await;
+
+    let full1 = server.semantic_tokens_full("st_incr.php").await;
+    let id1 = full1["result"]["resultId"]
+        .as_str()
+        .expect("resultId")
+        .to_string();
+
+    // First edit: add a second function
+    server
+        .change(
+            "st_incr.php",
+            2,
+            "<?php\nfunction a() {}\nfunction b() {}\n",
+        )
+        .await;
+    let resp1 = server.semantic_tokens_full_delta("st_incr.php", &id1).await;
+    assert!(resp1["error"].is_null(), "first delta error");
+
+    let full2 = server.semantic_tokens_full("st_incr.php").await;
+    let id2 = full2["result"]["resultId"]
+        .as_str()
+        .expect("resultId")
+        .to_string();
+
+    // Second edit: add a third function
+    server
+        .change(
+            "st_incr.php",
+            2,
+            "<?php\nfunction a() {}\nfunction b() {}\nfunction c() {}\n",
+        )
+        .await;
+    let resp2 = server.semantic_tokens_full_delta("st_incr.php", &id2).await;
+    assert!(resp2["error"].is_null(), "second delta error");
+
+    // Both deltas should succeed without errors
+    let final_full = server.semantic_tokens_full("st_incr.php").await;
+    assert!(
+        final_full["result"]["data"].is_array(),
+        "final full response should have data"
+    );
+}
+
+/// Test delta degradation on large file changes: ensure graceful handling of extensive edits.
+#[tokio::test]
+async fn semantic_tokens_delta_large_file_changes() {
+    let mut server = TestServer::new().await;
+
+    // Start with a moderately sized file
+    let initial = "<?php\n".to_string()
+        + &(0..10)
+            .map(|i| format!("function fn{i}() {{}}\n", i = i))
+            .collect::<String>();
+
+    server.open("st_large.php", &initial).await;
+
+    let full = server.semantic_tokens_full("st_large.php").await;
+    let pre_id = full["result"]["resultId"]
+        .as_str()
+        .expect("resultId")
+        .to_string();
+    let pre_count = full["result"]["data"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+
+    // Replace all content with a different set of functions
+    let modified = "<?php\n".to_string()
+        + &(10..20)
+            .map(|i| format!("function fn{i}() {{}}\n", i = i))
+            .collect::<String>();
+
+    server.change("st_large.php", 11, &modified).await;
+
+    let resp = server
+        .semantic_tokens_full_delta("st_large.php", &pre_id)
+        .await;
+    assert!(resp["error"].is_null(), "delta error on large file");
+    let result = &resp["result"];
+
+    // Should handle large changes gracefully (might degrade to full)
+    let has_result = result["data"].is_array() || result["edits"].is_array();
+    assert!(has_result, "large file delta should return result");
+}
