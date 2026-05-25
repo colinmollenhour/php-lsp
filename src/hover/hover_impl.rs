@@ -178,6 +178,24 @@ fn scan_statements(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                                 .unwrap_or_default();
                             return Some(format!("case {}::{}{}", e.name, c.name, value_str));
                         }
+                        EnumMemberKind::Method(m) if m.name == word => {
+                            let prefix = format_method_prefix(
+                                m.visibility.as_ref(),
+                                m.is_static,
+                                m.is_abstract,
+                                m.is_final,
+                            );
+                            let params = format_params(&m.params);
+                            let ret = m
+                                .return_type
+                                .as_ref()
+                                .map(|r| format!(": {}", format_type_hint(r)))
+                                .unwrap_or_default();
+                            return Some(format!(
+                                "{}function {}({}){}",
+                                prefix, m.name, params, ret
+                            ));
+                        }
                         EnumMemberKind::ClassConst(k) if k.name == word => {
                             return Some(format_class_const(k));
                         }
