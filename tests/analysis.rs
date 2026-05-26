@@ -14,8 +14,16 @@ pub use common::{
 
 #[path = "analysis/feature_code_lens.rs"]
 mod feature_code_lens;
-#[path = "analysis/feature_diagnostics.rs"]
-mod feature_diagnostics;
+#[path = "analysis/feature_diagnostics_edge_cases.rs"]
+mod feature_diagnostics_edge_cases;
+#[path = "analysis/feature_diagnostics_inheritance.rs"]
+mod feature_diagnostics_inheritance;
+#[path = "analysis/feature_diagnostics_type_errors.rs"]
+mod feature_diagnostics_type_errors;
+#[path = "analysis/feature_diagnostics_undefined.rs"]
+mod feature_diagnostics_undefined;
+#[path = "analysis/feature_diagnostics_workspace.rs"]
+mod feature_diagnostics_workspace;
 #[path = "analysis/feature_inlay_hints.rs"]
 mod feature_inlay_hints;
 #[path = "analysis/feature_inline_value.rs"]
