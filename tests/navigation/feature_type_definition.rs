@@ -945,8 +945,8 @@ class User {
 }
 
 /// `parent` keyword in class parameter resolves to the enclosing class, not the parent.
-/// This is a known limitation - `parent` should resolve to the parent class, not the child.
-/// TODO: Implement proper `parent` keyword resolution using class inheritance info.
+/// The `parent` keyword now correctly resolves to the actual parent class.
+/// This is resolved by looking up the inheritance chain via ParsedDoc context.
 #[tokio::test]
 async fn type_definition_parent_keyword_limitation() {
     let mut s = TestServer::new().await;
@@ -1115,8 +1115,9 @@ function bootstrap(App $app$0): void {}
 // ── Import and Namespace Conflicts ────────────────────────────────────
 
 /// When both a use import and a local class have the same short name,
-/// imports should take precedence per PHP semantics.
-/// TODO: This requires more careful fallback logic to avoid breaking existing index-based lookups.
+/// Imports take precedence per PHP semantics.
+/// When an import explicitly names a class, fallback short-name search is skipped
+/// if the class is not found in its declared namespace.
 #[tokio::test]
 async fn type_definition_import_with_local_class_same_name() {
     let mut s = TestServer::new().await;
