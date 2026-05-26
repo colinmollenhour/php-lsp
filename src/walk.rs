@@ -737,10 +737,26 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllClassRefsVisitor {
     }
 
     fn visit_type_hint(&mut self, type_hint: &TypeHint<'arena, 'src>) -> ControlFlow<()> {
-        if let TypeHintKind::Named(name) = &type_hint.kind {
-            self.push_name(name);
+        match &type_hint.kind {
+            TypeHintKind::Named(name) => {
+                self.push_name(name);
+                walk_type_hint(self, type_hint)
+            }
+            TypeHintKind::Nullable(_) => walk_type_hint(self, type_hint),
+            TypeHintKind::Union(types) => {
+                for inner in types.iter() {
+                    let _ = self.visit_type_hint(inner);
+                }
+                ControlFlow::Continue(())
+            }
+            TypeHintKind::Intersection(types) => {
+                for inner in types.iter() {
+                    let _ = self.visit_type_hint(inner);
+                }
+                ControlFlow::Continue(())
+            }
+            TypeHintKind::Keyword(_, _) => ControlFlow::Continue(()),
         }
-        walk_type_hint(self, type_hint)
     }
 
     fn visit_catch_clause(&mut self, catch: &CatchClause<'arena, 'src>) -> ControlFlow<()> {
@@ -870,10 +886,26 @@ impl<'arena, 'src> Visitor<'arena, 'src> for ClassRefsVisitor<'_> {
     }
 
     fn visit_type_hint(&mut self, type_hint: &TypeHint<'arena, 'src>) -> ControlFlow<()> {
-        if let TypeHintKind::Named(name) = &type_hint.kind {
-            self.collect_name(name);
+        match &type_hint.kind {
+            TypeHintKind::Named(name) => {
+                self.collect_name(name);
+                walk_type_hint(self, type_hint)
+            }
+            TypeHintKind::Nullable(_) => walk_type_hint(self, type_hint),
+            TypeHintKind::Union(types) => {
+                for inner in types.iter() {
+                    let _ = self.visit_type_hint(inner);
+                }
+                ControlFlow::Continue(())
+            }
+            TypeHintKind::Intersection(types) => {
+                for inner in types.iter() {
+                    let _ = self.visit_type_hint(inner);
+                }
+                ControlFlow::Continue(())
+            }
+            TypeHintKind::Keyword(_, _) => ControlFlow::Continue(()),
         }
-        walk_type_hint(self, type_hint)
     }
 
     fn visit_catch_clause(&mut self, catch: &CatchClause<'arena, 'src>) -> ControlFlow<()> {

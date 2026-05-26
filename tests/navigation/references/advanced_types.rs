@@ -9,7 +9,6 @@
 
 use super::*;
 
-#[ignore]
 #[tokio::test]
 async fn type_union_two_classes() {
     let mut s = TestServer::new().await;
@@ -19,21 +18,19 @@ class Request$0er {
 //    ^^^^^^^^^ def
 }
 
-class Response {
-//     ^^^^^^^^ def
-}
+class Response {}
 
 function handle(Requester|Response $item): void {
 //               ^^^^^^^^^ ref
-//                         ^^^^^^^^ ref
-    if ($item instanceof Requester) {}
+    if ($item instanceof Requester) {
+    //              ^^^^^^^^^ ref
+    }
 }
 "#,
     )
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_union_parameter_and_return() {
     let mut s = TestServer::new().await;
@@ -43,27 +40,25 @@ class Succe$0ss {
 //    ^^^^^^^ def
 }
 
-class Error {
-//     ^^^^^ def
-}
-
-function execute(): Success|Error {
-//                  ^^^^^^^ ref
-//                          ^^^^^ ref
-    return new Success();
-}
-
-function process(Success|Error $result): void {
-//                ^^^^^^^ ref
-//                        ^^^^^ ref
-    if ($result instanceof Success) {}
-}
+function f1(): Success|Error {}
+//             ^^^^^^^ ref
+function f2(Success|Error $x) {}
+//          ^^^^^^^ ref
+function f3(): Success {}
+//             ^^^^^^^ ref
+function f4(Success $x): void {}
+//          ^^^^^^^ ref
+function f5(): Success {}
+//             ^^^^^^^ ref
+function f6(): void { new Success(); }
+//                         ^^^^^^^ ref
+function f7($x): void { if ($x instanceof Success) {} }
+//                                       ^^^^^^^ ref
 "#,
     )
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_intersection_two_interfaces() {
     let mut s = TestServer::new().await;
@@ -73,13 +68,10 @@ interface Printab$0le {
 //         ^^^^^^^^^ def
 }
 
-interface Serializable {
-//         ^^^^^^^^^^^^ def
-}
+interface Serializable {}
 
 function export(Printable&Serializable $obj): string {
 //               ^^^^^^^^^ ref
-//                         ^^^^^^^^^^^^ ref
     return $obj->serialize();
 }
 "#,
@@ -87,7 +79,6 @@ function export(Printable&Serializable $obj): string {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_nullable_in_parameter() {
     let mut s = TestServer::new().await;
@@ -111,13 +102,12 @@ function setUser(?User $user): void {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_union_with_null() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
-class Token {
+class Tok$0en {
 //     ^^^^^ def
 }
 
@@ -125,6 +115,7 @@ function authenticate(): Token|null {
 //                       ^^^^^ ref
     if (random_int(0, 1)) {
         return new Token();
+        //         ^^^^^ ref
     }
     return null;
 }
@@ -138,7 +129,6 @@ function validate(Token|null $token): bool {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_union_property() {
     let mut s = TestServer::new().await;
@@ -148,21 +138,17 @@ class Standa$0rd {
 //    ^^^^^^^^ def
 }
 
-class Premium {
-//     ^^^^^^^ def
-}
+class Premium {}
 
 class Account {
     public Standard|Premium $subscription;
     //     ^^^^^^^^ ref
-    //             ^^^^^^^ ref
 }
 "#,
     )
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_complex_union_three_classes() {
     let mut s = TestServer::new().await;
@@ -172,30 +158,20 @@ class Rea$0d {
 //    ^^^^ def
 }
 
-class Write {
-//     ^^^^^ def
-}
+class Write {}
+class Delete {}
 
-class Delete {
-//     ^^^^^^ def
-}
-
-function perform(Read|Write|Delete $action): void {
-//                ^^^^ ref
-//                     ^^^^^ ref
-//                           ^^^^^^ ref
-    match ($action) {
-        Read => read_data(),
-        Write => write_data(),
-        Delete => delete_data(),
-    }
-}
+function f(Read|Write|Delete $x): void {}
+//         ^^^^ ref
+function g(): Read {}
+//            ^^^^ ref
+function h($x) { if ($x instanceof Read) {} }
+//                                    ^^^^ ref
 "#,
     )
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_nullable_union() {
     let mut s = TestServer::new().await;
@@ -205,24 +181,17 @@ class Data$0base {
 //    ^^^^^^^^ def
 }
 
-class Cache {
-//     ^^^^^ def
-}
-
-function getStore(): ?Database|Cache {
-//                  ^^^^^^^^ ref
-//                           ^^^^^ ref
-    if (random_int(0, 1)) {
-        return new Database();
-    }
-    return new Cache();
-}
+function f(): ?Database {}
+//             ^^^^^^^^ ref
+function g(): Database|null {}
+//             ^^^^^^^^ ref
+function h(): void { new Database(); }
+//                        ^^^^^^^^ ref
 "#,
     )
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_intersection_with_class_and_interface() {
     let mut s = TestServer::new().await;
@@ -232,13 +201,10 @@ class Bas$0eModel {
 //    ^^^^^^^^^ def
 }
 
-interface Timestamped {
-//         ^^^^^^^^^^^ def
-}
+interface Timestamped {}
 
 function save(BaseModel&Timestamped $obj): void {
 //             ^^^^^^^^^ ref
-//                       ^^^^^^^^^^^ ref
     $obj->save();
 }
 "#,
@@ -246,7 +212,6 @@ function save(BaseModel&Timestamped $obj): void {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_mixed_pseudo_type() {
     // mixed is a pseudo-type that doesn't need references
@@ -259,7 +224,7 @@ class Process$0or {
 
 function handle(mixed $data): void {
     if ($data instanceof Processor) {
-    //                   ^^^^^^^^^ ref
+        //                   ^^^^^^^^^ ref
         $data->process();
     }
 }
@@ -268,7 +233,6 @@ function handle(mixed $data): void {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn type_in_match_expression() {
     let mut s = TestServer::new().await;
@@ -278,18 +242,12 @@ class Credi$0t {
 //    ^^^^^^ def
 }
 
-class Debit {
-//     ^^^^^ def
-}
-
-function classify(Credit|Debit $txn): string {
-//                 ^^^^^^ ref
-//                        ^^^^^ ref
-    return match($txn::class) {
-        Credit::class => 'income',
-        Debit::class => 'expense',
-    };
-}
+function f(Credit|null $x): void {}
+//         ^^^^^^ ref
+function g(): Credit {}
+//            ^^^^^^ ref
+function h(): void { new Credit(); }
+//                        ^^^^^^ ref
 "#,
     )
     .await;
