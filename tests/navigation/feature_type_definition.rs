@@ -948,7 +948,6 @@ class User {
 /// This is a known limitation - `parent` should resolve to the parent class, not the child.
 /// TODO: Implement proper `parent` keyword resolution using class inheritance info.
 #[tokio::test]
-#[ignore]
 async fn type_definition_parent_keyword_limitation() {
     let mut s = TestServer::new().await;
     let out = s
@@ -961,10 +960,9 @@ class Child extends Base {
 "#,
         )
         .await;
-    // `parent` is parsed as the enclosing class (Child) - limitation
-    // In PHP, this should resolve to Base, not Child
+    // `parent` now correctly resolves to the parent class (Base)
     expect![[r#"
-        main.php:2:6-2:11"#]]
+        main.php:1:6-1:10"#]]
     .assert_eq(&out);
 }
 
@@ -1120,7 +1118,6 @@ function bootstrap(App $app$0): void {}
 /// imports should take precedence per PHP semantics.
 /// TODO: This requires more careful fallback logic to avoid breaking existing index-based lookups.
 #[tokio::test]
-#[ignore]
 async fn type_definition_import_with_local_class_same_name() {
     let mut s = TestServer::new().await;
     let out = s
