@@ -92,32 +92,38 @@ pub fn goto_type_definition(
     }
 
     // Fallback: short-name search across all docs.
-    for candidate in type_candidates(&class_name) {
-        let cand_short = candidate
-            .trim_start_matches('\\')
-            .rsplit('\\')
-            .next()
-            .unwrap_or(candidate);
-        for (uri, other_doc) in all_docs {
-            let other_sv = other_doc.view();
-            if let Some(range) = find_class_range(other_sv, &other_doc.program().stmts, cand_short)
-            {
-                results.push(Location {
-                    uri: uri.clone(),
-                    range,
-                });
+    // Skip fallback if the class_name came from an import: imports take precedence,
+    // so if not found in their declared namespace, don't fall back to short-name search.
+    let is_from_import = imports.values().any(|v| v == &class_name);
+    if !is_from_import {
+        for candidate in type_candidates(&class_name) {
+            let cand_short = candidate
+                .trim_start_matches('\\')
+                .rsplit('\\')
+                .next()
+                .unwrap_or(candidate);
+            for (uri, other_doc) in all_docs {
+                let other_sv = other_doc.view();
+                if let Some(range) =
+                    find_class_range(other_sv, &other_doc.program().stmts, cand_short)
+                {
+                    results.push(Location {
+                        uri: uri.clone(),
+                        range,
+                    });
+                }
             }
         }
-    }
 
-    // Deduplicate and sort for consistent results
-    results.sort_by(|a, b| {
-        a.uri
-            .as_str()
-            .cmp(b.uri.as_str())
-            .then_with(|| a.range.start.line.cmp(&b.range.start.line))
-    });
-    results.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+        // Deduplicate and sort for consistent results
+        results.sort_by(|a, b| {
+            a.uri
+                .as_str()
+                .cmp(b.uri.as_str())
+                .then_with(|| a.range.start.line.cmp(&b.range.start.line))
+        });
+        results.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+    }
 
     results
 }
@@ -331,9 +337,11 @@ pub fn goto_type_definition_from_index(
 
     // First pass: look for exact FQN match (high priority)
     for candidate in type_candidates(&class_name) {
+        let cand_fqn = candidate.trim_start_matches('\\');
         for (uri, idx) in indexes {
             for cls in &idx.classes {
-                if cls.name.as_ref() == candidate {
+                let cls_fqn = cls.fqn.as_ref().trim_start_matches('\\');
+                if cls_fqn == cand_fqn {
                     let range = line_range(cls.start_line);
                     results.push(Location {
                         uri: uri.clone(),
@@ -357,34 +365,39 @@ pub fn goto_type_definition_from_index(
     }
 
     // Second pass: look for short name match (lower priority, may be ambiguous)
-    for candidate in type_candidates(&class_name) {
-        let cn_short = candidate.rsplit('\\').next().unwrap_or(candidate);
-        for (uri, idx) in indexes {
-            for cls in &idx.classes {
-                let short = cls
-                    .name
-                    .as_ref()
-                    .rsplit('\\')
-                    .next()
-                    .unwrap_or(cls.name.as_ref());
-                if short == cn_short {
-                    let range = line_range(cls.start_line);
-                    results.push(Location {
-                        uri: uri.clone(),
-                        range,
-                    });
+    // Skip fallback if the class_name came from an import: imports take precedence,
+    // so if not found in their declared namespace, don't fall back to short-name search.
+    let is_from_import = imports.values().any(|v| v == &class_name);
+    if !is_from_import {
+        for candidate in type_candidates(&class_name) {
+            let cn_short = candidate.rsplit('\\').next().unwrap_or(candidate);
+            for (uri, idx) in indexes {
+                for cls in &idx.classes {
+                    let short = cls
+                        .name
+                        .as_ref()
+                        .rsplit('\\')
+                        .next()
+                        .unwrap_or(cls.name.as_ref());
+                    if short == cn_short {
+                        let range = line_range(cls.start_line);
+                        results.push(Location {
+                            uri: uri.clone(),
+                            range,
+                        });
+                    }
                 }
             }
         }
-    }
 
-    results.sort_by(|a, b| {
-        a.uri
-            .as_str()
-            .cmp(b.uri.as_str())
-            .then_with(|| a.range.start.line.cmp(&b.range.start.line))
-    });
-    results.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+        results.sort_by(|a, b| {
+            a.uri
+                .as_str()
+                .cmp(b.uri.as_str())
+                .then_with(|| a.range.start.line.cmp(&b.range.start.line))
+        });
+        results.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+    }
 
     results
 }

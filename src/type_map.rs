@@ -61,6 +61,7 @@ impl TypeMap {
             std::slice::from_ref(&returns),
             &fn_returns,
             None,
+            doc,
         );
         TypeMap(map)
     }
@@ -86,6 +87,7 @@ impl TypeMap {
             &all_returns,
             &fn_returns,
             None,
+            doc,
         );
         TypeMap(map)
     }
@@ -128,6 +130,7 @@ impl TypeMap {
             &all_returns,
             &fn_returns,
             cursor_byte,
+            doc,
         );
         TypeMap(map)
     }
@@ -141,21 +144,21 @@ impl TypeMap {
 /// Pre-build a map of class_name → method_name → return_class_name for a single doc.
 pub fn build_method_returns(doc: &ParsedDoc) -> MethodReturnsMap {
     let mut out = HashMap::new();
-    collect_method_returns_stmts(doc.source(), &doc.program().stmts, &mut out);
+    collect_method_returns_stmts(doc.source(), &doc.program().stmts, &mut out, doc);
     out
 }
 
 /// Pre-build a map of function_name → return_class_name for a single doc.
 pub fn build_function_returns(doc: &ParsedDoc) -> FunctionReturnsMap {
     let mut out = HashMap::new();
-    collect_function_returns_stmts(doc.source(), &doc.program().stmts, &mut out);
+    collect_function_returns_stmts(doc.source(), &doc.program().stmts, &mut out, doc);
     out
 }
 
 /// Pre-build a map of class_name → static_method_name → return_class_name for a single doc.
 pub fn build_static_method_returns(doc: &ParsedDoc) -> StaticMethodReturnsMap {
     let mut out = HashMap::new();
-    collect_static_method_returns_stmts(doc.source(), &doc.program().stmts, &mut out);
+    collect_static_method_returns_stmts(doc.source(), &doc.program().stmts, &mut out, doc);
     out
 }
 
@@ -224,6 +227,7 @@ fn collect_method_returns_stmts(
     source: &str,
     stmts: &[Stmt<'_, '_>],
     out: &mut HashMap<String, HashMap<String, String>>,
+    doc: &ParsedDoc,
 ) {
     for stmt in stmts {
         match &stmt.kind {
@@ -234,8 +238,13 @@ fn collect_method_returns_stmts(
                 };
                 for member in c.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
-                        && let Some(ret) =
-                            extract_method_return_class(source, member.span.start, m, &class_name)
+                        && let Some(ret) = extract_method_return_class(
+                            source,
+                            member.span.start,
+                            m,
+                            &class_name,
+                            doc,
+                        )
                     {
                         out.entry(class_name.clone())
                             .or_default()
@@ -247,8 +256,13 @@ fn collect_method_returns_stmts(
                 let trait_name = t.name.to_string();
                 for member in t.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
-                        && let Some(ret) =
-                            extract_method_return_class(source, member.span.start, m, &trait_name)
+                        && let Some(ret) = extract_method_return_class(
+                            source,
+                            member.span.start,
+                            m,
+                            &trait_name,
+                            doc,
+                        )
                     {
                         out.entry(trait_name.clone())
                             .or_default()
@@ -260,8 +274,13 @@ fn collect_method_returns_stmts(
                 let enum_name = e.name.to_string();
                 for member in e.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind
-                        && let Some(ret) =
-                            extract_method_return_class(source, member.span.start, m, &enum_name)
+                        && let Some(ret) = extract_method_return_class(
+                            source,
+                            member.span.start,
+                            m,
+                            &enum_name,
+                            doc,
+                        )
                     {
                         out.entry(enum_name.clone())
                             .or_default()
@@ -271,7 +290,7 @@ fn collect_method_returns_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_method_returns_stmts(source, inner, out);
+                    collect_method_returns_stmts(source, inner, out, doc);
                 }
             }
             _ => {}
@@ -283,17 +302,18 @@ fn collect_function_returns_stmts(
     source: &str,
     stmts: &[Stmt<'_, '_>],
     out: &mut FunctionReturnsMap,
+    doc: &ParsedDoc,
 ) {
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) => {
-                if let Some(ret) = extract_function_return_class(source, stmt.span.start, f) {
+                if let Some(ret) = extract_function_return_class(source, stmt.span.start, f, doc) {
                     out.insert(f.name.to_string(), ret);
                 }
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_function_returns_stmts(source, inner, out);
+                    collect_function_returns_stmts(source, inner, out, doc);
                 }
             }
             _ => {}
@@ -305,6 +325,7 @@ fn collect_static_method_returns_stmts(
     source: &str,
     stmts: &[Stmt<'_, '_>],
     out: &mut StaticMethodReturnsMap,
+    doc: &ParsedDoc,
 ) {
     for stmt in stmts {
         match &stmt.kind {
@@ -316,8 +337,13 @@ fn collect_static_method_returns_stmts(
                 for member in c.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.is_static
-                        && let Some(ret) =
-                            extract_method_return_class(source, member.span.start, m, &class_name)
+                        && let Some(ret) = extract_method_return_class(
+                            source,
+                            member.span.start,
+                            m,
+                            &class_name,
+                            doc,
+                        )
                     {
                         out.entry(class_name.clone())
                             .or_default()
@@ -327,7 +353,7 @@ fn collect_static_method_returns_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_static_method_returns_stmts(source, inner, out);
+                    collect_static_method_returns_stmts(source, inner, out, doc);
                 }
             }
             _ => {}
@@ -340,10 +366,11 @@ fn extract_method_return_class(
     member_start: u32,
     m: &php_ast::MethodDecl<'_, '_>,
     enclosing_class: &str,
+    doc: &ParsedDoc,
 ) -> Option<String> {
     // 1. AST return type hint takes priority
     if let Some(hint) = &m.return_type
-        && let Some(s) = type_hint_to_class_string(hint, Some(enclosing_class))
+        && let Some(s) = type_hint_to_class_string(hint, Some(enclosing_class), Some(doc))
     {
         return Some(s);
     }
@@ -371,10 +398,11 @@ fn extract_function_return_class(
     source: &str,
     function_start: u32,
     f: &php_ast::FunctionDecl<'_, '_>,
+    doc: &ParsedDoc,
 ) -> Option<String> {
     // 1. AST return type hint takes priority
     if let Some(hint) = &f.return_type
-        && let Some(s) = type_hint_to_class_string(hint, None)
+        && let Some(s) = type_hint_to_class_string(hint, None, Some(doc))
     {
         return Some(s);
     }
@@ -405,6 +433,7 @@ fn extract_function_return_class(
 fn type_hint_to_class_string(
     hint: &TypeHint<'_, '_>,
     enclosing_class: Option<&str>,
+    doc: Option<&ParsedDoc>,
 ) -> Option<String> {
     use mir_types::Atomic;
     let union = mir_analyzer::parser::type_from_hint(hint, enclosing_class);
@@ -414,10 +443,26 @@ fn type_hint_to_class_string(
         .filter_map(|a| match a {
             Atomic::TNamedObject { fqcn, .. }
             | Atomic::TSelf { fqcn }
-            | Atomic::TStaticObject { fqcn }
-            | Atomic::TParent { fqcn } => {
+            | Atomic::TStaticObject { fqcn } => {
                 let short = fqcn.rsplit('\\').next().unwrap_or(fqcn.as_ref());
                 Some(short.to_string())
+            }
+            Atomic::TParent { fqcn } => {
+                // If we have the doc and enclosing class, resolve to the actual parent class
+                if let (Some(doc), Some(enc_class)) = (doc, enclosing_class) {
+                    if let Some(parent) = parent_class_name(doc, enc_class) {
+                        let short = parent.rsplit('\\').next().unwrap_or(&parent);
+                        Some(short.to_string())
+                    } else {
+                        // No parent found, fall back to enclosing class short name
+                        let short = fqcn.rsplit('\\').next().unwrap_or(fqcn.as_ref());
+                        Some(short.to_string())
+                    }
+                } else {
+                    // No doc context, use enclosing class as fallback
+                    let short = fqcn.rsplit('\\').next().unwrap_or(fqcn.as_ref());
+                    Some(short.to_string())
+                }
             }
             Atomic::TIntersection { parts } => {
                 let intersection_classes: Vec<String> = parts
@@ -426,10 +471,25 @@ fn type_hint_to_class_string(
                         part.types.iter().filter_map(|a| match a {
                             Atomic::TNamedObject { fqcn, .. }
                             | Atomic::TSelf { fqcn }
-                            | Atomic::TStaticObject { fqcn }
-                            | Atomic::TParent { fqcn } => {
+                            | Atomic::TStaticObject { fqcn } => {
                                 let short = fqcn.rsplit('\\').next().unwrap_or(fqcn.as_ref());
                                 Some(short.to_string())
+                            }
+                            Atomic::TParent { fqcn } => {
+                                // Same logic as above for parent in intersections
+                                if let (Some(doc), Some(enc_class)) = (doc, enclosing_class) {
+                                    if let Some(parent) = parent_class_name(doc, enc_class) {
+                                        let short = parent.rsplit('\\').next().unwrap_or(&parent);
+                                        Some(short.to_string())
+                                    } else {
+                                        let short =
+                                            fqcn.rsplit('\\').next().unwrap_or(fqcn.as_ref());
+                                        Some(short.to_string())
+                                    }
+                                } else {
+                                    let short = fqcn.rsplit('\\').next().unwrap_or(fqcn.as_ref());
+                                    Some(short.to_string())
+                                }
                             }
                             _ => None,
                         })
@@ -459,6 +519,7 @@ fn collect_types_stmts(
     method_returns: &[&MethodReturnsMap],
     function_returns: &FunctionReturnsMap,
     cursor_byte: Option<u32>,
+    doc: &ParsedDoc,
 ) {
     for stmt in stmts {
         // Check for `/** @var ClassName $varName */` docblock before this statement.
@@ -498,6 +559,7 @@ fn collect_types_stmts(
                 method_returns,
                 function_returns,
                 cursor_byte,
+                doc,
             ),
             StmtKind::Function(f) => {
                 // Only collect params/body when cursor is inside this function (or no cursor).
@@ -530,7 +592,7 @@ fn collect_types_stmts(
                 }
                 for p in f.params.iter() {
                     if let Some(hint) = &p.type_hint
-                        && let Some(class_str) = type_hint_to_class_string(hint, None)
+                        && let Some(class_str) = type_hint_to_class_string(hint, None, Some(doc))
                     {
                         map.insert(format!("${}", p.name), class_str);
                     }
@@ -543,6 +605,7 @@ fn collect_types_stmts(
                     method_returns,
                     function_returns,
                     cursor_byte,
+                    doc,
                 );
             }
             StmtKind::Class(c) => {
@@ -583,8 +646,11 @@ fn collect_types_stmts(
                         }
                         for p in m.params.iter() {
                             if let Some(hint) = &p.type_hint
-                                && let Some(class_str) =
-                                    type_hint_to_class_string(hint, class_name.as_deref())
+                                && let Some(class_str) = type_hint_to_class_string(
+                                    hint,
+                                    class_name.as_deref(),
+                                    Some(doc),
+                                )
                             {
                                 map.insert(format!("${}", p.name), class_str);
                             }
@@ -604,6 +670,7 @@ fn collect_types_stmts(
                                 method_returns,
                                 function_returns,
                                 cursor_byte,
+                                doc,
                             );
                         }
                     }
@@ -619,7 +686,8 @@ fn collect_types_stmts(
                         }
                         for p in m.params.iter() {
                             if let Some(hint) = &p.type_hint
-                                && let Some(class_str) = type_hint_to_class_string(hint, None)
+                                && let Some(class_str) =
+                                    type_hint_to_class_string(hint, None, Some(doc))
                             {
                                 map.insert(format!("${}", p.name), class_str);
                             }
@@ -633,6 +701,7 @@ fn collect_types_stmts(
                                 method_returns,
                                 function_returns,
                                 cursor_byte,
+                                doc,
                             );
                         }
                     }
@@ -648,7 +717,8 @@ fn collect_types_stmts(
                         }
                         for p in m.params.iter() {
                             if let Some(hint) = &p.type_hint
-                                && let Some(class_str) = type_hint_to_class_string(hint, None)
+                                && let Some(class_str) =
+                                    type_hint_to_class_string(hint, None, Some(doc))
                             {
                                 map.insert(format!("${}", p.name), class_str);
                             }
@@ -662,6 +732,7 @@ fn collect_types_stmts(
                                 method_returns,
                                 function_returns,
                                 cursor_byte,
+                                doc,
                             );
                         }
                     }
@@ -677,6 +748,7 @@ fn collect_types_stmts(
                         method_returns,
                         function_returns,
                         cursor_byte,
+                        doc,
                     );
                 }
             }
@@ -710,6 +782,7 @@ fn collect_types_stmts(
                     method_returns,
                     function_returns,
                     cursor_byte,
+                    doc,
                 );
                 for elseif in if_stmt.elseif_branches.iter() {
                     collect_types_stmts(
@@ -720,6 +793,7 @@ fn collect_types_stmts(
                         method_returns,
                         function_returns,
                         cursor_byte,
+                        doc,
                     );
                 }
                 if let Some(else_branch) = if_stmt.else_branch {
@@ -731,6 +805,7 @@ fn collect_types_stmts(
                         method_returns,
                         function_returns,
                         cursor_byte,
+                        doc,
                     );
                 }
             }
@@ -753,6 +828,7 @@ fn collect_types_stmts(
                     method_returns,
                     function_returns,
                     cursor_byte,
+                    doc,
                 );
             }
             // try { ... } catch (FooException $e) { ... }
@@ -766,6 +842,7 @@ fn collect_types_stmts(
                     method_returns,
                     function_returns,
                     cursor_byte,
+                    doc,
                 );
                 for catch in t.catches.iter() {
                     if let Some(var_name) = &catch.var
@@ -790,6 +867,7 @@ fn collect_types_stmts(
                         method_returns,
                         function_returns,
                         cursor_byte,
+                        doc,
                     );
                 }
                 if let Some(finally) = &t.finally {
@@ -801,6 +879,7 @@ fn collect_types_stmts(
                         method_returns,
                         function_returns,
                         cursor_byte,
+                        doc,
                     );
                 }
             }
@@ -835,6 +914,7 @@ fn collect_types_expr(
     method_returns: &[&MethodReturnsMap],
     function_returns: &FunctionReturnsMap,
     cursor_byte: Option<u32>,
+    doc: &ParsedDoc,
 ) {
     match &expr.kind {
         ExprKind::Assign(assign) => {
@@ -856,6 +936,7 @@ fn collect_types_expr(
                         method_returns,
                         function_returns,
                         cursor_byte,
+                        doc,
                     );
                     return;
                 }
@@ -946,6 +1027,7 @@ fn collect_types_expr(
                 method_returns,
                 function_returns,
                 cursor_byte,
+                doc,
             );
         }
 
@@ -1002,6 +1084,7 @@ fn collect_types_expr(
                 method_returns,
                 function_returns,
                 cursor_byte,
+                doc,
             );
             // Restore captured variable types: inner assignments inside the closure
             // body should not affect the outer scope's type for completions.
@@ -1026,6 +1109,7 @@ fn collect_types_expr(
                 method_returns,
                 function_returns,
                 cursor_byte,
+                doc,
             );
         }
 
