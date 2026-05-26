@@ -24,8 +24,12 @@ mod feature_file_ops;
 mod feature_file_rename_protocol;
 #[path = "workspace/feature_incremental.rs"]
 mod feature_incremental;
+#[path = "workspace/feature_lsp_gaps_verification.rs"]
+mod feature_lsp_gaps_verification;
 #[path = "workspace/feature_project_structures.rs"]
 mod feature_project_structures;
+#[path = "workspace/feature_pull_diagnostics.rs"]
+mod feature_pull_diagnostics;
 #[path = "workspace/feature_server.rs"]
 mod feature_server;
 #[path = "workspace/feature_workspace_folders.rs"]
