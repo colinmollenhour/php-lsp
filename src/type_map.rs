@@ -139,6 +139,18 @@ impl TypeMap {
     pub fn get<'a>(&'a self, var: &str) -> Option<&'a str> {
         self.0.get(var).map(|s| s.as_str())
     }
+
+    /// Find the innermost `MethodCall`/`NullsafeMethodCall` expression whose span
+    /// contains `cursor_byte`, then resolve the type of its object. Used by
+    /// `typeDefinition` when the cursor sits in a chain gap rather than on a word.
+    pub(crate) fn chain_type_at_cursor(
+        &self,
+        stmts: &[php_ast::Stmt<'_, '_>],
+        cursor_byte: u32,
+        method_returns: &[&MethodReturnsMap],
+    ) -> Option<String> {
+        find_call_type_in_stmts(stmts, cursor_byte, &self.0, method_returns)
+    }
 }
 
 /// Pre-build a map of class_name → method_name → return_class_name for a single doc.
@@ -165,7 +177,7 @@ pub fn build_static_method_returns(doc: &ParsedDoc) -> StaticMethodReturnsMap {
 /// Resolve the type of an arbitrary expression (variable, method call, etc).
 /// This enables method chaining: `$q->select()->where()` first resolves $q's type,
 /// then the return type of select(), then where() on that result.
-fn resolve_expr_type(
+pub(crate) fn resolve_expr_type(
     expr: &php_ast::Expr<'_, '_>,
     map: &HashMap<String, String>,
     method_returns: &[&MethodReturnsMap],
@@ -191,6 +203,79 @@ fn resolve_expr_type(
         }
         _ => None,
     }
+}
+
+/// Walk statements to find the innermost MethodCall/NullsafeMethodCall whose span
+/// contains `cursor_byte`, then resolve the type of its object. Returns None if
+/// no such expression is found.
+fn find_call_type_in_stmts(
+    stmts: &[Stmt<'_, '_>],
+    cursor: u32,
+    vars: &HashMap<String, String>,
+    method_returns: &[&MethodReturnsMap],
+) -> Option<String> {
+    for stmt in stmts {
+        if !span_contains_cursor(stmt.span, cursor) {
+            continue;
+        }
+        let result = match &stmt.kind {
+            StmtKind::Expression(e) => find_call_type_in_expr(e, cursor, vars, method_returns),
+            StmtKind::Return(Some(e)) => find_call_type_in_expr(e, cursor, vars, method_returns),
+            StmtKind::Echo(exprs) => exprs
+                .iter()
+                .find_map(|e| find_call_type_in_expr(e, cursor, vars, method_returns)),
+            StmtKind::Function(f) => find_call_type_in_stmts(&f.body, cursor, vars, method_returns),
+            StmtKind::Class(c) => c.members.iter().find_map(|m| {
+                if let ClassMemberKind::Method(method) = &m.kind
+                    && let Some(body) = &method.body
+                {
+                    find_call_type_in_stmts(body, cursor, vars, method_returns)
+                } else {
+                    None
+                }
+            }),
+            StmtKind::Namespace(ns) => {
+                if let NamespaceBody::Braced(inner) = &ns.body {
+                    find_call_type_in_stmts(inner, cursor, vars, method_returns)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if result.is_some() {
+            return result;
+        }
+    }
+    None
+}
+
+fn find_call_type_in_expr(
+    expr: &php_ast::Expr<'_, '_>,
+    cursor: u32,
+    vars: &HashMap<String, String>,
+    method_returns: &[&MethodReturnsMap],
+) -> Option<String> {
+    if !span_contains_cursor(expr.span, cursor) {
+        return None;
+    }
+    match &expr.kind {
+        ExprKind::MethodCall(mc) | ExprKind::NullsafeMethodCall(mc) => {
+            find_call_type_in_expr(mc.object, cursor, vars, method_returns)
+                // Cursor is in this call but not in a deeper sub-expression:
+                // resolve the full call (including its return type), not just the receiver.
+                .or_else(|| resolve_expr_type(expr, vars, method_returns))
+        }
+        ExprKind::Assign(a) => find_call_type_in_expr(a.value, cursor, vars, method_returns),
+        _ => None,
+    }
+}
+
+#[inline]
+fn span_contains_cursor(span: php_ast::Span, cursor: u32) -> bool {
+    // Use inclusive end so a cursor in the gap after a closing paren still matches
+    // the parent expression (e.g. `$q->where()$0->next()` — after `)` of where()).
+    cursor >= span.start && cursor <= span.end
 }
 
 /// Look up `class.method() -> return_class` across a stack of per-doc maps.

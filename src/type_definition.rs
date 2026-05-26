@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use crate::ast::{MethodReturnsMap, ParsedDoc, SourceView, format_type_hint, str_offset_in_range};
 use crate::moniker::resolve_fqn;
 use crate::references::collect_class_imports;
-use crate::type_map::TypeMap;
+use crate::type_map::{TypeMap, build_method_returns};
 use crate::util::word_at_position;
 
 /// Given the cursor position, resolve the type of the symbol and return all
@@ -25,24 +25,42 @@ pub fn goto_type_definition(
     all_docs: &[(Url, Arc<ParsedDoc>)],
     position: Position,
 ) -> Vec<Location> {
-    let word = match word_at_position(source, position) {
-        Some(w) => w,
-        None => return Vec::new(),
-    };
-
     let imports = collect_class_imports(doc);
     let type_map = TypeMap::from_doc_with_meta(doc, None, doc_returns);
-    let class_name = if word.starts_with('$') {
-        // TypeMap stores the short class name; resolve it to FQN using the
-        // current file's namespace + use imports so that `User` in
-        // `namespace App\Service` resolves to `App\Service\User`.
-        match type_map.get(&word) {
-            Some(short) => resolve_fqn(doc, short, &imports),
-            None => return Vec::new(),
+
+    let class_name = if let Some(word) = word_at_position(source, position) {
+        // Named symbol (variable or parameter)
+        if word.starts_with('$') {
+            // TypeMap stores the short class name; resolve it to FQN using the
+            // current file's namespace + use imports so that `User` in
+            // `namespace App\Service` resolves to `App\Service\User`.
+            match type_map.get(&word) {
+                Some(short) => resolve_fqn(doc, short, &imports),
+                None => return Vec::new(),
+            }
+        } else {
+            match param_type_for(&doc.program().stmts, &word) {
+                Some(raw) => resolve_fqn(doc, &raw, &imports),
+                None => return Vec::new(),
+            }
         }
     } else {
-        match param_type_for(&doc.program().stmts, &word) {
-            Some(raw) => resolve_fqn(doc, &raw, &imports),
+        // Cursor is not on a word — try resolving the type from a method-call chain.
+        let cursor_byte = doc.view().byte_of_position(position);
+        let owned_returns;
+        let chain_returns: &MethodReturnsMap = match doc_returns {
+            Some(r) => r,
+            None => {
+                owned_returns = build_method_returns(doc);
+                &owned_returns
+            }
+        };
+        match type_map.chain_type_at_cursor(
+            &doc.program().stmts,
+            cursor_byte,
+            std::slice::from_ref(&chain_returns),
+        ) {
+            Some(ty) => resolve_fqn(doc, &ty, &imports),
             None => return Vec::new(),
         }
     };
@@ -308,22 +326,36 @@ pub fn goto_type_definition_from_index(
     indexes: &[(Url, std::sync::Arc<crate::file_index::FileIndex>)],
     position: Position,
 ) -> Vec<Location> {
-    use crate::util::word_at_position;
-    let word = match word_at_position(source, position) {
-        Some(w) => w,
-        None => return Vec::new(),
-    };
-
     let imports = collect_class_imports(doc);
     let type_map = TypeMap::from_doc_with_meta(doc, None, doc_returns);
-    let class_name = if word.starts_with('$') {
-        match type_map.get(&word) {
-            Some(short) => resolve_fqn(doc, short, &imports),
-            None => return Vec::new(),
+    let class_name = if let Some(word) = word_at_position(source, position) {
+        if word.starts_with('$') {
+            match type_map.get(&word) {
+                Some(short) => resolve_fqn(doc, short, &imports),
+                None => return Vec::new(),
+            }
+        } else {
+            match param_type_for(&doc.program().stmts, &word) {
+                Some(raw) => resolve_fqn(doc, &raw, &imports),
+                None => return Vec::new(),
+            }
         }
     } else {
-        match param_type_for(&doc.program().stmts, &word) {
-            Some(raw) => resolve_fqn(doc, &raw, &imports),
+        let cursor_byte = doc.view().byte_of_position(position);
+        let owned_returns;
+        let chain_returns: &MethodReturnsMap = match doc_returns {
+            Some(r) => r,
+            None => {
+                owned_returns = build_method_returns(doc);
+                &owned_returns
+            }
+        };
+        match type_map.chain_type_at_cursor(
+            &doc.program().stmts,
+            cursor_byte,
+            std::slice::from_ref(&chain_returns),
+        ) {
+            Some(ty) => resolve_fqn(doc, &ty, &imports),
             None => return Vec::new(),
         }
     };

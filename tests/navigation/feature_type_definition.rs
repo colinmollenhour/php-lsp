@@ -1301,11 +1301,7 @@ $u$0->save();
     .assert_eq(&out);
 }
 
-/// Method chaining on expression results requires cursor position expression analysis.
-/// Currently only works for variables and parameters, not intermediate expressions.
-/// TODO: Implement expression-based type analysis at cursor position.
 #[tokio::test]
-#[ignore]
 async fn type_definition_method_chaining_simple() {
     let mut s = TestServer::new().await;
     let out = s
@@ -1326,10 +1322,7 @@ $q->select('id')->where('active')$0->execute();
     .assert_eq(&out);
 }
 
-/// Method chaining with different return types requires cursor position expression analysis.
-/// TODO: Implement expression-based type analysis at cursor position.
 #[tokio::test]
-#[ignore]
 async fn type_definition_method_chaining_different_return_types() {
     let mut s = TestServer::new().await;
     let out = s
@@ -1353,6 +1346,34 @@ $r = $c->request()->withHeader('auth')$0->send();
     // Should resolve ->withHeader() to Request class (from request() return type)
     expect![[r#"
         main.php:1:6-1:13"#]]
+    .assert_eq(&out);
+}
+
+/// Chaining where an intermediate method returns a *different* class (not self).
+/// Without the correct fallback (resolving the full call, not just its receiver),
+/// typeDefinition would return the receiver's class instead of the return class.
+#[tokio::test]
+async fn type_definition_method_chaining_non_self_return() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_type_definition(
+            r#"<?php
+class Pipeline {
+    public function stage(string $name): Stage { return new Stage(); }
+}
+class Stage {
+    public function run(): Result { return new Result(); }
+}
+class Result {}
+$p = new Pipeline();
+$p->stage('init')$0->run();
+"#,
+        )
+        .await;
+    // Cursor is after stage('init') — should resolve to Stage (return type of stage()),
+    // not Pipeline (the receiver type of stage()).
+    expect![[r#"
+        main.php:4:6-4:11"#]]
     .assert_eq(&out);
 }
 
