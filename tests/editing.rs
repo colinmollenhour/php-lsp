@@ -44,14 +44,14 @@ mod feature_document_link;
 mod feature_folding;
 #[path = "editing/feature_formatting.rs"]
 mod feature_formatting;
+#[path = "editing/feature_hover_advanced.rs"]
+mod feature_hover_advanced;
 #[path = "editing/feature_hover_basic.rs"]
 mod feature_hover_basic;
 #[path = "editing/feature_hover_cross_file.rs"]
 mod feature_hover_cross_file;
 #[path = "editing/feature_hover_inheritance.rs"]
 mod feature_hover_inheritance;
-#[path = "editing/feature_hover_special.rs"]
-mod feature_hover_special;
 #[path = "editing/feature_hover_types.rs"]
 mod feature_hover_types;
 #[path = "editing/feature_item_resolve.rs"]
