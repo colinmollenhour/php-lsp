@@ -385,6 +385,60 @@ pub fn assert_diagnostics(notif: &Value, expected: &[DiagnosticAnnotation]) {
     }
 }
 
+/// Validate that all annotations in a fixture align exactly with code positions.
+///
+/// This checks that annotation carets point to actual meaningful symbols
+/// (uppercase or underscore-starting words), not whitespace or punctuation.
+///
+/// Panics if any annotation is misaligned.
+pub fn validate_annotations(fixture: &Fixture) {
+    for file in &fixture.files {
+        let lines: Vec<&str> = file.text.lines().collect();
+
+        for anno in &file.annotations {
+            let line_no = anno.line as usize;
+            if line_no >= lines.len() {
+                panic!(
+                    "annotation targets non-existent line {} in file {}",
+                    line_no, file.path
+                );
+            }
+
+            let line = lines[line_no];
+            let start = anno.start_char as usize;
+            let end = anno.end_char as usize;
+
+            if end > line.len() {
+                panic!(
+                    "annotation [{}-{}] in file {} line {} exceeds line length {}",
+                    start,
+                    end,
+                    file.path,
+                    line_no,
+                    line.len()
+                );
+            }
+
+            let text = &line[start..end];
+
+            // Check that text starts with a symbol (uppercase letter, underscore, or digit)
+            if !text.chars().next().map_or(false, |c| {
+                c.is_uppercase() || c == '_' || c.is_ascii_digit()
+            }) {
+                panic!(
+                    "annotation misaligned in file {} line {}\n\
+                     line:     {}\n\
+                     target [{}:{}]: {:?}\n\
+                     message:  {:?}\n\
+                     \n\
+                     annotation carets should point to a type/symbol name, not whitespace",
+                    file.path, line_no, line, start, end, text, anno.message
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,5 +510,27 @@ mod tests {
         let a = &f.files[0].annotations[0];
         assert_eq!(a.severity, "warning");
         assert_eq!(a.message, "might be slow");
+    }
+
+    #[test]
+    fn annotation_validates_exact_column_alignment() {
+        // Valid: annotation points to a type name
+        let src = "<?php\nclass User {}\n// ^^^^ ref\n";
+        let f = parse(src);
+        validate_annotations(&f); // Should not panic
+
+        // Valid: annotation in a union type
+        let src2 = "<?php\nfunction f(User|int $x) {}\n// ^^^^ ref\n";
+        let f2 = parse(src2);
+        validate_annotations(&f2); // Should not panic
+    }
+
+    #[test]
+    #[should_panic(expected = "annotation misaligned")]
+    fn annotation_detects_misalignment() {
+        // Invalid: annotation points to whitespace instead of symbol
+        let src = "<?php\nclass User {}\n//  ^^^^ ref\n";
+        let f = parse(src);
+        validate_annotations(&f); // Should panic - points at 'U' in "User"
     }
 }

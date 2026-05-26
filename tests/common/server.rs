@@ -1633,6 +1633,7 @@ impl TestServer {
     /// it lives in; extra or missing locations cause a side-by-side diff.
     pub async fn check_references_annotated(&mut self, src: &str) {
         let opened = self.open_fixture(src).await;
+        fixture::validate_annotations(&opened.fixture);
         let c = opened.cursor().clone();
         let resp = self.references(&c.path, c.line, c.character, true).await;
         let expected = collect_navigation_annotations(&opened.fixture, &["def", "ref"]);
