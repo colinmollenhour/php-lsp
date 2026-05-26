@@ -2059,21 +2059,30 @@ impl LanguageServer for Backend {
         let doc_returns = self.docs.get_method_returns_salsa(uri);
         // First pass: open-file ParsedDocs give accurate character positions.
         let open_docs = self.docs.docs_for(&self.open_urls());
-        if let Some(loc) =
-            goto_type_definition(&source, &doc, doc_returns.as_deref(), &open_docs, position)
-        {
-            return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
+        let mut results =
+            goto_type_definition(&source, &doc, doc_returns.as_deref(), &open_docs, position);
+
+        // If no results from first pass, try background files via FileIndex (line-only positions).
+        if results.is_empty() {
+            let all_indexes = self.docs.all_indexes();
+            results = goto_type_definition_from_index(
+                &source,
+                &doc,
+                doc_returns.as_deref(),
+                &all_indexes,
+                position,
+            );
         }
-        // Second pass: background files via FileIndex (line-only positions).
-        let all_indexes = self.docs.all_indexes();
-        Ok(goto_type_definition_from_index(
-            &source,
-            &doc,
-            doc_returns.as_deref(),
-            &all_indexes,
-            position,
-        )
-        .map(GotoDefinitionResponse::Scalar))
+
+        // Format response: scalar for single result, array for multiple, none for empty
+        let response = match results.len() {
+            0 => None,
+            1 => Some(GotoDefinitionResponse::Scalar(
+                results.into_iter().next().unwrap(),
+            )),
+            _ => Some(GotoDefinitionResponse::Array(results)),
+        };
+        Ok(response)
     }
 
     async fn prepare_type_hierarchy(

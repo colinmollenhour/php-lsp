@@ -360,6 +360,27 @@ pub(crate) fn resolve_fqn(
     let is_fqn = name.starts_with('\\');
     let bare = name.trim_start_matches('\\');
 
+    // Fully-qualified names (`\Foo\Bar`) bypass everything below — they're
+    // already absolute.
+    if is_fqn {
+        return bare.to_string();
+    }
+
+    // PHP semantics: `use` imports take precedence over local class names.
+    // Check imports first before scanning for local declarations.
+    if let Some(fqn) = file_imports.get(bare) {
+        return fqn.clone();
+    }
+
+    // Qualified-via-aliased-use: `Sub\Inner` where `use App\Sub;` is in
+    // scope. The first segment of the qualified name is the alias; replace
+    // it with the alias's FQN and append the remainder.
+    if let Some((first, rest)) = bare.split_once('\\')
+        && let Some(prefix) = file_imports.get(first)
+    {
+        return format!("{prefix}\\{rest}");
+    }
+
     // Track the current namespace prefix across top-level statements so that
     // the declaration-form `namespace App;` (NamespaceBody::Simple) applies
     // to every subsequent class/function until the next namespace statement.
@@ -413,26 +434,6 @@ pub(crate) fn resolve_fqn(
             }
             _ => {}
         }
-    }
-
-    // Fully-qualified names (`\Foo\Bar`) bypass everything below — they're
-    // already absolute.
-    if is_fqn {
-        return bare.to_string();
-    }
-
-    // Not a local declaration — resolve via `use` statements.
-    if let Some(fqn) = file_imports.get(bare) {
-        return fqn.clone();
-    }
-
-    // Qualified-via-aliased-use: `Sub\Inner` where `use App\Sub;` is in
-    // scope. The first segment of the qualified name is the alias; replace
-    // it with the alias's FQN and append the remainder.
-    if let Some((first, rest)) = bare.split_once('\\')
-        && let Some(prefix) = file_imports.get(first)
-    {
-        return format!("{prefix}\\{rest}");
     }
 
     // No local declaration and no `use` import. When the file declares a

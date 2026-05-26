@@ -189,9 +189,10 @@ function process(Admin|User $u$0): void {}
 "#,
         )
         .await;
-    // Union types return the first matching type in the union
+    // Union types now return all matching types in the union
     expect![[r#"
-        main.php:1:6-1:11"#]]
+        main.php:1:6-1:11
+        main.php:2:6-2:10"#]]
     .assert_eq(&out);
 }
 
@@ -310,10 +311,8 @@ class Service {
     .assert_eq(&out);
 }
 
-/// Union types (PHP 8.0+) return the first matching type in the union.
-/// TODO: Support returning all matching types in union, or at least document clearly.
+/// Union types (PHP 8.0+) now return all matching types in the union.
 #[tokio::test]
-#[ignore]
 async fn type_definition_limitation_union_types_not_supported() {
     let mut s = TestServer::new().await;
     let out = s
@@ -325,18 +324,15 @@ function authenticate(Admin|User $a$0): void {}
 "#,
         )
         .await;
-    // Union types return the first matching type
+    // Union types return all matching types
     expect![[r#"
-        main.php:1:6-1:11"#]]
+        main.php:1:6-1:11
+        main.php:2:6-2:10"#]]
     .assert_eq(&out);
 }
 
-/// **LIMITATION**: Intersection types (PHP 8.1+) are not currently supported.
-/// `type_hint_to_class_string` returns `None` for intersection type hints, so TypeMap
-/// has no entry for the variable and type_definition returns nothing.
-/// TODO: Implement intersection type support (PHP 8.1+).
+/// Intersection types (PHP 8.1+) are now supported and return all matching types.
 #[tokio::test]
-#[ignore]
 async fn type_definition_limitation_intersection_types_not_supported() {
     let mut s = TestServer::new().await;
     let out = s
@@ -348,8 +344,11 @@ function process(Readable&Writable $rw$0): void {}
 "#,
         )
         .await;
-    // Intersection types are not yet supported
-    expect!["<none>"].assert_eq(&out);
+    // Intersection types return all matching types
+    expect![[r#"
+        main.php:1:10-1:18
+        main.php:2:10-2:18"#]]
+    .assert_eq(&out);
 }
 
 /// Aliased types in use imports are resolved via `collect_file_imports` which
@@ -884,11 +883,8 @@ function items(array $data$0): void {}
 
 // ── Variable Assignment and Factory Methods ────────────────────────────
 
-/// Variable assigned from another variable's type.
-/// TypeMap only tracks direct `new ClassName()` assignments, not variable-to-variable.
-/// TODO: Enhance TypeMap to track variable-to-variable assignment chains.
+/// Variable assigned from another variable's type is now tracked.
 #[tokio::test]
-#[ignore]
 async fn type_definition_variable_assigned_from_other() {
     let mut s = TestServer::new().await;
     let out = s
@@ -901,15 +897,14 @@ $copy$0->process();
 "#,
         )
         .await;
-    // Variable assignment chains are not tracked - TypeMap only tracks direct `new`
-    expect!["<none>"].assert_eq(&out);
+    // Variable-to-variable assignments are now tracked
+    expect![[r#"
+        main.php:1:6-1:12"#]]
+    .assert_eq(&out);
 }
 
-/// Nullable union type resolution.
-/// Note: `?Success|Error` is parsed as nullable Success or Error, both nullable.
-/// TODO: Support union types - currently returns only first match.
+/// Nullable union type resolution now returns all matching types.
 #[tokio::test]
-#[ignore]
 async fn type_definition_nullable_union_type() {
     let mut s = TestServer::new().await;
     let out = s
@@ -921,9 +916,10 @@ function handle(Success|Error $result$0): void {}
 "#,
         )
         .await;
-    // Union types return first match
+    // Union types return all matches
     expect![[r#"
-        main.php:1:6-1:13"#]]
+        main.php:1:6-1:13
+        main.php:2:6-2:11"#]]
     .assert_eq(&out);
 }
 
@@ -972,10 +968,8 @@ class Child extends Base {
     .assert_eq(&out);
 }
 
-/// `static` keyword cannot be used as a parameter type hint (only valid for return types).
-/// This test verifies that attempting to resolve a parameter named `static` fails.
+/// Parameter with Factory type resolves correctly (test previously ignored for wrong reason).
 #[tokio::test]
-#[ignore]
 async fn type_definition_static_return_type() {
     let mut s = TestServer::new().await;
     let out = s
@@ -1122,10 +1116,9 @@ function bootstrap(App $app$0): void {}
 
 // ── Import and Namespace Conflicts ────────────────────────────────────
 
-/// When both a use import and a local class have the same short name.
-/// Current behavior: resolves to local class in same namespace (not respecting import).
-/// This is a known limitation - imports are not fully respected in resolution.
-/// TODO: Fix import precedence - `use` imports should override same-namespace classes.
+/// When both a use import and a local class have the same short name,
+/// imports should take precedence per PHP semantics.
+/// TODO: This requires more careful fallback logic to avoid breaking existing index-based lookups.
 #[tokio::test]
 #[ignore]
 async fn type_definition_import_with_local_class_same_name() {
@@ -1146,17 +1139,12 @@ function log(Logger $l$0): void {}
 "#,
         )
         .await;
-    // When both import and local class exist, local class is found first
-    // This is the current behavior; imports don't fully override same-namespace classes
-    expect![[r#"
-        src/Logger.php:2:6-2:12"#]]
-    .assert_eq(&out);
+    // Import takes precedence: Different\Logger doesn't exist in fixture, so result is empty
+    expect!["<none>"].assert_eq(&out);
 }
 
-/// Aliased import with conflict.
-/// TODO: Fix aliased import resolution - should respect `use ... as ...` aliases.
+/// Aliased import is now correctly resolved.
 #[tokio::test]
-#[ignore]
 async fn type_definition_aliased_import_with_local_class() {
     let mut s = TestServer::new().await;
     let out = s
@@ -1180,7 +1168,7 @@ function log(AppLogger $l$0): void {}  // Explicitly uses alias
 "#,
         )
         .await;
-    // Alias resolves to App\Logger despite local Service\Logger existing
+    // Alias resolves to App\Logger, not the local App\Service\Logger
     expect![[r#"
         src/Logger.php:2:6-2:12"#]]
     .assert_eq(&out);
@@ -1315,7 +1303,9 @@ $u$0->save();
     .assert_eq(&out);
 }
 
-/// Method chaining: `$obj->method1()->method2()` should resolve based on method1's return type.
+/// Method chaining on expression results requires cursor position expression analysis.
+/// Currently only works for variables and parameters, not intermediate expressions.
+/// TODO: Implement expression-based type analysis at cursor position.
 #[tokio::test]
 #[ignore]
 async fn type_definition_method_chaining_simple() {
@@ -1332,13 +1322,14 @@ $q->select('id')->where('active')$0->execute();
 "#,
         )
         .await;
-    // Should resolve the second ->where() call to QueryBuilder
+    // Should resolve the chained ->where() call to QueryBuilder
     expect![[r#"
         main.php:1:6-1:18"#]]
     .assert_eq(&out);
 }
 
-/// Method chaining with different return type: fluent interface returning different class.
+/// Method chaining with different return types requires cursor position expression analysis.
+/// TODO: Implement expression-based type analysis at cursor position.
 #[tokio::test]
 #[ignore]
 async fn type_definition_method_chaining_different_return_types() {
@@ -1361,15 +1352,14 @@ $r = $c->request()->withHeader('auth')$0->send();
 "#,
         )
         .await;
-    // Should resolve ->withHeader() to Request class
+    // Should resolve ->withHeader() to Request class (from request() return type)
     expect![[r#"
         main.php:1:6-1:13"#]]
     .assert_eq(&out);
 }
 
-/// Function call return type: `getValue()` should resolve based on return type annotation.
+/// Function call return type is now resolved and tracked in TypeMap.
 #[tokio::test]
-#[ignore]
 async fn type_definition_function_call_return_type() {
     let mut s = TestServer::new().await;
     let out = s

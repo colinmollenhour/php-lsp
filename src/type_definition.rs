@@ -14,16 +14,21 @@ use crate::references::collect_class_imports;
 use crate::type_map::TypeMap;
 use crate::util::word_at_position;
 
-/// Given the cursor position, resolve the type of the symbol and return the
-/// location of that type's class/interface declaration.
+/// Given the cursor position, resolve the type of the symbol and return all
+/// matching locations for that type's class/interface declarations.
+/// Returns empty vec if no type found, single-element vec for simple types,
+/// multiple elements for union types (e.g., Admin|User).
 pub fn goto_type_definition(
     source: &str,
     doc: &ParsedDoc,
     doc_returns: Option<&MethodReturnsMap>,
     all_docs: &[(Url, Arc<ParsedDoc>)],
     position: Position,
-) -> Option<Location> {
-    let word = word_at_position(source, position)?;
+) -> Vec<Location> {
+    let word = match word_at_position(source, position) {
+        Some(w) => w,
+        None => return Vec::new(),
+    };
 
     let imports = collect_class_imports(doc);
     let type_map = TypeMap::from_doc_with_meta(doc, None, doc_returns);
@@ -31,12 +36,18 @@ pub fn goto_type_definition(
         // TypeMap stores the short class name; resolve it to FQN using the
         // current file's namespace + use imports so that `User` in
         // `namespace App\Service` resolves to `App\Service\User`.
-        let short = type_map.get(&word)?.to_string();
-        resolve_fqn(doc, &short, &imports)
+        match type_map.get(&word) {
+            Some(short) => resolve_fqn(doc, short, &imports),
+            None => return Vec::new(),
+        }
     } else {
-        let raw = param_type_for(&doc.program().stmts, &word)?;
-        resolve_fqn(doc, &raw, &imports)
+        match param_type_for(&doc.program().stmts, &word) {
+            Some(raw) => resolve_fqn(doc, &raw, &imports),
+            None => return Vec::new(),
+        }
     };
+
+    let mut results = Vec::new();
 
     // Look only in files whose namespace + short class name matches the FQN.
     for candidate in type_candidates(&class_name) {
@@ -59,12 +70,25 @@ pub fn goto_type_definition(
             let other_sv = other_doc.view();
             if let Some(range) = find_class_range(other_sv, &other_doc.program().stmts, cand_short)
             {
-                return Some(Location {
+                results.push(Location {
                     uri: uri.clone(),
                     range,
                 });
             }
         }
+    }
+
+    // If results found in FQN pass, return them
+    if !results.is_empty() {
+        // Deduplicate and sort for consistent results
+        results.sort_by(|a, b| {
+            a.uri
+                .as_str()
+                .cmp(b.uri.as_str())
+                .then_with(|| a.range.start.line.cmp(&b.range.start.line))
+        });
+        results.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+        return results;
     }
 
     // Fallback: short-name search across all docs.
@@ -78,14 +102,24 @@ pub fn goto_type_definition(
             let other_sv = other_doc.view();
             if let Some(range) = find_class_range(other_sv, &other_doc.program().stmts, cand_short)
             {
-                return Some(Location {
+                results.push(Location {
                     uri: uri.clone(),
                     range,
                 });
             }
         }
     }
-    None
+
+    // Deduplicate and sort for consistent results
+    results.sort_by(|a, b| {
+        a.uri
+            .as_str()
+            .cmp(b.uri.as_str())
+            .then_with(|| a.range.start.line.cmp(&b.range.start.line))
+    });
+    results.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+
+    results
 }
 
 /// Return the namespace declared in a doc's top-level statements, if any.
@@ -259,25 +293,33 @@ fn find_class_range(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], name: &str) -> O
     None
 }
 
-/// Find a type definition using `FileIndex` entries.
+/// Find type definition locations using `FileIndex` entries.
+/// Returns all matching locations (multiple for union types).
 pub fn goto_type_definition_from_index(
     source: &str,
     doc: &ParsedDoc,
     doc_returns: Option<&MethodReturnsMap>,
     indexes: &[(Url, std::sync::Arc<crate::file_index::FileIndex>)],
     position: Position,
-) -> Option<Location> {
+) -> Vec<Location> {
     use crate::util::word_at_position;
-    let word = word_at_position(source, position)?;
+    let word = match word_at_position(source, position) {
+        Some(w) => w,
+        None => return Vec::new(),
+    };
 
     let imports = collect_class_imports(doc);
     let type_map = TypeMap::from_doc_with_meta(doc, None, doc_returns);
     let class_name = if word.starts_with('$') {
-        let short = type_map.get(&word)?.to_string();
-        resolve_fqn(doc, &short, &imports)
+        match type_map.get(&word) {
+            Some(short) => resolve_fqn(doc, short, &imports),
+            None => return Vec::new(),
+        }
     } else {
-        let raw = param_type_for(&doc.program().stmts, &word)?;
-        resolve_fqn(doc, &raw, &imports)
+        match param_type_for(&doc.program().stmts, &word) {
+            Some(raw) => resolve_fqn(doc, &raw, &imports),
+            None => return Vec::new(),
+        }
     };
 
     let line_range = |line: u32| -> Range {
@@ -285,18 +327,33 @@ pub fn goto_type_definition_from_index(
         Range { start: p, end: p }
     };
 
+    let mut results = Vec::new();
+
     // First pass: look for exact FQN match (high priority)
     for candidate in type_candidates(&class_name) {
         for (uri, idx) in indexes {
             for cls in &idx.classes {
                 if cls.name.as_ref() == candidate {
-                    return Some(Location {
+                    let range = line_range(cls.start_line);
+                    results.push(Location {
                         uri: uri.clone(),
-                        range: line_range(cls.start_line),
+                        range,
                     });
                 }
             }
         }
+    }
+
+    // If found in first pass, deduplicate and return those
+    if !results.is_empty() {
+        results.sort_by(|a, b| {
+            a.uri
+                .as_str()
+                .cmp(b.uri.as_str())
+                .then_with(|| a.range.start.line.cmp(&b.range.start.line))
+        });
+        results.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+        return results;
     }
 
     // Second pass: look for short name match (lower priority, may be ambiguous)
@@ -311,13 +368,23 @@ pub fn goto_type_definition_from_index(
                     .next()
                     .unwrap_or(cls.name.as_ref());
                 if short == cn_short {
-                    return Some(Location {
+                    let range = line_range(cls.start_line);
+                    results.push(Location {
                         uri: uri.clone(),
-                        range: line_range(cls.start_line),
+                        range,
                     });
                 }
             }
         }
     }
-    None
+
+    results.sort_by(|a, b| {
+        a.uri
+            .as_str()
+            .cmp(b.uri.as_str())
+            .then_with(|| a.range.start.line.cmp(&b.range.start.line))
+    });
+    results.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+
+    results
 }
