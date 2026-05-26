@@ -21,9 +21,9 @@ class Request$0er {
 class Response {}
 
 function handle(Requester|Response $item): void {
-//               ^^^^^^^^^ ref
+//              ^^^^^^^^^ ref
     if ($item instanceof Requester) {
-    //              ^^^^^^^^^ ref
+    //                   ^^^^^^^^^ ref
     }
 }
 "#,
@@ -51,9 +51,9 @@ function f4(Success $x): void {}
 function f5(): Success {}
 //             ^^^^^^^ ref
 function f6(): void { new Success(); }
-//                         ^^^^^^^ ref
+//                        ^^^^^^^ ref
 function f7($x): void { if ($x instanceof Success) {} }
-//                                       ^^^^^^^ ref
+//                                        ^^^^^^^ ref
 "#,
     )
     .await;
@@ -65,13 +65,13 @@ async fn type_intersection_two_interfaces() {
     s.check_references_annotated(
         r#"<?php
 interface Printab$0le {
-//         ^^^^^^^^^ def
+//        ^^^^^^^^^ def
 }
 
 interface Serializable {}
 
 function export(Printable&Serializable $obj): string {
-//               ^^^^^^^^^ ref
+//              ^^^^^^^^^ ref
     return $obj->serialize();
 }
 "#,
@@ -94,7 +94,7 @@ function getUser(int $id): ?User {
 }
 
 function setUser(?User $user): void {
-//               ^^^^ ref
+//                ^^^^ ref
     if ($user !== null) {}
 }
 "#,
@@ -108,7 +108,7 @@ async fn type_union_with_null() {
     s.check_references_annotated(
         r#"<?php
 class Tok$0en {
-//     ^^^^^ def
+//    ^^^^^ def
 }
 
 function authenticate(): Token|null {
@@ -121,7 +121,7 @@ function authenticate(): Token|null {
 }
 
 function validate(Token|null $token): bool {
-//                 ^^^^^ ref
+//                ^^^^^ ref
     return $token !== null;
 }
 "#,
@@ -166,7 +166,7 @@ function f(Read|Write|Delete $x): void {}
 function g(): Read {}
 //            ^^^^ ref
 function h($x) { if ($x instanceof Read) {} }
-//                                    ^^^^ ref
+//                                 ^^^^ ref
 "#,
     )
     .await;
@@ -184,9 +184,9 @@ class Data$0base {
 function f(): ?Database {}
 //             ^^^^^^^^ ref
 function g(): Database|null {}
-//             ^^^^^^^^ ref
+//            ^^^^^^^^ ref
 function h(): void { new Database(); }
-//                        ^^^^^^^^ ref
+//                       ^^^^^^^^ ref
 "#,
     )
     .await;
@@ -204,7 +204,7 @@ class Bas$0eModel {
 interface Timestamped {}
 
 function save(BaseModel&Timestamped $obj): void {
-//             ^^^^^^^^^ ref
+//            ^^^^^^^^^ ref
     $obj->save();
 }
 "#,
@@ -247,7 +247,7 @@ function f(Credit|null $x): void {}
 function g(): Credit {}
 //            ^^^^^^ ref
 function h(): void { new Credit(); }
-//                        ^^^^^^ ref
+//                       ^^^^^^ ref
 "#,
     )
     .await;
