@@ -7,26 +7,22 @@ use expect_test::expect;
 #[tokio::test]
 async fn type_definition_variable_to_class() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Foo {}
+//    ^^^ type
 $obj = new Foo();
 $obj$0->bar();
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:1:6-1:9"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_cross_file() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /a.php
+    s.check_type_definition_annotated(
+        r#"//- /a.php
 <?php
 $obj = new Mailer();
 $obj$0->send();
@@ -34,12 +30,10 @@ $obj$0->send();
 //- /mailer.php
 <?php
 class Mailer {}
+//    ^^^^^^ type
 "#,
-        )
-        .await;
-    expect![[r#"
-        mailer.php:1:6-1:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -58,70 +52,58 @@ $unknown$0->foo();
 #[tokio::test]
 async fn type_definition_interface_type() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 interface Countable {}
 $obj = new MyList();
 $obj$0->count();
 class MyList implements Countable {}
+//    ^^^^^^ type
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:4:6-4:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_enum_typed_param() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 enum Status { case Active; }
+//   ^^^^^^ type
 function process(Status $s): void { $s$0-> }
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:1:5-1:11"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_trait_typed_param() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 trait Logger {}
+//    ^^^^^^ type
 function process(Logger $l): void { $l$0-> }
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:1:6-1:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_variable_from_new_expr() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Widget {}
+//    ^^^^^^ type
 $w = new Widget();
 echo $w$0;
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:1:6-1:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -141,12 +123,12 @@ gree$0t();
 #[tokio::test]
 async fn type_definition_with_use_import() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Mailer.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Mailer.php
 <?php
 namespace Vendor;
 class Mailer {}
+//    ^^^^^^ type
 
 //- /src/main.php
 <?php
@@ -154,81 +136,63 @@ use Vendor\Mailer;
 $m = new Mailer();
 $m$0->send();
 "#,
-        )
-        .await;
-    expect![[r#"
-        src/Mailer.php:2:6-2:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_nullable_type() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class User {}
+//    ^^^^ type
 function process(?User $u$0): void {}
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:1:6-1:10"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_union_type_not_supported() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Admin {}
+//    ^^^^^ type
 class User {}
+//    ^^^^ type
 function process(Admin|User $u$0): void {}
 "#,
-        )
-        .await;
-    // Union types now return all matching types in the union
-    expect![[r#"
-        main.php:1:6-1:11
-        main.php:2:6-2:10"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_fully_qualified_parameter() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 namespace App;
 class Service {}
+//    ^^^^^^^ type
 function process(\App\Service $s$0): void {}
 "#,
-        )
-        .await;
-    // Should resolve FQN type hints
-    expect![[r#"
-        main.php:2:6-2:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_cursor_on_param_name() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Logger {}
+//    ^^^^^^ type
 function write_log(Logger $l$0): void {}
 "#,
-        )
-        .await;
-    // When cursor is on param name, should resolve to param's type
-    expect![[r#"
-        main.php:1:6-1:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Tests for indexed type definition (background files) ────
@@ -288,12 +252,12 @@ function create(UserModel $u$0): void {}
 #[tokio::test]
 async fn type_definition_unqualified_param_in_namespace_resolves_correctly() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Logger.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Logger.php
 <?php
 namespace App\Service;
 class Logger {}
+//    ^^^^^^ type
 
 //- /src/Service.php
 <?php
@@ -302,53 +266,40 @@ class Service {
     public function log(Logger $l$0): void {}
 }
 "#,
-        )
-        .await;
-    // param_type_for returns "Logger", resolve_fqn qualifies it to "App\Service\Logger",
-    // and the FQN-scoped search finds the correct file.
-    expect![[r#"
-        src/Logger.php:2:6-2:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Union types (PHP 8.0+) now return all matching types in the union.
 #[tokio::test]
 async fn type_definition_limitation_union_types_not_supported() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Admin {}
+//    ^^^^^ type
 class User {}
+//    ^^^^ type
 function authenticate(Admin|User $a$0): void {}
 "#,
-        )
-        .await;
-    // Union types return all matching types
-    expect![[r#"
-        main.php:1:6-1:11
-        main.php:2:6-2:10"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Intersection types (PHP 8.1+) are now supported and return all matching types.
 #[tokio::test]
 async fn type_definition_limitation_intersection_types_not_supported() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 interface Readable {}
+//        ^^^^^^^^ type
 interface Writable {}
+//        ^^^^^^^^ type
 function process(Readable&Writable $rw$0): void {}
 "#,
-        )
-        .await;
-    // Intersection types return all matching types
-    expect![[r#"
-        main.php:1:10-1:18
-        main.php:2:10-2:18"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Aliased types in use imports are resolved via `collect_file_imports` which
@@ -356,12 +307,12 @@ function process(Readable&Writable $rw$0): void {}
 #[tokio::test]
 async fn type_definition_alias_with_use_import() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Model/Account.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Model/Account.php
 <?php
 namespace App\Model;
 class Account {}
+//    ^^^^^^^ type
 
 //- /src/Service.php
 <?php
@@ -369,11 +320,8 @@ namespace App\Service;
 use App\Model\Account as UserAccount;
 function create(UserAccount $acc$0): void {}
 "#,
-        )
-        .await;
-    expect![[r#"
-        src/Model/Account.php:2:6-2:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// **LIMITATION**: Generic-like syntax (e.g., Collection<User>) is not supported.
@@ -403,20 +351,17 @@ function process(Collection<User> $items$0): void {}
 #[tokio::test]
 async fn type_definition_enum_method_parameter() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Logger {}
+//    ^^^^^^ type
 enum Status {
     case Active;
     public function log(Logger $l$0): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:1:6-1:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// When multiple classes share a short name, exact FQN match should be preferred.
@@ -424,9 +369,8 @@ enum Status {
 #[tokio::test]
 async fn type_definition_prefers_exact_fqn_over_short_name() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Model/User.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Model/User.php
 <?php
 namespace App\Model;
 class User {}
@@ -435,18 +379,15 @@ class User {}
 <?php
 namespace App\Service;
 class User {}
+//    ^^^^ type
 
 //- /src/main.php
 <?php
 namespace App\Service;
 function create(User $u$0): void {}
 "#,
-        )
-        .await;
-    // Should resolve to App\Service\User (exact FQN match), not App\Model\User
-    expect![[r#"
-        src/Service/User.php:2:6-2:10"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Unqualified type names in non-global namespaces should be resolved with namespace context.
@@ -454,12 +395,12 @@ function create(User $u$0): void {}
 #[tokio::test]
 async fn type_definition_unqualified_name_in_namespace() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Model/User.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Model/User.php
 <?php
 namespace App\Model;
 class User {}
+//    ^^^^ type
 
 //- /src/Service/UserService.php
 <?php
@@ -469,12 +410,8 @@ class UserService {
     public function getUser(User $user$0): void {}
 }
 "#,
-        )
-        .await;
-    // Should resolve to App\Model\User despite being in App\Service namespace
-    expect![[r#"
-        src/Model/User.php:2:6-2:10"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Regression tests for $var FQN resolution ─────────────────────────────────
@@ -485,9 +422,8 @@ class UserService {
 #[tokio::test]
 async fn type_definition_var_new_in_namespace_prefers_same_namespace() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Model/Order.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Model/Order.php
 <?php
 namespace App\Model;
 class Order {}
@@ -496,6 +432,7 @@ class Order {}
 <?php
 namespace App\Service;
 class Order {}
+//    ^^^^^ type
 
 //- /src/Service/Processor.php
 <?php
@@ -503,13 +440,8 @@ namespace App\Service;
 $order = new Order();
 $order$0->process();
 "#,
-        )
-        .await;
-    // $order is `new Order()` in namespace App\Service, so it should resolve to
-    // App\Service\Order, not App\Model\Order
-    expect![[r#"
-        src/Service/Order.php:2:6-2:11"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// `$var = new Class()` in a namespace with a `use` import: the import overrides
@@ -517,12 +449,12 @@ $order$0->process();
 #[tokio::test]
 async fn type_definition_var_new_with_use_import_overrides_namespace() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Model/Invoice.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Model/Invoice.php
 <?php
 namespace App\Model;
 class Invoice {}
+//    ^^^^^^^ type
 
 //- /src/Service/Invoice.php
 <?php
@@ -536,12 +468,8 @@ use App\Model\Invoice;
 $inv = new Invoice();
 $inv$0->total();
 "#,
-        )
-        .await;
-    // use App\Model\Invoice is explicit, so $inv resolves to App\Model\Invoice
-    expect![[r#"
-        src/Model/Invoice.php:2:6-2:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Typed parameter in a class method (not a top-level function) in a namespace.
@@ -549,12 +477,12 @@ $inv$0->total();
 #[tokio::test]
 async fn type_definition_method_param_in_namespaced_class() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Model/Product.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Model/Product.php
 <?php
 namespace App\Model;
 class Product {}
+//    ^^^^^^^ type
 
 //- /src/Service/Cart.php
 <?php
@@ -564,20 +492,16 @@ class Cart {
     public function addItem(Product $item$0): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"
-        src/Model/Product.php:2:6-2:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Nullable type `?ClassName` in a namespace resolves the inner class by FQN.
 #[tokio::test]
 async fn type_definition_nullable_type_in_namespace() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Model/Address.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Model/Address.php
 <?php
 namespace App\Model;
 class Address {}
@@ -586,18 +510,15 @@ class Address {}
 <?php
 namespace App\Service;
 class Address {}
+//    ^^^^^^^ type
 
 //- /src/Handler.php
 <?php
 namespace App\Service;
 function deliver(?Address $addr$0): void {}
 "#,
-        )
-        .await;
-    // ?Address in App\Service namespace resolves to App\Service\Address
-    expect![[r#"
-        src/Service/Address.php:2:6-2:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Braced namespace form: both the calling file and the target class use
@@ -605,9 +526,8 @@ function deliver(?Address $addr$0): void {}
 #[tokio::test]
 async fn type_definition_braced_namespace() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Model/Report.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Model/Report.php
 <?php
 namespace App\Model {
     class Report {}
@@ -617,6 +537,7 @@ namespace App\Model {
 <?php
 namespace App\Service {
     class Report {}
+    //    ^^^^^^ type
 }
 
 //- /src/Runner.php
@@ -625,24 +546,20 @@ namespace App\Service {
     function run(Report $r$0): void {}
 }
 "#,
-        )
-        .await;
-    // Report in braced App\Service namespace → App\Service\Report (indented class, col 10)
-    expect![[r#"
-        src/Service/Report.php:2:10-2:16"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Deeply nested namespace (A\B\C) — resolve_fqn must handle multi-segment prefix.
 #[tokio::test]
 async fn type_definition_deeply_nested_namespace() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Cmd.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Cmd.php
 <?php
 namespace App\Console\Command;
 class Cmd {}
+//    ^^^ type
 
 //- /src/Other/Cmd.php
 <?php
@@ -654,12 +571,8 @@ class Cmd {}
 namespace App\Console\Command;
 function dispatch(Cmd $c$0): void {}
 "#,
-        )
-        .await;
-    // Cmd in App\Console\Command → App\Console\Command\Cmd, not App\Http\Controller\Cmd
-    expect![[r#"
-        src/Cmd.php:2:6-2:9"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Regression tests for index (background file) FQN resolution ──────────────
@@ -713,12 +626,12 @@ function greet(UserModel $u$0): void {}
 #[tokio::test]
 async fn type_definition_unqualified_name_same_namespace() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Logger.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Logger.php
 <?php
 namespace App;
 class Logger {}
+//    ^^^^^^ type
 
 //- /src/Service.php
 <?php
@@ -727,12 +640,8 @@ class Service {
     public function log(Logger $l$0): void {}
 }
 "#,
-        )
-        .await;
-    // Unqualified Logger in App namespace should resolve to App\Logger
-    expect![[r#"
-        src/Logger.php:2:6-2:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -741,9 +650,8 @@ async fn type_definition_not_confused_by_use_function_import() {
     // `format $x` where `format` also appears in `use function Lib\format` should
     // resolve to the same-namespace class `App\format`, not to `Lib\format`.
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /main.php
+    s.check_type_definition_annotated(
+        r#"//- /main.php
 <?php
 namespace App;
 use function Lib\format;
@@ -754,12 +662,10 @@ function go(format $x$0): void {}
 <?php
 namespace App;
 class format {}
+//    ^^^^^^ type
 "#,
-        )
-        .await;
-    expect![[r#"
-        format.php:2:6-2:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Built-in and Special Types ────────────────────────────────────────
@@ -887,40 +793,32 @@ function items(array $data$0): void {}
 #[tokio::test]
 async fn type_definition_variable_assigned_from_other() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Result {}
+//    ^^^^^^ type
 $value = new Result();
 $copy = $value;
 $copy$0->process();
 "#,
-        )
-        .await;
-    // Variable-to-variable assignments are now tracked
-    expect![[r#"
-        main.php:1:6-1:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Nullable union type resolution now returns all matching types.
 #[tokio::test]
 async fn type_definition_nullable_union_type() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Success {}
+//    ^^^^^^^ type
 class Error {}
+//    ^^^^^ type
 function handle(Success|Error $result$0): void {}
 "#,
-        )
-        .await;
-    // Union types return all matches
-    expect![[r#"
-        main.php:1:6-1:13
-        main.php:2:6-2:11"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Self, Parent, Static Keywords ────────────────────────────────────────
@@ -929,19 +827,15 @@ function handle(Success|Error $result$0): void {}
 #[tokio::test]
 async fn type_definition_self_keyword_in_class() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class User {
+//    ^^^^ type
     public function duplicate(self $other$0): self {}
 }
 "#,
-        )
-        .await;
-    // `self` is resolved to the containing class (User)
-    expect![[r#"
-        main.php:1:6-1:10"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// `parent` keyword in class parameter resolves to the enclosing class, not the parent.
@@ -950,40 +844,32 @@ class User {
 #[tokio::test]
 async fn type_definition_parent_keyword_limitation() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Base {}
+//    ^^^^ type
 class Child extends Base {
     public function get_parent(parent $p$0): void {}
 }
 "#,
-        )
-        .await;
-    // `parent` now correctly resolves to the parent class (Base)
-    expect![[r#"
-        main.php:1:6-1:10"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Parameter with Factory type resolves correctly (test previously ignored for wrong reason).
 #[tokio::test]
 async fn type_definition_static_return_type() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Factory {
+//    ^^^^^^^ type
     public function create(): static { return new static(); }
     public function use_it(Factory $f$0): void {}
 }
 "#,
-        )
-        .await;
-    // Cursor is on $f parameter of type Factory, should resolve to Factory
-    expect![[r#"
-        main.php:1:6-1:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Trait-Specific Cases ───────────────────────────────────────────────
@@ -992,30 +878,27 @@ class Factory {
 #[tokio::test]
 async fn type_definition_trait_with_class_param() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Config {}
+//    ^^^^^^ type
 trait Settings {
     public function load(Config $cfg$0): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:1:6-1:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Trait with cross-file type hint.
 #[tokio::test]
 async fn type_definition_trait_cross_file_param() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/db.php
+    s.check_type_definition_annotated(
+        r#"//- /src/db.php
 <?php
 class Connection {}
+//    ^^^^^^^^^^ type
 
 //- /src/main.php
 <?php
@@ -1023,11 +906,8 @@ trait Database {
     public function query(Connection $conn$0): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"
-        src/db.php:1:6-1:16"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Enum Backed Types ─────────────────────────────────────────────────
@@ -1036,41 +916,35 @@ trait Database {
 #[tokio::test]
 async fn type_definition_backed_enum_int_param() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Logger {}
+//    ^^^^^^ type
 enum Priority: int {
     case HIGH = 1;
     case LOW = 0;
     public function log(Logger $logger$0): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:1:6-1:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Backed enum (string-backed) typed as parameter.
 #[tokio::test]
 async fn type_definition_backed_enum_as_parameter() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 enum Status: string {
+//   ^^^^^^ type
     case ACTIVE = 'active';
     case INACTIVE = 'inactive';
 }
 function process(Status $status$0): void {}
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:1:5-1:11"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Interface Inheritance ──────────────────────────────────────────────
@@ -1079,37 +953,31 @@ function process(Status $status$0): void {}
 #[tokio::test]
 async fn type_definition_extended_interface() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 interface Animal {}
 interface Pet extends Animal {}
+//        ^^^ type
 function adopt(Pet $pet$0): void {}
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:2:10-2:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Multiple interface inheritance (one class implements two).
 #[tokio::test]
 async fn type_definition_multi_interface_param() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 interface Logger {}
 interface Config {}
 class App implements Logger, Config {}
+//    ^^^ type
 function bootstrap(App $app$0): void {}
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:3:6-3:9"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Import and Namespace Conflicts ────────────────────────────────────
@@ -1145,12 +1013,12 @@ function log(Logger $l$0): void {}
 #[tokio::test]
 async fn type_definition_aliased_import_with_local_class() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"//- /src/Logger.php
+    s.check_type_definition_annotated(
+        r#"//- /src/Logger.php
 <?php
 namespace App;
 class Logger {}
+//    ^^^^^^ type
 
 //- /src/Service/Logger.php
 <?php
@@ -1164,12 +1032,8 @@ use App\Logger as AppLogger;
 
 function log(AppLogger $l$0): void {}  // Explicitly uses alias
 "#,
-        )
-        .await;
-    // Alias resolves to App\Logger, not the local App\Service\Logger
-    expect![[r#"
-        src/Logger.php:2:6-2:12"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Cursor Position Variants ───────────────────────────────────────────
@@ -1178,18 +1042,14 @@ function log(AppLogger $l$0): void {}  // Explicitly uses alias
 #[tokio::test]
 async fn type_definition_cursor_on_param_name_value() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Handler {}
+//    ^^^^^^^ type
 function process(Handler $h$0andler): void {}
 "#,
-        )
-        .await;
-    // Cursor is on $handler, not just $h
-    expect![[r#"
-        main.php:1:6-1:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Cursor on variable without type hint.
@@ -1239,52 +1099,44 @@ function test(User $u$0): void {}
 #[tokio::test]
 async fn type_definition_factory_method_returns_self_type() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Builder {
+//    ^^^^^^^ type
     public static function create(): self { return new self(); }
 }
 $b = Builder::create();
 $b$0->build();
 "#,
-        )
-        .await;
-    // Should resolve Builder::create() return type (self) to Builder class
-    expect![[r#"
-        main.php:1:6-1:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Factory method with explicit class return: `Factory::make()` returns `static`.
 #[tokio::test]
 async fn type_definition_factory_method_returns_static() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Factory {
+//    ^^^^^^^ type
     public static function make(): static { return new static(); }
 }
 $f = Factory::make();
 $f$0->process();
 "#,
-        )
-        .await;
-    // Should resolve Factory::make() return type (static) to Factory class
-    expect![[r#"
-        main.php:1:6-1:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Factory method with explicit return type annotation.
 #[tokio::test]
 async fn type_definition_factory_method_with_explicit_return_type() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class User {}
+//    ^^^^ type
 class UserFactory {
     public static function create(string $name): User {
         return new User();
@@ -1293,42 +1145,34 @@ class UserFactory {
 $u = UserFactory::create('Alice');
 $u$0->save();
 "#,
-        )
-        .await;
-    // Should resolve UserFactory::create() return type to User class
-    expect![[r#"
-        main.php:1:6-1:10"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_method_chaining_simple() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class QueryBuilder {
+//    ^^^^^^^^^^^^ type
     public function select(string $col): self { return $this; }
     public function where(string $cond): self { return $this; }
 }
 $q = new QueryBuilder();
 $q->select('id')->where('active')$0->execute();
 "#,
-        )
-        .await;
-    // Should resolve the chained ->where() call to QueryBuilder
-    expect![[r#"
-        main.php:1:6-1:18"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn type_definition_method_chaining_different_return_types() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Request {
+//    ^^^^^^^ type
     public function withHeader(string $name): self { return $this; }
 }
 class Response {
@@ -1341,12 +1185,8 @@ class Client {
 $c = new Client();
 $r = $c->request()->withHeader('auth')$0->send();
 "#,
-        )
-        .await;
-    // Should resolve ->withHeader() to Request class (from request() return type)
-    expect![[r#"
-        main.php:1:6-1:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Chaining where an intermediate method returns a *different* class (not self).
@@ -1355,46 +1195,37 @@ $r = $c->request()->withHeader('auth')$0->send();
 #[tokio::test]
 async fn type_definition_method_chaining_non_self_return() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Pipeline {
     public function stage(string $name): Stage { return new Stage(); }
 }
 class Stage {
+//    ^^^^^ type
     public function run(): Result { return new Result(); }
 }
 class Result {}
 $p = new Pipeline();
 $p->stage('init')$0->run();
 "#,
-        )
-        .await;
-    // Cursor is after stage('init') — should resolve to Stage (return type of stage()),
-    // not Pipeline (the receiver type of stage()).
-    expect![[r#"
-        main.php:4:6-4:11"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 /// Function call return type is now resolved and tracked in TypeMap.
 #[tokio::test]
 async fn type_definition_function_call_return_type() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_type_definition(
-            r#"<?php
+    s.check_type_definition_annotated(
+        r#"<?php
 class Document {}
+//    ^^^^^^^^ type
 function getDocument(): Document {
     return new Document();
 }
 $doc = getDocument();
 $doc$0->render();
 "#,
-        )
-        .await;
-    // Should resolve getDocument() return type to Document class
-    expect![[r#"
-        main.php:1:6-1:14"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
