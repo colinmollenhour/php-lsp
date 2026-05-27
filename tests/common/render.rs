@@ -969,6 +969,68 @@ pub(crate) fn collect_navigation_annotations(
     out
 }
 
+/// Validate that a span in source code points to a meaningful symbol.
+/// Returns error message if span is invalid.
+fn validate_span(
+    source: &str,
+    start_line: u32,
+    start_char: u32,
+    end_line: u32,
+    end_char: u32,
+) -> Option<String> {
+    let lines: Vec<&str> = source.lines().collect();
+
+    // Check bounds
+    let start_line = start_line as usize;
+    let end_line = end_line as usize;
+    if start_line >= lines.len() {
+        return Some(format!(
+            "span start line {} exceeds source ({} lines)",
+            start_line,
+            lines.len()
+        ));
+    }
+    if end_line >= lines.len() {
+        return Some(format!(
+            "span end line {} exceeds source ({} lines)",
+            end_line,
+            lines.len()
+        ));
+    }
+
+    // For single-line spans, check the characters
+    if start_line == end_line {
+        let line = lines[start_line];
+        let start_char = start_char as usize;
+        let end_char = end_char as usize;
+
+        if end_char > line.len() {
+            return Some(format!(
+                "span [{}:{}] exceeds line length {} on line {}: {}",
+                start_char,
+                end_char,
+                line.len(),
+                start_line,
+                line
+            ));
+        }
+
+        let text = &line[start_char..end_char];
+
+        // Span should start with a symbol (uppercase, underscore, or digit)
+        if !text.chars().next().map_or(false, |c| {
+            c.is_uppercase() || c == '_' || c.is_ascii_digit()
+        }) {
+            return Some(format!(
+                "span [{}:{}] on line {} points to invalid start: {:?} (expected symbol)\nline: {}",
+                start_char, end_char, start_line, text, line
+            ));
+        }
+    }
+
+    None
+}
+
 pub(crate) fn assert_locations_match(
     resp: &Value,
     expected: &[(String, (u32, u32, u32, u32), String)],
