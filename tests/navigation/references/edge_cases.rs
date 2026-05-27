@@ -12,7 +12,7 @@ async fn references_no_partial_name_match() {
 function gr$0eet(): void {}
 //       ^^^^^ def
 function greeting(): void {}
-greet();
+  greet();
 //^^^^^ ref
 greeting();
 "#,
@@ -74,7 +74,7 @@ async fn references_class_used_as_attribute() {
 class Ro$0ute {}
 //    ^^^^^ def
 #[Route]
-//  ^^^^^ ref
+//^^^^^ ref
 class HomeController {}
 "#,
     )
@@ -147,7 +147,7 @@ async fn references_static_method_call_in_class_property_default() {
         r#"<?php
 class C {
     public int $x = C::ma$0ke();
-    //                  ^^^^ ref
+    //                 ^^^^ ref
     public static function make(): int {
     //                     ^^^^ def
         return 0;
@@ -187,7 +187,7 @@ async fn references_function_decl_excludes_method_with_same_name() {
         r#"<?php
 function a$0dd(): void {}
 //       ^^^ def
-add();
+  add();
 //^^^ ref
 class C { public function add(): void {} }
 $c->add();
@@ -207,7 +207,7 @@ function hel$0per(): void {}
 //       ^^^^^^ def
 enum Status {
     public function label(): string { return helper(); }
-    //                                        ^^^^^^ ref
+    //                                       ^^^^^^ ref
 }
 "#,
     )
@@ -223,7 +223,7 @@ async fn references_function_decl_excludes_interface_method() {
         r#"<?php
 function a$0dd(): void {}
 //       ^^^ def
-add();
+  add();
 //^^^ ref
 interface I {
     public function add(): void;

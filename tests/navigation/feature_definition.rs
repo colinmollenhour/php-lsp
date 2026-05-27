@@ -999,7 +999,7 @@ async fn definition_promoted_property_cursor_in_constructor_body() {
         r#"<?php
 class Builder {
     public function __construct(private string $name) {
-    //                                          ^^^^ def
+    //                          ^^^^^^^^^^^^^^^^^^^^ def
         echo $na$0me;
     }
 }

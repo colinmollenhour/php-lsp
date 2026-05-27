@@ -258,10 +258,10 @@ async fn highlight_static_method_call() {
         r#"<?php
 class Calc {
     public static function add$0() { return 1 + 2; }
-    //                       ^^^ ref
+    //                     ^^^ ref
 }
 Calc::add();
-//     ^^^ ref
+//    ^^^ ref
 "#,
     )
     .await;
@@ -365,7 +365,7 @@ async fn highlight_function_parameter() {
     s.check_highlight_annotated(
         r#"<?php
 function foo($n$0ame) {
-//              ^^^^ write
+//           ^^^^^ write
     echo $name;
 //       ^^^^^ read
 }

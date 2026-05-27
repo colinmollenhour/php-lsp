@@ -224,7 +224,7 @@ class Process$0or {
 
 function handle(mixed $data): void {
     if ($data instanceof Processor) {
-        //                   ^^^^^^^^^ ref
+        //               ^^^^^^^^^ ref
         $data->process();
     }
 }

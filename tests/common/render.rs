@@ -1105,47 +1105,23 @@ pub(crate) fn assert_locations_match(
     }
 }
 
-/// Check whether the annotation caret is aligned with the server's returned
-/// range. The caret's START column must fall inside the actual range
-/// `[start, end)`.
-///
-/// This is asymmetric on purpose. Comment/cursor markers can only push a caret
-/// *rightward* from the true symbol start (the `//` marker occupies the first
-/// columns, the `$0` cursor marker shifts the visual baseline right), so a
-/// caret that begins well *before* the server span is a genuine misalignment
-/// and is rejected. The one exception is the `$` sigil on variables and
-/// properties: a server may return `status` while the caret marks `$status`
-/// (or vice-versa), so one column of left slack is allowed. A caret starting at
-/// or past the span end is rejected — it has drifted off the symbol entirely.
-///
-/// The caret *width* is also bounded: it may not exceed the server span's width
-/// (plus the sigil slack). This is what lets annotations catch a *truncated*
-/// span — e.g. a server returning `\App\W` where the caret marks the full
-/// `\App\Widget`. Marker-shifted carets keep the symbol's width, and a caret
-/// marking a sub-part of a wider server span is narrower, so both still pass;
-/// only a caret wider than the span it matches (the truncation signal) fails.
-const SIGIL_SLACK: u32 = 1;
-
+/// Check whether the annotation caret exactly matches the server's returned
+/// range. The annotation start and end columns must equal the actual span's
+/// start and end columns on the same line.
 fn annotation_within_range(expected: &(u32, u32, u32, u32), actual: &(u32, u32, u32, u32)) -> bool {
-    // Annotations are always single-line: esl == eel.
     let (esl, esc, _eel, eec) = *expected;
     let (asl, asc, ael, aec) = *actual;
     // Annotation line must fall within the actual range's line span.
     if esl < asl || esl > ael {
         return false;
     }
-    // Single-line actual range (the common case): the caret must start at or
-    // after the symbol start (minus the `$` sigil slack) and before its end,
-    // and must not be wider than the span it claims to mark.
+    // Single-line actual range: require exact start and end column match.
     if asl == ael {
-        let start_ok = asc.saturating_sub(SIGIL_SLACK) <= esc && esc < aec;
-        let width_ok = eec.saturating_sub(esc) <= (aec - asc) + SIGIL_SLACK;
-        return start_ok && width_ok;
+        return esc == asc && eec == aec;
     }
-    // Multi-line actual range: enforce the start-column floor only on the
-    // first line; line containment is otherwise sufficient.
+    // Multi-line actual range: exact start-column match on the first line.
     if esl == asl {
-        return asc.saturating_sub(SIGIL_SLACK) <= esc;
+        return esc == asc;
     }
     true
 }
