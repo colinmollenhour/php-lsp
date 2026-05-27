@@ -11,8 +11,9 @@ use crate::ast::{ParsedDoc, str_offset_in_range};
 use crate::util::utf16_code_units;
 use crate::walk::{
     all_class_ref_names_in_stmts, class_refs_in_stmts, constant_refs_in_stmts,
-    fqn_new_class_refs_in_stmts, function_refs_in_stmts, method_refs_in_stmts, new_refs_in_stmts,
-    property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use,
+    fqn_new_class_refs_in_stmts, function_refs_in_stmts, global_constant_refs_in_stmts,
+    method_refs_in_stmts, new_refs_in_stmts, property_refs_in_stmts, refs_in_stmts,
+    refs_in_stmts_with_use,
 };
 
 /// Callback signature for the mir-codebase reference-lookup fast path:
@@ -483,11 +484,17 @@ fn scan_doc(
             }
             // Constant walker emits both declaration spans and access spans.
             Some(SymbolKind::Constant) => {
-                // target_fqn doubles as the owning-class short name for same-name disambiguation.
-                let class_filter = target_fqn
-                    .and_then(|fqn| fqn.trim_start_matches('\\').rsplit('\\').next())
-                    .or(target_fqn);
-                constant_refs_in_stmts(source, stmts, word, class_filter, &mut spans);
+                // Class constants: target_fqn = owning class short name (no backslash).
+                // Global/namespace constants: target_fqn = None (root) or
+                //   "Namespace\\ConstName" (namespaced, has backslash). Route to the
+                //   bare-identifier walker instead of the `::` class-const walker.
+                let is_global = target_fqn.is_none_or(|fqn| fqn.contains('\\'));
+                if is_global {
+                    global_constant_refs_in_stmts(source, stmts, word, target_fqn, &mut spans);
+                } else {
+                    // target_fqn = class short name for class constants.
+                    constant_refs_in_stmts(source, stmts, word, target_fqn, &mut spans);
+                }
                 if !include_declaration {
                     let mut decl_spans = Vec::new();
                     collect_declaration_spans(
@@ -741,6 +748,14 @@ fn collect_declaration_spans(
                             ));
                         }
                         _ => {}
+                    }
+                }
+            }
+            StmtKind::Const(items) if want_constant => {
+                for item in items.iter() {
+                    if item.name == word {
+                        let name = item.name.to_string();
+                        out.push(declaration_name_span(source, &name, item.span));
                     }
                 }
             }
