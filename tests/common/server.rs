@@ -17,6 +17,93 @@ use super::render::{
     render_workspace_symbols,
 };
 
+/// Validate that all spans in an LSP response point to valid code symbols.
+fn validate_lsp_spans(resp: &Value, file_path: &str, fixture: &Fixture) {
+    let result = &resp["result"];
+    let locs: Vec<Value> = if result.is_array() {
+        result.as_array().cloned().unwrap_or_default()
+    } else if result.is_null() {
+        return; // No results to validate
+    } else {
+        vec![result.clone()]
+    };
+
+    // Find the file in the fixture
+    let file_content = fixture
+        .files
+        .iter()
+        .find(|f| f.path == file_path)
+        .map(|f| f.text.as_str());
+
+    if file_content.is_none() {
+        return; // Can't validate without source
+    }
+    let source = file_content.unwrap();
+
+    for loc in locs {
+        let range = if loc["range"].is_object() {
+            &loc["range"]
+        } else if loc["targetRange"].is_object() {
+            &loc["targetRange"]
+        } else {
+            continue;
+        };
+
+        let start_line = range["start"]["line"].as_u64().unwrap_or(0) as u32;
+        let start_char = range["start"]["character"].as_u64().unwrap_or(0) as u32;
+        let end_line = range["end"]["line"].as_u64().unwrap_or(0) as u32;
+        let end_char = range["end"]["character"].as_u64().unwrap_or(0) as u32;
+
+        // Validate the span points to a valid symbol
+        let lines: Vec<&str> = source.lines().collect();
+        if start_line as usize >= lines.len() {
+            panic!(
+                "LSP span exceeds source bounds: start_line {} >= {} lines\nfile: {}\nresponse: {}",
+                start_line,
+                lines.len(),
+                file_path,
+                loc
+            );
+        }
+
+        if start_line == end_line {
+            let line = lines[start_line as usize];
+            let start = start_char as usize;
+            let end = end_char as usize;
+
+            if end > line.len() {
+                panic!(
+                    "LSP span exceeds line bounds: [{}-{}] exceeds line length {}\n\
+                     file: {}, line: {}\n\
+                     code: {}\n\
+                     response: {}",
+                    start,
+                    end,
+                    line.len(),
+                    file_path,
+                    start_line,
+                    line,
+                    loc
+                );
+            }
+
+            let text = &line[start..end];
+            if !text.chars().next().map_or(false, |c| {
+                c.is_uppercase() || c == '_' || c.is_ascii_digit()
+            }) {
+                panic!(
+                    "LSP span points to invalid symbol start\n\
+                     file: {}, line: {}\n\
+                     span [{}:{}]: {:?}\n\
+                     code: {}\n\
+                     response: {}",
+                    file_path, start_line, start, end, text, line, loc
+                );
+            }
+        }
+    }
+}
+
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
@@ -1636,6 +1723,8 @@ impl TestServer {
         fixture::validate_annotations(&opened.fixture);
         let c = opened.cursor().clone();
         let resp = self.references(&c.path, c.line, c.character, true).await;
+        // Validate that LSP response spans point to valid code symbols
+        validate_lsp_spans(&resp, &c.path, &opened.fixture);
         let expected = collect_navigation_annotations(&opened.fixture, &["def", "ref"]);
         assert_locations_match(&resp, &expected, &self.uri(""), "references");
     }
