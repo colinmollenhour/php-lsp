@@ -89,8 +89,14 @@ fn validate_lsp_spans(resp: &Value, _file_path: &str, fixture: &Fixture) {
             let text = &line[start..end];
             // A leading `\` is valid: fully-qualified names (`\App\Widget`) are
             // legitimate reference spans. A leading `$` is valid for PHP variables.
+            // A leading `&` is valid for by-reference use-clause bindings (`use (&$x)`).
             if !text.chars().next().map_or(false, |c| {
-                c.is_alphabetic() || c == '_' || c.is_ascii_digit() || c == '\\' || c == '$'
+                c.is_alphabetic()
+                    || c == '_'
+                    || c.is_ascii_digit()
+                    || c == '\\'
+                    || c == '$'
+                    || c == '&'
             }) {
                 panic!(
                     "LSP span points to invalid symbol start\n\
@@ -120,6 +126,53 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
         // Symlinks in fixtures would be unusual — ignore silently.
     }
     Ok(())
+}
+
+/// Convert a `textDocument/rename` response (WorkspaceEdit) into a fake
+/// Location-array response so `assert_annotated_locations` can be reused.
+///
+/// Edits are sorted by (uri, line, character) so annotation matching is
+/// deterministic regardless of insertion order.
+fn workspace_edit_as_location_response(resp: &Value, root: &str) -> Value {
+    let changes = match resp["result"]["changes"].as_object() {
+        Some(m) => m,
+        None => return json!({"result": []}),
+    };
+    let mut locs: Vec<Value> = Vec::new();
+    for (uri, edits) in changes {
+        // Strip the root prefix so the URI matches what fixture paths produce.
+        let short_uri = uri
+            .strip_prefix(root)
+            .unwrap_or(uri.as_str())
+            .trim_start_matches('/');
+        for edit in edits.as_array().unwrap_or(&vec![]) {
+            locs.push(json!({ "uri": short_uri, "range": edit["range"] }));
+        }
+    }
+    locs.sort_by_key(|l| {
+        (
+            l["uri"].as_str().unwrap_or("").to_owned(),
+            l["range"]["start"]["line"].as_u64().unwrap_or(0),
+            l["range"]["start"]["character"].as_u64().unwrap_or(0),
+        )
+    });
+    // Reconstruct full URIs so assert_locations_match can compare them.
+    // `root` already ends with '/' (e.g. "file:///") and `short` has no
+    // leading slash, so simple concatenation produces the correct URI.
+    let root_prefix = if root.ends_with('/') {
+        root.to_owned()
+    } else {
+        format!("{root}/")
+    };
+    let locs: Vec<Value> = locs
+        .into_iter()
+        .map(|l| {
+            let short = l["uri"].as_str().unwrap_or("").to_owned();
+            let full_uri = format!("{root_prefix}{short}");
+            json!({ "uri": full_uri, "range": l["range"] })
+        })
+        .collect();
+    json!({"result": locs})
 }
 
 // ---------- fluent builder ----------
@@ -1795,6 +1848,30 @@ impl TestServer {
             &["impl"],
             "implementation",
         );
+    }
+
+    /// Open `src`, run hover at `$0`, and assert the rendered output matches
+    /// `expected`. Pass `expect![[r#"..."#]]` as the second argument — the
+    /// auto-capture feature of `expect_test` still works.
+    pub async fn check_hover_annotated(&mut self, src: &str, expected: expect_test::Expect) {
+        let opened = self.open_fixture(src).await;
+        let c = opened.cursor().clone();
+        let resp = self.hover(&c.path, c.line, c.character).await;
+        expected.assert_eq(&render_hover(&resp));
+    }
+
+    /// Assert that rename at `$0` with `new_name` touches exactly the spans
+    /// marked with `// ^^^ rename` annotations in the fixture. Each annotation
+    /// line covers one rename edit; all edits across all files are matched.
+    pub async fn check_rename_annotated(&mut self, src: &str, new_name: &str) {
+        let opened = self.open_fixture(src).await;
+        let c = opened.cursor().clone();
+        let resp = self.rename(&c.path, c.line, c.character, new_name).await;
+        if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+            panic!("rename errored: {err}");
+        }
+        let as_locs = workspace_edit_as_location_response(&resp, &self.uri(""));
+        self.assert_annotated_locations(&as_locs, &opened.fixture, &c.path, &["rename"], "rename");
     }
 
     /// Assert that document highlights at `$0` match every `// ^^^ read` /

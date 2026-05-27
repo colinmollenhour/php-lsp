@@ -8,9 +8,8 @@ use expect_test::expect;
 async fn hover_across_files_via_use() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let v = s
-        .check_hover(
-            r#"//- /src/Greeter.php
+    s.check_hover_annotated(
+        r#"//- /src/Greeter.php
 <?php
 namespace App;
 class Greeter {
@@ -23,13 +22,12 @@ use App\Greeter;
 $g = new Greeter();
 $g->hel$0lo();
 "#,
-        )
-        .await;
-    expect![[r#"
-        ```php
-        Greeter::hello(): string
-        ```"#]]
-    .assert_eq(&v);
+        expect![[r#"
+            ```php
+            Greeter::hello(): string
+            ```"#]],
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -78,9 +76,8 @@ async fn hover_class_in_extends_clause_cross_file() {
 async fn hover_static_property_cross_file() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let v = s
-        .check_hover(
-            r#"//- /caller.php
+    s.check_hover_annotated(
+        r#"//- /caller.php
 <?php
 Config::$ver$0sion;
 
@@ -90,13 +87,12 @@ class Config {
     public static string $version = '1.0';
 }
 "#,
-        )
-        .await;
-    expect![[r#"
-        ```php
-        (property) public static Config::$version: string
-        ```"#]]
-    .assert_eq(&v);
+        expect![[r#"
+            ```php
+            (property) public static Config::$version: string
+            ```"#]],
+    )
+    .await;
 }
 
 // ── 1.3 First-class callable hover ──────────────────────────────────────────
@@ -105,18 +101,16 @@ class Config {
 async fn hover_use_alias_resolves_to_class() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let v = s
-        .check_hover(
-            r#"<?php
+    s.check_hover_annotated(
+        r#"<?php
 class Mailer { public function send(): void {} }
 use Mailer as Sender;
 $s = new Send$0er();
 "#,
-        )
-        .await;
-    expect![[r#"
-        ```php
-        class Mailer
-        ```"#]]
-    .assert_eq(&v);
+        expect![[r#"
+            ```php
+            class Mailer
+            ```"#]],
+    )
+    .await;
 }

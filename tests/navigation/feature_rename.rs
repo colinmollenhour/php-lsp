@@ -22,45 +22,37 @@ function gre$0et(): void {}
 async fn rename_function_same_file() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function gre$0et(): void {}
+//       ^^^^^ rename
 greet();
+//^^^^^ rename
 greet();
+//^^^^^ rename
 "#,
-            "salute",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        1:9-1:14 → "salute"
-        2:0-2:5 → "salute"
-        3:0-3:5 → "salute""#]]
-    .assert_eq(&out);
+        "salute",
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn rename_method_across_file() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 class Greeter {
     public function he$0llo(): string { return 'hi'; }
+    //              ^^^^^ rename
 }
 $g = new Greeter();
 $g->hello();
+//  ^^^^^ rename
 "#,
-            "salute",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:20-2:25 → "salute"
-        5:4-5:9 → "salute""#]]
-    .assert_eq(&out);
+        "salute",
+    )
+    .await;
 }
 
 /// Regression: renaming a variable inside an enum method previously produced
@@ -69,21 +61,17 @@ $g->hello();
 async fn rename_variable_inside_enum_method() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 enum Status {
     public function label($a$0rg) { return $arg + 1; }
+    //                    ^^^^ rename
+    //                                     ^^^^ rename
 }
 "#,
-            "value",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:26-2:30 → "$value"
-        2:41-2:45 → "$value""#]]
-    .assert_eq(&out);
+        "value",
+    )
+    .await;
 }
 
 /// Regression: renaming a variable parameter in an interface method previously
@@ -93,20 +81,16 @@ enum Status {
 async fn rename_variable_interface_method_param() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 interface Logger {
     public function log($mes$0sage): void;
+    //                  ^^^^^^^^ rename
 }
 "#,
-            "$msg",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:24-2:32 → "$msg""#]]
-    .assert_eq(&out);
+        "$msg",
+    )
+    .await;
 }
 
 /// Regression: same bug as above but for abstract class methods.
@@ -114,20 +98,16 @@ interface Logger {
 async fn rename_variable_abstract_class_method_param() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 abstract class Processor {
     abstract public function process($in$0put): string;
+    //                               ^^^^^^ rename
 }
 "#,
-            "$data",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:37-2:43 → "$data""#]]
-    .assert_eq(&out);
+        "$data",
+    )
+    .await;
 }
 
 /// Regression: same bug as above but for abstract trait methods.
@@ -135,42 +115,34 @@ abstract class Processor {
 async fn rename_variable_abstract_trait_method_param() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 trait Formattable {
     abstract public function format($da$0ta): string;
+    //                              ^^^^^ rename
 }
 "#,
-            "$input",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:36-2:41 → "$input""#]]
-    .assert_eq(&out);
+        "$input",
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn rename_class_updates_new_sites() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 class Wid$0get {}
+//    ^^^^^^ rename
 $a = new Widget();
+//       ^^^^^^ rename
 $b = new Widget();
+//       ^^^^^^ rename
 "#,
-            "Gadget",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        1:6-1:12 → "Gadget"
-        2:9-2:15 → "Gadget"
-        3:9-3:15 → "Gadget""#]]
-    .assert_eq(&out);
+        "Gadget",
+    )
+    .await;
 }
 
 /// `prepareRename` on a PHP keyword must return null so the editor greys out
@@ -214,24 +186,20 @@ function f(): void {
 async fn rename_property_updates_all_access_sites() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 class Counter {
     public int $count = 0;
+    //         ^^^^^ rename
     public function inc(): void { $this->coun$0t++; }
+    //                                  ^^^^^ rename
     public function get(): int  { return $this->count; }
+    //                                         ^^^^^ rename
 }
 "#,
-            "total",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:16-2:21 → "total"
-        3:41-3:46 → "total"
-        4:48-4:53 → "total""#]]
-    .assert_eq(&out);
+        "total",
+    )
+    .await;
 }
 
 /// Regression for #141: rename must rewrite the matching segment of a `use`
@@ -241,22 +209,18 @@ class Counter {
 async fn rename_class_rewrites_use_import_in_same_file() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 use Vendor\Lib\Widget;
+//             ^^^^^^ rename
 $a = new Wid$0get();
+//       ^^^^^^ rename
 $b = new Widget();
+//       ^^^^^^ rename
 "#,
-            "Gadget",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        1:15-1:21 → "Gadget"
-        2:9-2:15 → "Gadget"
-        3:9-3:15 → "Gadget""#]]
-    .assert_eq(&out);
+        "Gadget",
+    )
+    .await;
 }
 
 /// Cross-file companion to `rename_class_rewrites_use_import_in_same_file`:
@@ -272,40 +236,32 @@ $b = new Widget();
 async fn rename_class_rewrites_use_imports_across_files() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"//- /src/Widget.php
+    s.check_rename_annotated(
+        r#"//- /src/Widget.php
 <?php
 namespace App;
 class Wid$0get {}
+//    ^^^^^^ rename
 
 //- /src/a.php
 <?php
 use App\Widget;
+//      ^^^^^^ rename
 $x = new Widget();
+//       ^^^^^^ rename
 $is = $x instanceof Widget;
+//                  ^^^^^^ rename
 
 //- /src/b.php
 <?php
 use App\Widget;
+//      ^^^^^^ rename
 $y = new Widget();
+//       ^^^^^^ rename
 "#,
-            "Gadget",
-        )
-        .await;
-    expect![[r#"
-        // src/Widget.php
-        2:6-2:12 → "Gadget"
-
-        // src/a.php
-        1:8-1:14 → "Gadget"
-        2:9-2:15 → "Gadget"
-        3:20-3:26 → "Gadget"
-
-        // src/b.php
-        1:8-1:14 → "Gadget"
-        2:9-2:15 → "Gadget""#]]
-    .assert_eq(&out);
+        "Gadget",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -428,24 +384,20 @@ async fn will_delete_file_strips_use_imports_from_dependents() {
 async fn rename_does_not_match_partial_words() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function foo$0() {}
+//       ^^^ rename
 function foobar() {}
 function barfoo() {}
 foo();
+//^^^ rename
 foobar();
 barfoo();
 "#,
-            "baz",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        1:9-1:12 → "baz"
-        4:0-4:3 → "baz""#]]
-    .assert_eq(&out);
+        "baz",
+    )
+    .await;
 }
 
 /// Rename a variable should only affect the same scope, not variables with the
@@ -454,19 +406,15 @@ barfoo();
 async fn rename_variable_does_not_cross_function_boundary() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function foo() { $x$0 = 1; }
+//               ^^ rename
 function bar() { $x = 2; }
 "#,
-            "$y",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        1:17-1:19 → "$y""#]]
-    .assert_eq(&out);
+        "$y",
+    )
+    .await;
 }
 
 /// Rename a property across multiple files should update declaration and all uses.
@@ -475,29 +423,23 @@ function bar() { $x = 2; }
 async fn rename_property_works_across_files() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"//- /a.php
+    s.check_rename_annotated(
+        r#"//- /a.php
 <?php
 class Foo {
     public int $count;
+    //         ^^^^^ rename
 }
 
 //- /b.php
 <?php
 $foo = new Foo();
 echo $foo->coun$0t;
+//         ^^^^^ rename
 "#,
-            "total",
-        )
-        .await;
-    expect![[r#"
-        // a.php
-        2:16-2:21 → "total"
-
-        // b.php
-        2:11-2:16 → "total""#]]
-    .assert_eq(&out);
+        "total",
+    )
+    .await;
 }
 
 /// Property rename from declaration site is not supported - must rename from access site.
@@ -528,25 +470,21 @@ echo $foo->count;
 async fn rename_distinguishes_static_from_instance_properties() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 class Config {
     public static $instance;
     public $count;
+    //      ^^^^^ rename
     public function test(): void {
         $this->coun$0t++;
+        //     ^^^^^ rename
     }
 }
 "#,
-            "total",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        3:12-3:17 → "total"
-        5:15-5:20 → "total""#]]
-    .assert_eq(&out);
+        "total",
+    )
+    .await;
 }
 
 /// Rename must be case-sensitive and not match names that differ only in case.
@@ -554,21 +492,17 @@ class Config {
 async fn rename_is_case_sensitive() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function test() {}
+//       ^^^^ rename
 function Test() {}
 tes$0t();
+//^^^^ rename
 "#,
-            "verify",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        1:9-1:13 → "verify"
-        3:0-3:4 → "verify""#]]
-    .assert_eq(&out);
+        "verify",
+    )
+    .await;
 }
 
 /// Rename multiple occurrences of the same function in different scopes.
@@ -576,23 +510,19 @@ tes$0t();
 async fn rename_function_multiple_scopes() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function process$0() { process(); }
+//       ^^^^^^^ rename
+//                     ^^^^^^^ rename
 if (true) { process(); }
+//          ^^^^^^^ rename
 while (true) { process(); break; }
+//             ^^^^^^^ rename
 "#,
-            "handle",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        1:9-1:16 → "handle"
-        1:21-1:28 → "handle"
-        2:12-2:19 → "handle"
-        3:15-3:22 → "handle""#]]
-    .assert_eq(&out);
+        "handle",
+    )
+    .await;
 }
 
 /// Rename variable across multiple functions (comprehensive coverage).
@@ -601,26 +531,21 @@ while (true) { process(); break; }
 async fn rename_variable_deep_scopes() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function outer() {
     $x$0 = 1;
+   //^^ rename
     function inner() {
         $x = 2;
     }
     echo $x;
+    //   ^^ rename
 }
 "#,
-            "$y",
-        )
-        .await;
-    // Rename should only affect $x in outer scope, not the inner $x
-    expect![[r#"
-        // main.php
-        2:4-2:6 → "$y"
-        6:9-6:11 → "$y""#]]
-    .assert_eq(&out);
+        "$y",
+    )
+    .await;
 }
 
 // --- Documented Limitations ---
@@ -657,26 +582,21 @@ echo $foo->count;
 async fn rename_property_from_access_site_works() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 class Foo {
     public int $count;
+    //         ^^^^^ rename
 }
 $foo = new Foo();
 $foo->coun$0t++;
+//    ^^^^^ rename
 echo $foo->count;
+//         ^^^^^ rename
 "#,
-            "total",
-        )
-        .await;
-    // Property rename FROM access site works correctly
-    expect![[r#"
-        // main.php
-        2:16-2:21 → "total"
-        5:6-5:11 → "total"
-        6:11-6:16 → "total""#]]
-    .assert_eq(&out);
+        "total",
+    )
+    .await;
 }
 
 /// **LIMITATION**: Callable/closure parameter types are not fully supported.
@@ -710,22 +630,17 @@ function process(callable $callback$0): void {
 async fn rename_allows_superglobal_rename() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 if (isset($_GET$0['id'])) {
+//        ^^^^^ rename
     echo $_GET['id'];
+    //   ^^^^^ rename
 }
 "#,
-            "$params",
-        )
-        .await;
-    // Superglobals CAN be renamed by this implementation (not recommended!)
-    expect![[r#"
-        // main.php
-        1:10-1:15 → "$params"
-        2:9-2:14 → "$params""#]]
-    .assert_eq(&out);
+        "$params",
+    )
+    .await;
 }
 
 // --- Regression tests for bugs fixed in walk.rs and rename.rs ---
@@ -738,24 +653,20 @@ if (isset($_GET$0['id'])) {
 async fn rename_variable_in_arrow_function() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function process(): void {
     $value$0 = 42;
+    //^^^^^^ rename
     $fn = fn() => $value + 1;
+    //            ^^^^^^ rename
     echo $value;
+    //   ^^^^^^ rename
 }
 "#,
-            "$result",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:4-2:10 → "$result"
-        3:18-3:24 → "$result"
-        4:9-4:15 → "$result""#]]
-    .assert_eq(&out);
+        "$result",
+    )
+    .await;
 }
 
 /// Edge case: arrow function with multiple captures and nested operations.
@@ -763,25 +674,21 @@ function process(): void {
 async fn rename_variable_in_nested_arrow_function() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function compute(): void {
     $base$0 = 10;
+    //^^^^^ rename
     $offset = 5;
     $calc = fn() => fn() => $base + $offset;
+    //                      ^^^^^ rename
     echo $base;
+    //   ^^^^^ rename
 }
 "#,
-            "$initial",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:4-2:9 → "$initial"
-        4:28-4:33 → "$initial"
-        5:9-5:14 → "$initial""#]]
-    .assert_eq(&out);
+        "$initial",
+    )
+    .await;
 }
 
 /// Edge case: arrow function in array passed as argument.
@@ -789,29 +696,24 @@ function compute(): void {
 async fn rename_variable_in_arrow_in_array() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function process(): void {
     $multiplier$0 = 2;
+    //^^^^^^^^^^^ rename
     $mappers = [
         fn($x) => $x * $multiplier,
+        //             ^^^^^^^^^^^ rename
         fn($y) => $y + $multiplier,
+        //             ^^^^^^^^^^^ rename
     ];
     echo $multiplier;
+    //   ^^^^^^^^^^^ rename
 }
 "#,
-            "$factor",
-        )
-        .await;
-    // Arrow functions in array should capture references
-    expect![[r#"
-        // main.php
-        2:4-2:15 → "$factor"
-        4:23-4:34 → "$factor"
-        5:23-5:34 → "$factor"
-        7:9-7:20 → "$factor""#]]
-    .assert_eq(&out);
+        "$factor",
+    )
+    .await;
 }
 
 /// Regression: closure use() clause variables were not being collected during rename.
@@ -822,26 +724,22 @@ function process(): void {
 async fn rename_variable_in_closure_use_clause() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function greet(): void {
     $name$0 = "Alice";
+    //^^^^^ rename
     $greeting = function() use ($name) {
+    //                          ^^^^^ rename
         echo "Hello " . $name;
     };
     echo $name;
+    //   ^^^^^ rename
 }
 "#,
-            "$person",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:4-2:9 → "$person"
-        3:32-3:37 → "$person"
-        6:9-6:14 → "$person""#]]
-    .assert_eq(&out);
+        "$person",
+    )
+    .await;
 }
 
 /// Edge case: closure use() clause with reference binding.
@@ -849,27 +747,23 @@ function greet(): void {
 async fn rename_variable_in_closure_use_by_reference() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function counter(): void {
     $count$0 = 0;
+    //^^^^^^ rename
     $increment = function() use (&$count) {
+    //                           ^^^^^^^ rename
         $count++;
     };
     $increment();
     echo $count;
+    //   ^^^^^^ rename
 }
 "#,
-            "$total",
-        )
-        .await;
-    expect![[r#"
-        // main.php
-        2:4-2:10 → "$total"
-        3:33-3:40 → "$total"
-        7:9-7:15 → "$total""#]]
-    .assert_eq(&out);
+        "$total",
+    )
+    .await;
 }
 
 /// Edge case: closure with multiple use() variables.
@@ -878,14 +772,15 @@ function counter(): void {
 async fn rename_variable_in_closure_multiple_use_vars() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 function process(): void {
     $input$0 = "data";
+    //^^^^^^ rename
     $output = "";
     $debug = false;
     $handler = function() use ($input, $output, $debug) {
+    //                         ^^^^^^ rename
         if ($debug) {
             echo $input . $output;
         }
@@ -893,15 +788,9 @@ function process(): void {
     $handler();
 }
 "#,
-            "$data",
-        )
-        .await;
-    // Should rename declaration and the use clause reference
-    expect![[r#"
-        // main.php
-        2:4-2:10 → "$data"
-        5:31-5:37 → "$data""#]]
-    .assert_eq(&out);
+        "$data",
+    )
+    .await;
 }
 
 /// Regression: rename with same-named symbols in different namespaces was not FQN-aware.
@@ -914,24 +803,19 @@ function process(): void {
 async fn rename_within_namespace_scope() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 namespace App;
 class Logger$0 {}
+//    ^^^^^^ rename
 function create() {
     $l = new Logger();
+    //       ^^^^^^ rename
 }
 "#,
-            "Reporter",
-        )
-        .await;
-    // Rename resolves FQN and applies throughout the namespace
-    expect![[r#"
-        // main.php
-        2:6-2:12 → "Reporter"
-        4:13-4:19 → "Reporter""#]]
-    .assert_eq(&out);
+        "Reporter",
+    )
+    .await;
 }
 
 /// Edge case: aliased use imports must rename the alias, not the original class name.
@@ -940,21 +824,16 @@ function create() {
 async fn rename_aliased_use_import() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 use App\Logger as Log;
+//                ^^^ rename
 $l = new Log$0();
+//       ^^^ rename
 "#,
-            "Reporter",
-        )
-        .await;
-    // Should rename the alias "Log" to "Reporter" in the use statement
-    expect![[r#"
-        // main.php
-        1:18-1:21 → "Reporter"
-        2:9-2:12 → "Reporter""#]]
-    .assert_eq(&out);
+        "Reporter",
+    )
+    .await;
 }
 
 /// Edge case: multiple imports in a single use statement must all be updated.
@@ -963,22 +842,17 @@ $l = new Log$0();
 async fn rename_with_multiple_use_imports() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 use App\Logger, App\Parser;
+//      ^^^^^^ rename
 $l = new Logger$0();
+//       ^^^^^^ rename
 $p = new Parser();
 "#,
-            "Reporter",
-        )
-        .await;
-    // Only Logger is renamed, Parser stays the same
-    expect![[r#"
-        // main.php
-        1:8-1:14 → "Reporter"
-        2:9-2:15 → "Reporter""#]]
-    .assert_eq(&out);
+        "Reporter",
+    )
+    .await;
 }
 
 /// Edge case: UTF-16 multibyte character handling in FQN.
@@ -1018,24 +892,17 @@ $obj = new OldName$0();
 async fn rename_does_not_match_partial_fqn() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 use App\Services\FooExtra;
 use App\Services\Foo;
+//               ^^^ rename
 $obj = new Foo$0();
+//         ^^^ rename
 "#,
-            "Bar",
-        )
-        .await;
-    // Only Foo should be renamed to Bar; FooExtra stays untouched
-    // Line 1 (FooExtra) is not in the output because it's not renamed
-    // Line 2 (Foo) and Line 3 (usage) are renamed
-    expect![[r#"
-        // main.php
-        2:17-2:20 → "Bar"
-        3:11-3:14 → "Bar""#]]
-    .assert_eq(&out);
+        "Bar",
+    )
+    .await;
 }
 
 /// Edge case: Compound use statement with multiple imports.
@@ -1044,20 +911,15 @@ $obj = new Foo$0();
 async fn rename_multiple_imports_in_single_use_statement() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 use App\Logger, App\Parser;
+//      ^^^^^^ rename
 $l = new Logger$0();
+//       ^^^^^^ rename
 $p = new Parser();
 "#,
-            "Reporter",
-        )
-        .await;
-    // Only Logger should be renamed to Reporter; Parser stays the same
-    expect![[r#"
-        // main.php
-        1:8-1:14 → "Reporter"
-        2:9-2:15 → "Reporter""#]]
-    .assert_eq(&out);
+        "Reporter",
+    )
+    .await;
 }
