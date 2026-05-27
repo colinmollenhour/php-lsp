@@ -103,7 +103,6 @@ function retry() {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_global_define_style() {
     let mut s = TestServer::new().await;

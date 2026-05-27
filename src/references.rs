@@ -3,7 +3,9 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use php_ast::visitor::{Visitor, walk_stmt};
-use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Span, Stmt, StmtKind, UseKind};
+use php_ast::{
+    ClassMemberKind, EnumMemberKind, ExprKind, NamespaceBody, Span, Stmt, StmtKind, UseKind,
+};
 use rayon::prelude::*;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
@@ -757,6 +759,22 @@ fn collect_declaration_spans(
                         let name = item.name.to_string();
                         out.push(declaration_name_span(source, &name, item.span));
                     }
+                }
+            }
+            StmtKind::Expression(expr) if want_constant => {
+                // `define('NAME', value)` acts as a global constant declaration.
+                if let ExprKind::FunctionCall(f) = &expr.kind
+                    && let ExprKind::Identifier(id) = &f.name.kind
+                    && id.as_str() == "define"
+                    && let Some(first_arg) = f.args.first()
+                    && let ExprKind::String(s) = &first_arg.value.kind
+                    && *s == word
+                {
+                    let start = first_arg.value.span.start + 1;
+                    out.push(Span {
+                        start,
+                        end: start + s.len() as u32,
+                    });
                 }
             }
             StmtKind::Namespace(ns) => {
