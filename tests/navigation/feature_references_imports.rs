@@ -93,21 +93,18 @@ $x = Status::AC$0TIVE;
 #[tokio::test]
 async fn references_handles_class_name_duplicate_with_member() {
     let mut s = TestServer::new().await;
-    let refs = s
-        .check_references(
-            r#"<?php
+    // Should find multiple references to Status (class + const member)
+    s.check_references_annotated(
+        r#"<?php
 class Statu$0s {
+//    ^^^^^^ def
     const Status = 1;
 }
 $x = Status::Status;
+//   ^^^^^^ ref
 "#,
-        )
-        .await;
-    // Should find multiple references to Status (class + const member)
-    expect![[r#"
-        main.php:1:6-1:12
-        main.php:4:5-4:11"#]]
-    .assert_eq(&refs);
+    )
+    .await;
 }
 
 #[tokio::test]

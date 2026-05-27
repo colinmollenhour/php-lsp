@@ -87,8 +87,10 @@ fn validate_lsp_spans(resp: &Value, _file_path: &str, fixture: &Fixture) {
             }
 
             let text = &line[start..end];
+            // A leading `\` is valid: fully-qualified names (`\App\Widget`) are
+            // legitimate reference spans.
             if !text.chars().next().map_or(false, |c| {
-                c.is_alphabetic() || c == '_' || c.is_ascii_digit()
+                c.is_alphabetic() || c == '_' || c.is_ascii_digit() || c == '\\'
             }) {
                 panic!(
                     "LSP span points to invalid symbol start\n\

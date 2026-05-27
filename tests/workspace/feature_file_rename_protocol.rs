@@ -124,19 +124,18 @@ class Class {}
 async fn references_across_use_statements() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let refs = s
-        .check_references(
-            r#"<?php
+    // References should find the class usage.
+    s.check_references_annotated(
+        r#"<?php
 use App$0\Logger;
 
 class Logger {}
 
 $log = new Logger();
+//         ^^^^^^ ref
 "#,
-        )
-        .await;
-    // References should find the class and its usage
-    expect!["main.php:5:11-5:17"].assert_eq(&refs);
+    )
+    .await;
 }
 
 #[tokio::test]
