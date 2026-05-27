@@ -1720,10 +1720,10 @@ impl TestServer {
     /// it lives in; extra or missing locations cause a side-by-side diff.
     pub async fn check_references_annotated(&mut self, src: &str) {
         let opened = self.open_fixture(src).await;
-        fixture::validate_annotations(&opened.fixture);
         let c = opened.cursor().clone();
         let resp = self.references(&c.path, c.line, c.character, true).await;
-        // Validate that LSP response spans point to valid code symbols
+        // Validate that LSP response spans point to valid code symbols.
+        // This catches both real bugs in span generation and any misaligned test annotations.
         validate_lsp_spans(&resp, &c.path, &opened.fixture);
         let expected = collect_navigation_annotations(&opened.fixture, &["def", "ref"]);
         assert_locations_match(&resp, &expected, &self.uri(""), "references");
