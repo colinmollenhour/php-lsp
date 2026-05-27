@@ -716,82 +716,70 @@ function greet(string $n$0ame): void {}
 #[tokio::test]
 async fn implementation_on_interface() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_implementation(
-            r#"<?php
+    s.check_implementation_annotated(
+        r#"<?php
 interface Writ$0able { public function write(): void; }
 class A implements Writable { public function write(): void {} }
+//    ^ impl
 class B implements Writable { public function write(): void {} }
+//    ^ impl
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:2:6-2:7
-        main.php:3:6-3:7"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn implementation_on_abstract_class() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_implementation(
-            r#"<?php
+    s.check_implementation_annotated(
+        r#"<?php
 abstract class Base$0 { abstract public function handle(): void; }
 class ConcreteA extends Base { public function handle(): void {} }
+//    ^^^^^^^^^ impl
 class ConcreteB extends Base { public function handle(): void {} }
+//    ^^^^^^^^^ impl
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:2:6-2:15
-        main.php:3:6-3:15"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn implementation_multiple_classes() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_implementation(
-            r#"<?php
+    s.check_implementation_annotated(
+        r#"<?php
 interface Work$0er { public function execute(): void; }
 class JobA implements Worker { public function execute(): void {} }
+//    ^^^^ impl
 class JobB implements Worker { public function execute(): void {} }
+//    ^^^^ impl
 class JobC implements Worker { public function execute(): void {} }
+//    ^^^^ impl
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:2:6-2:10
-        main.php:3:6-3:10
-        main.php:4:6-4:10"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn implementation_cross_file() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_implementation(
-            r#"//- /src/Contract.php
+    s.check_implementation_annotated(
+        r#"//- /src/Contract.php
 <?php
 interface Operat$0or { public function run(): void; }
 
 //- /src/impl/Add.php
 <?php
 class Add implements Operator { public function run(): void {} }
+//    ^^^ impl
 
 //- /src/impl/Sub.php
 <?php
 class Sub implements Operator { public function run(): void {} }
+//    ^^^ impl
 "#,
-        )
-        .await;
-    expect![[r#"
-        src/impl/Add.php:1:6-1:9
-        src/impl/Sub.php:1:6-1:9"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -810,35 +798,29 @@ class Concret$0e { public function action(): void {} }
 #[tokio::test]
 async fn implementation_interface_extends_single() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_implementation(
-            r#"<?php
+    s.check_implementation_annotated(
+        r#"<?php
 interface Animal$0 {}
 interface Dog extends Animal {}
+//        ^^^ impl
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:2:10-2:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn implementation_interface_extends_multiple() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_implementation(
-            r#"<?php
+    s.check_implementation_annotated(
+        r#"<?php
 interface Animal$0 {}
 interface Dog extends Animal {}
+//        ^^^ impl
 interface Cat extends Animal {}
+//        ^^^ impl
 "#,
-        )
-        .await;
-    expect![[r#"
-        main.php:2:10-2:13
-        main.php:3:10-3:13"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]

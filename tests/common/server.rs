@@ -88,9 +88,9 @@ fn validate_lsp_spans(resp: &Value, _file_path: &str, fixture: &Fixture) {
 
             let text = &line[start..end];
             // A leading `\` is valid: fully-qualified names (`\App\Widget`) are
-            // legitimate reference spans.
+            // legitimate reference spans. A leading `$` is valid for PHP variables.
             if !text.chars().next().map_or(false, |c| {
-                c.is_alphabetic() || c == '_' || c.is_ascii_digit() || c == '\\'
+                c.is_alphabetic() || c == '_' || c.is_ascii_digit() || c == '\\' || c == '$'
             }) {
                 panic!(
                     "LSP span points to invalid symbol start\n\
@@ -1713,6 +1713,23 @@ impl TestServer {
         render_prepare_rename(&resp)
     }
 
+    /// Shared implementation for all annotation-based navigation assertions.
+    ///
+    /// Validates that every LSP `Location` in `resp` aligns with a `// ^^^ <tag>`
+    /// annotation in the fixture, and that no annotation is uncovered.
+    fn assert_annotated_locations(
+        &self,
+        resp: &serde_json::Value,
+        fixture: &super::fixture::Fixture,
+        cursor_path: &str,
+        accept_tags: &[&str],
+        label: &str,
+    ) {
+        validate_lsp_spans(resp, cursor_path, fixture);
+        let expected = collect_navigation_annotations(fixture, accept_tags);
+        assert_locations_match(resp, &expected, &self.uri(""), label);
+    }
+
     /// Assert that references at `$0` exactly match the `// ^^^ def` and
     /// `// ^^^ ref` annotations in the fixture. Includes declaration in the
     /// request (annotations cover both the decl site and each usage).
@@ -1723,11 +1740,13 @@ impl TestServer {
         let opened = self.open_fixture(src).await;
         let c = opened.cursor().clone();
         let resp = self.references(&c.path, c.line, c.character, true).await;
-        // Validate that LSP response spans point to valid code symbols.
-        // This catches both real bugs in span generation and any misaligned test annotations.
-        validate_lsp_spans(&resp, &c.path, &opened.fixture);
-        let expected = collect_navigation_annotations(&opened.fixture, &["def", "ref"]);
-        assert_locations_match(&resp, &expected, &self.uri(""), "references");
+        self.assert_annotated_locations(
+            &resp,
+            &opened.fixture,
+            &c.path,
+            &["def", "ref"],
+            "references",
+        );
     }
 
     /// Assert that go-to-definition at `$0` lands on every `// ^^^ def`
@@ -1736,8 +1755,46 @@ impl TestServer {
         let opened = self.open_fixture(src).await;
         let c = opened.cursor().clone();
         let resp = self.definition(&c.path, c.line, c.character).await;
-        let expected = collect_navigation_annotations(&opened.fixture, &["def"]);
-        assert_locations_match(&resp, &expected, &self.uri(""), "definition");
+        self.assert_annotated_locations(&resp, &opened.fixture, &c.path, &["def"], "definition");
+    }
+
+    /// Assert that go-to-declaration at `$0` lands on every `// ^^^ decl`
+    /// annotation in the fixture.
+    pub async fn check_declaration_annotated(&mut self, src: &str) {
+        let opened = self.open_fixture(src).await;
+        let c = opened.cursor().clone();
+        let resp = self.declaration(&c.path, c.line, c.character).await;
+        self.assert_annotated_locations(&resp, &opened.fixture, &c.path, &["decl"], "declaration");
+    }
+
+    /// Assert that go-to-type-definition at `$0` lands on every `// ^^^ type`
+    /// annotation in the fixture.
+    pub async fn check_type_definition_annotated(&mut self, src: &str) {
+        let opened = self.open_fixture(src).await;
+        let c = opened.cursor().clone();
+        let resp = self.type_definition(&c.path, c.line, c.character).await;
+        self.assert_annotated_locations(
+            &resp,
+            &opened.fixture,
+            &c.path,
+            &["type"],
+            "type_definition",
+        );
+    }
+
+    /// Assert that go-to-implementation at `$0` lands on every `// ^^^ impl`
+    /// annotation in the fixture.
+    pub async fn check_implementation_annotated(&mut self, src: &str) {
+        let opened = self.open_fixture(src).await;
+        let c = opened.cursor().clone();
+        let resp = self.implementation(&c.path, c.line, c.character).await;
+        self.assert_annotated_locations(
+            &resp,
+            &opened.fixture,
+            &c.path,
+            &["impl"],
+            "implementation",
+        );
     }
 
     /// Assert that document highlights at `$0` match every `// ^^^ read` /

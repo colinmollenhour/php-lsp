@@ -16,29 +16,28 @@ use expect_test::expect;
 #[tokio::test]
 async fn interface_method_from_concrete_impl() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 interface Logger {
     public function log(string $msg): void;
+    //              ^^^ decl
 }
 class FileLogger implements Logger {
     public function log$0(string $msg): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:20-2:23"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn interface_method_from_call_site() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 interface Logger {
     public function log(string $msg): void;
+    //              ^^^ decl
 }
 class FileLogger implements Logger {
     public function log(string $msg): void {}
@@ -46,38 +45,36 @@ class FileLogger implements Logger {
 $logger = new FileLogger();
 $logger->log$0('hello');
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:20-2:23"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn interface_method_on_declaration_site() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 interface Logger {
     public function log$0(string $msg): void;
+    //              ^^^ decl
 }
 class FileLogger implements Logger {
     public function log(string $msg): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:20-2:23"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn cross_file_interface_method() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"//- /Logger.php
+    s.check_declaration_annotated(
+        r#"//- /Logger.php
 <?php
 interface Logger {
     public function log(string $msg): void;
+    //              ^^^ decl
 }
 
 //- /FileLogger.php
@@ -86,9 +83,8 @@ class FileLogger implements Logger {
     public function log$0(string $msg): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"Logger.php:2:20-2:23"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -115,16 +111,15 @@ class Handler implements A, B {
 #[tokio::test]
 async fn interface_name_itself() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 interface Logger$0 {
+//        ^^^^^^ decl
     public function log(): void;
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:1:10-1:16"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Abstract class method declarations ─────────────────────────────────────
@@ -132,48 +127,46 @@ interface Logger$0 {
 #[tokio::test]
 async fn abstract_method_from_concrete_subclass() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 abstract class Base {
     abstract public function build(): void;
+    //                       ^^^^^ decl
 }
 class Impl extends Base {
     public function build$0(): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:29-2:34"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn abstract_method_on_declaration_site() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 abstract class Base {
     abstract public function build$0(): void;
+    //                       ^^^^^ decl
 }
 class Impl extends Base {
     public function build(): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:29-2:34"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn cross_file_abstract_method() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"//- /Base.php
+    s.check_declaration_annotated(
+        r#"//- /Base.php
 <?php
 abstract class Base {
     abstract public function build(): void;
+    //                       ^^^^^ decl
 }
 
 //- /Impl.php
@@ -182,9 +175,8 @@ class Impl extends Base {
     public function build$0(): void {}
 }
 "#,
-        )
-        .await;
-    expect![[r#"Base.php:2:29-2:34"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Abstract trait methods (bug case) ───────────────────────────────────────
@@ -192,20 +184,19 @@ class Impl extends Base {
 #[tokio::test]
 async fn abstract_trait_method_from_using_class() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 trait Renderable {
     abstract public function render(): string;
+    //                       ^^^^^^ decl
 }
 class Page {
     use Renderable;
     public function render$0(): string { return ''; }
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:29-2:35"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Concrete fallback (declaration == definition) ──────────────────────────
@@ -213,65 +204,61 @@ class Page {
 #[tokio::test]
 async fn concrete_function_falls_back_to_definition() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 function greet(): string { return 'hi'; }
+//       ^^^^^ decl
 greet$0();
 "#,
-        )
-        .await;
-    expect![[r#"main.php:1:9-1:14"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn concrete_class_name() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 class Widget {
+//    ^^^^^^ decl
     public function show(): void {}
 }
 $w = new Widget$0();
 "#,
-        )
-        .await;
-    expect![[r#"main.php:1:6-1:12"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn trait_name_falls_back() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 trait Loggable$0 {
+//    ^^^^^^^^ decl
     public function log(): void {}
 }
 class Page {
     use Loggable;
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:1:6-1:14"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn enum_name_falls_back() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 enum Suit$0 {
+//   ^^^^ decl
     case Hearts;
     public function label(): string { return 'H'; }
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:1:5-1:9"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Cross-file fallback ────────────────────────────────────────────────────
@@ -279,19 +266,18 @@ enum Suit$0 {
 #[tokio::test]
 async fn cross_file_function_fallback() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"//- /helpers.php
+    s.check_declaration_annotated(
+        r#"//- /helpers.php
 <?php
 function validate(string $x): bool { return true; }
+//       ^^^^^^^^ decl
 
 //- /main.php
 <?php
 $ok = validate$0('test');
 "#,
-        )
-        .await;
-    expect![[r#"helpers.php:1:9-1:17"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Constants and enum members ────────────────────────────────────────────
@@ -299,99 +285,93 @@ $ok = validate$0('test');
 #[tokio::test]
 async fn class_constant_declaration() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 class Config {
     const DEBUG$0 = true;
+    //    ^^^^^ decl
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:10-2:15"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn enum_case_declaration() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 enum Status {
     case Active$0;
+    //   ^^^^^^ decl
     case Inactive;
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:9-2:15"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn enum_constant_declaration() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 enum Suit {
     case Hearts;
     const MAX_VALUE$0 = 100;
+    //    ^^^^^^^^^ decl
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:3:10-3:19"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn class_property_declaration() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 class User {
     public string $name$0;
+    //             ^^^^ decl
     public function getName(): string { return $this->name; }
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:19-2:23"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn trait_property_declaration() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 trait Timestampable {
     protected string $created$0;
+    //                ^^^^^^^ decl
 }
 class Post {
     use Timestampable;
 }
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:22-2:29"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn property_cursor_on_usage_finds_declaration() {
     let mut s = TestServer::new().await;
-    let out = s
-        .check_declaration(
-            r#"<?php
+    s.check_declaration_annotated(
+        r#"<?php
 class User {
     public string $email;
+    //             ^^^^^ decl
 }
 $u = new User();
 $u->email$0 = 'test@example.com';
 "#,
-        )
-        .await;
-    expect![[r#"main.php:2:19-2:24"#]].assert_eq(&out);
+    )
+    .await;
 }
 
 // ── Edge cases ─────────────────────────────────────────────────────────────
