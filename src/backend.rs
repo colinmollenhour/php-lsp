@@ -1331,21 +1331,19 @@ impl LanguageServer for Backend {
                 let mut locations = find_constructor_references(&short_name, &all_docs, class_fqn);
                 if include_declaration {
                     // The cursor is already on the `__construct` name (verified by
-                    // `class_name_at_construct_decl`), so use the cursor position directly as
-                    // the span rather than re-searching via str_offset (which finds the first
-                    // occurrence in the file and would point at the wrong constructor in files
-                    // with more than one class).
-                    let end = Position {
-                        line: position.line,
-                        character: position.character + "__construct".len() as u32,
-                    };
-                    locations.push(Location {
-                        uri: uri.clone(),
-                        range: Range {
-                            start: position,
-                            end,
-                        },
-                    });
+                    // `class_name_at_construct_decl`), so derive the span from the
+                    // identifier under the cursor rather than re-searching via
+                    // str_offset (which finds the first occurrence in the file and
+                    // would point at the wrong constructor in files with more than
+                    // one class). Using the word boundaries — not the raw cursor
+                    // position — keeps the span correct when the cursor sits
+                    // mid-identifier.
+                    if let Some(range) = crate::util::word_range_at(&source, position) {
+                        locations.push(Location {
+                            uri: uri.clone(),
+                            range,
+                        });
+                    }
                 }
                 return Ok(if locations.is_empty() {
                     None
@@ -1489,16 +1487,22 @@ impl LanguageServer for Backend {
                 // more than one same-named method.
                 let mut combined = session_locs;
                 if include_declaration {
-                    let end = Position {
-                        line: position.line,
-                        character: position.character + word.len() as u32,
-                    };
+                    // Derive the declaration span from the identifier under the
+                    // cursor, not the raw cursor position — otherwise a cursor
+                    // placed mid-identifier yields a span shifted right by its
+                    // in-word offset. Falls back to the cursor-anchored span if
+                    // word boundaries can't be resolved.
+                    let range =
+                        crate::util::word_range_at(&source, position).unwrap_or_else(|| Range {
+                            start: position,
+                            end: Position {
+                                line: position.line,
+                                character: position.character + word.len() as u32,
+                            },
+                        });
                     combined.push(Location {
                         uri: uri.clone(),
-                        range: Range {
-                            start: position,
-                            end,
-                        },
+                        range,
                     });
                     let mut seen = std::collections::HashSet::new();
                     combined.retain(|loc| {
