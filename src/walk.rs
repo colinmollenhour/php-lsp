@@ -1,5 +1,6 @@
 /// AST walkers — collect all spans where a name, variable, property, function,
 /// method, or class reference appears in the given statements.
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 
 use php_ast::{
@@ -452,6 +453,21 @@ impl<'arena, 'src> Visitor<'arena, 'src> for PropertyRefsVisitor<'_> {
                     self.out.push(span);
                 }
             }
+            // Static property access: Class::$prop, self::$prop, parent::$prop.
+            // The member expression is a Variable whose span includes the `$` sigil;
+            // we skip it (+1) so the emitted span covers only the name itself,
+            // matching the convention used by instance-property access above.
+            ExprKind::StaticPropertyAccess(s) => {
+                if let ExprKind::Identifier(name) = &s.member.kind
+                    && name.as_str() == self.prop_name
+                    && s.member.span.start + 1 < s.member.span.end
+                {
+                    self.out.push(Span {
+                        start: s.member.span.start + 1,
+                        end: s.member.span.end,
+                    });
+                }
+            }
             _ => {}
         }
         walk_expr(self, expr)
@@ -553,6 +569,146 @@ impl<'arena, 'src> Visitor<'arena, 'src> for MethodRefsVisitor<'_> {
             _ => {}
         }
         walk_expr(self, expr)
+    }
+}
+
+// ── Class-constant-reference walker ──────────────────────────────────────────
+
+/// Collect all spans where `const_name` is declared or accessed as a class
+/// constant (`Class::CONST`, `self::CONST`, `parent::CONST`, `static::CONST`).
+///
+/// `class_filter` — when `Some`, only access expressions whose class part
+/// matches the given short name (or is `self`/`parent`/`static`, or is a class
+/// that directly extends the owning class in the same file) are included.
+/// Pass the owning class name to avoid matching same-named constants elsewhere.
+pub fn constant_refs_in_stmts(
+    source: &str,
+    stmts: &[Stmt<'_, '_>],
+    const_name: &str,
+    class_filter: Option<&str>,
+    out: &mut Vec<Span>,
+) {
+    // Pre-build the set of allowed class names: the owner itself plus any class
+    // in this file that directly `extends` the owner (they inherit the constant).
+    let allowed: Option<HashSet<String>> = class_filter.map(|owner| {
+        let mut set = HashSet::new();
+        set.insert(owner.to_string());
+        for stmt in stmts {
+            if let StmtKind::Class(c) = &stmt.kind
+                && let Some(extends) = &c.extends
+                && extends.to_string_repr() == owner
+                && let Some(name) = c.name
+            {
+                set.insert(name.to_string());
+            }
+        }
+        set
+    });
+    let mut v = ConstantRefsVisitor {
+        source,
+        const_name,
+        allowed: allowed.as_ref(),
+        current_class: None,
+        out: Vec::new(),
+    };
+    for stmt in stmts {
+        let _ = v.visit_stmt(stmt);
+    }
+    out.append(&mut v.out);
+}
+
+struct ConstantRefsVisitor<'a> {
+    source: &'a str,
+    const_name: &'a str,
+    /// When `Some`, only include access sites where the class expression matches
+    /// a name in this set or is `self`/`parent`/`static`.
+    allowed: Option<&'a HashSet<String>>,
+    /// The short name of the class currently being visited; used to filter
+    /// `ClassConst` declaration spans to the owning class only.
+    current_class: Option<String>,
+    out: Vec<Span>,
+}
+
+impl<'arena, 'src> Visitor<'arena, 'src> for ConstantRefsVisitor<'_> {
+    fn visit_stmt(&mut self, stmt: &Stmt<'arena, 'src>) -> ControlFlow<()> {
+        let class_name: Option<String> = match &stmt.kind {
+            StmtKind::Class(c) => c.name.map(|n| n.to_string()),
+            StmtKind::Interface(i) => Some(i.name.to_string()),
+            StmtKind::Trait(t) => Some(t.name.to_string()),
+            StmtKind::Enum(e) => Some(e.name.to_string()),
+            _ => {
+                return walk_stmt(self, stmt);
+            }
+        };
+        let prev = self.current_class.take();
+        self.current_class = class_name;
+        let r = walk_stmt(self, stmt);
+        self.current_class = prev;
+        r
+    }
+
+    fn visit_expr(&mut self, expr: &Expr<'arena, 'src>) -> ControlFlow<()> {
+        if let ExprKind::ClassConstAccess(s) = &expr.kind
+            && let ExprKind::Identifier(name) = &s.member.kind
+            && name.as_str() == self.const_name
+        {
+            let include = self.allowed.is_none_or(|allowed| {
+                if let ExprKind::Identifier(class_id) = &s.class.kind {
+                    let cn = class_id.as_str();
+                    matches!(cn, "self" | "parent" | "static") || allowed.contains(cn)
+                } else {
+                    true
+                }
+            });
+            if include {
+                self.out.push(s.member.span);
+            }
+        }
+        walk_expr(self, expr)
+    }
+
+    fn visit_class_member(&mut self, member: &ClassMember<'arena, 'src>) -> ControlFlow<()> {
+        if let ClassMemberKind::ClassConst(c) = &member.kind
+            && c.name == self.const_name
+        {
+            let class_ok = self.allowed.is_none_or(|allowed| {
+                self.current_class
+                    .as_deref()
+                    .is_none_or(|cls| allowed.contains(cls))
+            });
+            if class_ok {
+                let name = c.name.to_string();
+                let start = str_offset_in_range(self.source, member.span, &name)
+                    .unwrap_or_else(|| str_offset(self.source, &name).unwrap_or(0));
+                self.out.push(Span {
+                    start,
+                    end: start + name.len() as u32,
+                });
+            }
+        }
+        walk_class_member(self, member)
+    }
+
+    fn visit_enum_member(&mut self, member: &EnumMember<'arena, 'src>) -> ControlFlow<()> {
+        if let EnumMemberKind::ClassConst(c) = &member.kind
+            && c.name == self.const_name
+        {
+            let class_ok = self.allowed.is_none_or(|allowed| {
+                self.current_class
+                    .as_deref()
+                    .is_none_or(|cls| allowed.contains(cls))
+            });
+            if class_ok {
+                let name = c.name.to_string();
+                let start = str_offset_in_range(self.source, member.span, &name)
+                    .unwrap_or_else(|| str_offset(self.source, &name).unwrap_or(0));
+                self.out.push(Span {
+                    start,
+                    end: start + name.len() as u32,
+                });
+            }
+        }
+        walk_enum_member(self, member)
     }
 }
 
@@ -1134,6 +1290,67 @@ mod tests {
         let mut out = vec![];
         property_refs_in_stmts(src, &doc.program().stmts, "name", &mut out);
         assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn property_refs_finds_static_access() {
+        let src = "<?php\nclass Reg { public static int $val = 0; }\nReg::$val;\nReg::$val = 1;";
+        let doc = parse(src);
+        let mut out = vec![];
+        property_refs_in_stmts(src, &doc.program().stmts, "val", &mut out);
+        // declaration + two static access sites
+        assert_eq!(out.len(), 3, "expected decl + 2 accesses, got: {out:?}");
+    }
+
+    // ── constant_refs_in_stmts ──────────────────────────────────────────────
+
+    #[test]
+    fn constant_refs_finds_decl_and_class_access() {
+        let src = "<?php\nclass S { const ACTIVE = 1; }\n$x = S::ACTIVE;\nif ($v === S::ACTIVE) {}";
+        let doc = parse(src);
+        let mut out = vec![];
+        constant_refs_in_stmts(src, &doc.program().stmts, "ACTIVE", None, &mut out);
+        // declaration + 2 access sites
+        assert_eq!(out.len(), 3, "expected decl + 2 accesses, got: {out:?}");
+    }
+
+    #[test]
+    fn constant_refs_finds_self_and_parent_access() {
+        let src = "<?php\nclass Base { const V = 1; }\nclass Child extends Base { public function f(): int { return parent::V; } }";
+        let doc = parse(src);
+        let mut out = vec![];
+        constant_refs_in_stmts(src, &doc.program().stmts, "V", Some("Base"), &mut out);
+        let texts = spans_to_strs(src, &out);
+        // should find: declaration in Base + parent::V access in Child
+        assert!(
+            out.len() >= 2,
+            "expected decl + parent::V access, got: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn constant_refs_parent_reference_full_source() {
+        let src = "<?php\nclass Base {\n    const VERSION = '1.0';\n}\n\nclass Extended extends Base {\n    public function getVersion(): string {\n        return parent::VERSION;\n    }\n}\n\necho Extended::VERSION;";
+        let doc = parse(src);
+        let mut out = vec![];
+        constant_refs_in_stmts(src, &doc.program().stmts, "VERSION", Some("Base"), &mut out);
+        let texts = spans_to_strs(src, &out);
+        assert!(
+            out.len() >= 3,
+            "expected decl + parent::VERSION + Extended::VERSION = 3, got {}: {texts:?}",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn constant_refs_filters_same_name_different_class() {
+        let src = "<?php\nclass A { const X = 1; }\nclass B { const X = 2; }\nA::X;\nB::X;";
+        let doc = parse(src);
+        let mut out = vec![];
+        constant_refs_in_stmts(src, &doc.program().stmts, "X", Some("A"), &mut out);
+        // should NOT include B's declaration or B::X
+        let texts = spans_to_strs(src, &out);
+        assert!(!texts.is_empty(), "should find A::X: {texts:?}");
     }
 
     // ── function_refs_in_stmts ───────────────────────────────────────────────

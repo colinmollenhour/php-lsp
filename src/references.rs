@@ -10,9 +10,9 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use crate::ast::{ParsedDoc, str_offset_in_range};
 use crate::util::utf16_code_units;
 use crate::walk::{
-    all_class_ref_names_in_stmts, class_refs_in_stmts, fqn_new_class_refs_in_stmts,
-    function_refs_in_stmts, method_refs_in_stmts, new_refs_in_stmts, property_refs_in_stmts,
-    refs_in_stmts, refs_in_stmts_with_use,
+    all_class_ref_names_in_stmts, class_refs_in_stmts, constant_refs_in_stmts,
+    fqn_new_class_refs_in_stmts, function_refs_in_stmts, method_refs_in_stmts, new_refs_in_stmts,
+    property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use,
 };
 
 /// Callback signature for the mir-codebase reference-lookup fast path:
@@ -32,6 +32,8 @@ pub enum SymbolKind {
     Class,
     /// A class / trait property (`->name`, `?->name`, promoted or declared).
     Property,
+    /// A class, interface, enum, or trait constant (`Class::CONST`, `self::CONST`).
+    Constant,
 }
 
 fn class_has_ancestor(
@@ -211,9 +213,9 @@ pub fn find_references_codebase_with_target(
         // General walker already handles None kind; codebase index adds no value.
         None => None,
 
-        // Properties aren't tracked in the mir codebase index; fall through to
-        // the general AST walker by returning None.
-        Some(SymbolKind::Property) => None,
+        // Properties and constants aren't tracked in the mir codebase index; fall
+        // through to the AST walker.
+        Some(SymbolKind::Property) | Some(SymbolKind::Constant) => None,
     }
 }
 
@@ -244,7 +246,15 @@ fn find_references_inner(
             {
                 return Vec::new();
             }
-            scan_doc(word, uri, doc, include_declaration, include_use, kind)
+            scan_doc(
+                word,
+                uri,
+                doc,
+                include_declaration,
+                include_use,
+                kind,
+                target_fqn,
+            )
         })
         .collect()
 }
@@ -425,6 +435,7 @@ fn scan_doc(
     include_declaration: bool,
     include_use: bool,
     kind: Option<SymbolKind>,
+    target_fqn: Option<&str>,
 ) -> Vec<Location> {
     let source = doc.source();
     // Substring pre-filter: every walker below pushes a span only when an
@@ -463,6 +474,27 @@ fn scan_doc(
                         stmts,
                         word,
                         Some(SymbolKind::Property),
+                        &mut decl_spans,
+                    );
+                    let decl_set: HashSet<(u32, u32)> =
+                        decl_spans.iter().map(|s| (s.start, s.end)).collect();
+                    spans.retain(|span| !decl_set.contains(&(span.start, span.end)));
+                }
+            }
+            // Constant walker emits both declaration spans and access spans.
+            Some(SymbolKind::Constant) => {
+                // target_fqn doubles as the owning-class short name for same-name disambiguation.
+                let class_filter = target_fqn
+                    .and_then(|fqn| fqn.trim_start_matches('\\').rsplit('\\').next())
+                    .or(target_fqn);
+                constant_refs_in_stmts(source, stmts, word, class_filter, &mut spans);
+                if !include_declaration {
+                    let mut decl_spans = Vec::new();
+                    collect_declaration_spans(
+                        source,
+                        stmts,
+                        word,
+                        Some(SymbolKind::Constant),
                         &mut decl_spans,
                     );
                     let decl_set: HashSet<(u32, u32)> =
@@ -544,6 +576,7 @@ fn collect_declaration_spans(
     let want_method = matches!(kind, None | Some(SymbolKind::Method));
     let want_type = matches!(kind, None | Some(SymbolKind::Class));
     let want_property = matches!(kind, None | Some(SymbolKind::Property));
+    let want_constant = matches!(kind, None | Some(SymbolKind::Constant));
 
     for stmt in stmts {
         match &stmt.kind {
@@ -561,7 +594,7 @@ fn collect_declaration_spans(
                 {
                     out.push(declaration_name_span(source, &name.to_string(), stmt.span));
                 }
-                if want_method || want_property {
+                if want_method || want_property || want_constant {
                     for member in c.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) if want_method && m.name == word => {
@@ -597,6 +630,13 @@ fn collect_declaration_spans(
                                     member.span,
                                 ));
                             }
+                            ClassMemberKind::ClassConst(c) if want_constant && c.name == word => {
+                                out.push(declaration_name_span(
+                                    source,
+                                    &c.name.to_string(),
+                                    member.span,
+                                ));
+                            }
                             _ => {}
                         }
                     }
@@ -610,16 +650,24 @@ fn collect_declaration_spans(
                         stmt.span,
                     ));
                 }
-                if want_method {
+                if want_method || want_constant {
                     for member in i.members.iter() {
-                        if let ClassMemberKind::Method(m) = &member.kind
-                            && m.name == word
-                        {
-                            out.push(declaration_name_span(
-                                source,
-                                &m.name.to_string(),
-                                member.span,
-                            ));
+                        match &member.kind {
+                            ClassMemberKind::Method(m) if want_method && m.name == word => {
+                                out.push(declaration_name_span(
+                                    source,
+                                    &m.name.to_string(),
+                                    member.span,
+                                ));
+                            }
+                            ClassMemberKind::ClassConst(c) if want_constant && c.name == word => {
+                                out.push(declaration_name_span(
+                                    source,
+                                    &c.name.to_string(),
+                                    member.span,
+                                ));
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -632,7 +680,7 @@ fn collect_declaration_spans(
                         stmt.span,
                     ));
                 }
-                if want_method || want_property {
+                if want_method || want_property || want_constant {
                     for member in t.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) if want_method && m.name == word => {
@@ -646,6 +694,13 @@ fn collect_declaration_spans(
                                 out.push(declaration_name_span(
                                     source,
                                     &p.name.to_string(),
+                                    member.span,
+                                ));
+                            }
+                            ClassMemberKind::ClassConst(c) if want_constant && c.name == word => {
+                                out.push(declaration_name_span(
+                                    source,
+                                    &c.name.to_string(),
                                     member.span,
                                 ));
                             }
@@ -672,6 +727,13 @@ fn collect_declaration_spans(
                             ));
                         }
                         EnumMemberKind::Case(c) if want_type && c.name == word => {
+                            out.push(declaration_name_span(
+                                source,
+                                &c.name.to_string(),
+                                member.span,
+                            ));
+                        }
+                        EnumMemberKind::ClassConst(c) if want_constant && c.name == word => {
                             out.push(declaration_name_span(
                                 source,
                                 &c.name.to_string(),

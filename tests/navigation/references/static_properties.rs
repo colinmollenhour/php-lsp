@@ -9,7 +9,6 @@
 
 use super::*;
 
-#[ignore]
 #[tokio::test]
 async fn static_property_basic_access() {
     let mut s = TestServer::new().await;
@@ -30,7 +29,6 @@ Registry::$instance = 'value';
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn static_property_self_reference() {
     let mut s = TestServer::new().await;
@@ -47,7 +45,7 @@ class Cache {
 
     public static function get(string $key): mixed {
         return self::$items[$key] ?? null;
-        //         ^^^^^ ref
+        //           ^^^^^ ref
     }
 
     public static function clear(): void {
@@ -60,7 +58,6 @@ class Cache {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn static_property_parent_reference() {
     let mut s = TestServer::new().await;
@@ -68,7 +65,7 @@ async fn static_property_parent_reference() {
         r#"<?php
 class BaseStorage {
     protected static array $coun$0t = [];
-    //                             ^^^^^ def
+    //                     ^^^^^ def
 }
 
 class ExtendedStorage extends BaseStorage {
@@ -87,7 +84,6 @@ class ExtendedStorage extends BaseStorage {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn static_property_cross_file() {
     let mut s = TestServer::new().await;
@@ -103,13 +99,13 @@ class ServiceRegistry {
 <?php
 function getService(string $name): mixed {
     return ServiceRegistry::$container?->get($name);
-    //                     ^^^^^^^^^ ref
+    //                      ^^^^^^^^^ ref
 }
 
 class Bootstrap {
     public static function init(\Psr\Container $c): void {
         ServiceRegistry::$container = $c;
-        //             ^^^^^^^^^ ref
+        //               ^^^^^^^^^ ref
     }
 }
 "#,
@@ -117,7 +113,6 @@ class Bootstrap {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn static_property_in_condition() {
     let mut s = TestServer::new().await;
@@ -130,10 +125,10 @@ class AppState {
 
 function bootstrap(): void {
     if (!AppState::$initialized) {
-    //            ^^^^^^^^^^^ ref
+    //             ^^^^^^^^^^^ ref
         setup();
         AppState::$initialized = true;
-        //       ^^^^^^^^^^^ ref
+        //        ^^^^^^^^^^^ ref
     }
 }
 "#,
@@ -141,7 +136,6 @@ function bootstrap(): void {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn static_property_in_foreach() {
     let mut s = TestServer::new().await;
@@ -154,7 +148,7 @@ class Logger {
 
 function logErrors(): void {
     foreach (Logger::$messages as $msg) {
-    //              ^^^^^^^^ ref
+    //               ^^^^^^^^ ref
         echo $msg;
     }
 
@@ -166,7 +160,6 @@ function logErrors(): void {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn static_property_visibility_levels() {
     // Test static properties with different visibility modifiers
@@ -183,7 +176,7 @@ class AccessControl {
 class External {
     public function test(): void {
         $val = AccessControl::$public_val;
-        //                   ^^^^^^^^^^^ ref
+        //                    ^^^^^^^^^^^ ref
     }
 }
 
@@ -197,7 +190,6 @@ class Internal extends AccessControl {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn static_property_multiple_assignments() {
     let mut s = TestServer::new().await;
@@ -220,14 +212,13 @@ function resetCounter(): void {
 
 function getCounter(): int {
     return Counter::$value;
-    //             ^^^^^ ref
+    //              ^^^^^ ref
 }
 "#,
     )
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn static_property_in_static_initializer() {
     let mut s = TestServer::new().await;
@@ -250,7 +241,6 @@ class Config {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn static_property_type_safety() {
     let mut s = TestServer::new().await;
