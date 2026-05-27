@@ -20,10 +20,10 @@ class Registry {
 }
 
 $r = Registry::$instance;
-//             ^^^^^^^^ ref
+//              ^^^^^^^^ ref
 
 Registry::$instance = 'value';
-//        ^^^^^^^^ ref
+//         ^^^^^^^^ ref
 "#,
     )
     .await;
@@ -36,21 +36,21 @@ async fn static_property_self_reference() {
         r#"<?php
 class Cache {
     public static array $ite$0ms = [];
-    //                    ^^^^^ def
+    //                   ^^^^^ def
 
     public static function add(string $key): void {
         self::$items[$key] = true;
-        //    ^^^^^ ref
+        //     ^^^^^ ref
     }
 
     public static function get(string $key): mixed {
         return self::$items[$key] ?? null;
-        //           ^^^^^ ref
+        //            ^^^^^ ref
     }
 
     public static function clear(): void {
         self::$items = [];
-        //    ^^^^^ ref
+        //     ^^^^^ ref
     }
 }
 "#,
@@ -65,18 +65,18 @@ async fn static_property_parent_reference() {
         r#"<?php
 class BaseStorage {
     protected static array $coun$0t = [];
-    //                     ^^^^^ def
+    //                      ^^^^^ def
 }
 
 class ExtendedStorage extends BaseStorage {
     public static function increment(): void {
         parent::$count[] = 1;
-        //      ^^^^^ ref
+        //       ^^^^^ ref
     }
 
     public static function reset(): void {
         parent::$count = [];
-        //      ^^^^^ ref
+        //       ^^^^^ ref
     }
 }
 "#,
@@ -92,20 +92,20 @@ async fn static_property_cross_file() {
 <?php
 class ServiceRegistry {
     public static ?\Psr\Container $contai$0ner = null;
-    //                            ^^^^^^^^^ def
+    //                             ^^^^^^^^^ def
 }
 
 //- /Service.php
 <?php
 function getService(string $name): mixed {
     return ServiceRegistry::$container?->get($name);
-    //                      ^^^^^^^^^ ref
+    //                       ^^^^^^^^^ ref
 }
 
 class Bootstrap {
     public static function init(\Psr\Container $c): void {
         ServiceRegistry::$container = $c;
-        //               ^^^^^^^^^ ref
+        //                ^^^^^^^^^ ref
     }
 }
 "#,
@@ -125,10 +125,10 @@ class AppState {
 
 function bootstrap(): void {
     if (!AppState::$initialized) {
-    //             ^^^^^^^^^^^ ref
+    //              ^^^^^^^^^^^ ref
         setup();
         AppState::$initialized = true;
-        //        ^^^^^^^^^^^ ref
+        //         ^^^^^^^^^^^ ref
     }
 }
 "#,
@@ -143,17 +143,17 @@ async fn static_property_in_foreach() {
         r#"<?php
 class Logger {
     public static array $message$0s = [];
-    //                    ^^^^^^^^ def
+    //                   ^^^^^^^^ def
 }
 
 function logErrors(): void {
     foreach (Logger::$messages as $msg) {
-    //               ^^^^^^^^ ref
+    //                ^^^^^^^^ ref
         echo $msg;
     }
 
     Logger::$messages = [];
-    //      ^^^^^^^^ ref
+    //       ^^^^^^^^ ref
 }
 "#,
     )
@@ -168,7 +168,7 @@ async fn static_property_visibility_levels() {
         r#"<?php
 class AccessControl {
     public static string $public$0_val = '';
-    //                    ^^^^^^^^^^^ def
+    //                    ^^^^^^^^^^ def
     protected static string $protected_val = '';
     private static string $private_val = '';
 }
@@ -176,7 +176,7 @@ class AccessControl {
 class External {
     public function test(): void {
         $val = AccessControl::$public_val;
-        //                    ^^^^^^^^^^^ ref
+        //                     ^^^^^^^^^^ ref
     }
 }
 
@@ -197,22 +197,22 @@ async fn static_property_multiple_assignments() {
         r#"<?php
 class Counter {
     public static int $valu$0e = 0;
-    //                  ^^^^^ def
+    //                 ^^^^^ def
 }
 
 function incrementCounter(): void {
     Counter::$value++;
-    //       ^^^^^ ref
+    //        ^^^^^ ref
 }
 
 function resetCounter(): void {
     Counter::$value = 0;
-    //       ^^^^^ ref
+    //        ^^^^^ ref
 }
 
 function getCounter(): int {
     return Counter::$value;
-    //              ^^^^^ ref
+    //               ^^^^^ ref
 }
 "#,
     )
@@ -248,7 +248,7 @@ async fn static_property_type_safety() {
         r#"<?php
 class Database {
     public static ?\PDO $connectio$0n = null;
-    //                    ^^^^^^^^^^ def
+    //                   ^^^^^^^^^^ def
 }
 
 class QueryBuilder {
@@ -259,7 +259,7 @@ class QueryBuilder {
         }
 
         Database::$connection->query('SELECT 1');
-        //        ^^^^^^^^^^ ref
+        //         ^^^^^^^^^^ ref
     }
 }
 "#,

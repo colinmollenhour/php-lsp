@@ -26,9 +26,9 @@ async fn rename_function_same_file() {
         r#"<?php
 function gre$0et(): void {}
 //       ^^^^^ rename
-greet();
+  greet();
 //^^^^^ rename
-greet();
+  greet();
 //^^^^^ rename
 "#,
         "salute",
@@ -66,7 +66,7 @@ async fn rename_variable_inside_enum_method() {
 enum Status {
     public function label($a$0rg) { return $arg + 1; }
     //                    ^^^^ rename
-    //                                     ^^^^ rename
+    //                                   ^^^^ rename
 }
 "#,
         "value",
@@ -190,11 +190,11 @@ async fn rename_property_updates_all_access_sites() {
         r#"<?php
 class Counter {
     public int $count = 0;
-    //         ^^^^^ rename
+    //          ^^^^^ rename
     public function inc(): void { $this->coun$0t++; }
-    //                                  ^^^^^ rename
+    //                                   ^^^^^ rename
     public function get(): int  { return $this->count; }
-    //                                         ^^^^^ rename
+    //                                          ^^^^^ rename
 }
 "#,
         "total",
@@ -390,7 +390,7 @@ function foo$0() {}
 //       ^^^ rename
 function foobar() {}
 function barfoo() {}
-foo();
+  foo();
 //^^^ rename
 foobar();
 barfoo();
@@ -428,7 +428,7 @@ async fn rename_property_works_across_files() {
 <?php
 class Foo {
     public int $count;
-    //         ^^^^^ rename
+    //          ^^^^^ rename
 }
 
 //- /b.php
@@ -497,7 +497,7 @@ async fn rename_is_case_sensitive() {
 function test() {}
 //       ^^^^ rename
 function Test() {}
-tes$0t();
+  tes$0t();
 //^^^^ rename
 "#,
         "verify",
@@ -514,7 +514,7 @@ async fn rename_function_multiple_scopes() {
         r#"<?php
 function process$0() { process(); }
 //       ^^^^^^^ rename
-//                     ^^^^^^^ rename
+//                   ^^^^^^^ rename
 if (true) { process(); }
 //          ^^^^^^^ rename
 while (true) { process(); break; }
@@ -535,7 +535,7 @@ async fn rename_variable_deep_scopes() {
         r#"<?php
 function outer() {
     $x$0 = 1;
-   //^^ rename
+  //^^ rename
     function inner() {
         $x = 2;
     }
@@ -586,7 +586,7 @@ async fn rename_property_from_access_site_works() {
         r#"<?php
 class Foo {
     public int $count;
-    //         ^^^^^ rename
+    //          ^^^^^ rename
 }
 $foo = new Foo();
 $foo->coun$0t++;
@@ -657,7 +657,7 @@ async fn rename_variable_in_arrow_function() {
         r#"<?php
 function process(): void {
     $value$0 = 42;
-    //^^^^^^ rename
+//  ^^^^^^ rename
     $fn = fn() => $value + 1;
     //            ^^^^^^ rename
     echo $value;
@@ -678,7 +678,7 @@ async fn rename_variable_in_nested_arrow_function() {
         r#"<?php
 function compute(): void {
     $base$0 = 10;
-    //^^^^^ rename
+//  ^^^^^ rename
     $offset = 5;
     $calc = fn() => fn() => $base + $offset;
     //                      ^^^^^ rename
@@ -700,7 +700,7 @@ async fn rename_variable_in_arrow_in_array() {
         r#"<?php
 function process(): void {
     $multiplier$0 = 2;
-    //^^^^^^^^^^^ rename
+//  ^^^^^^^^^^^ rename
     $mappers = [
         fn($x) => $x * $multiplier,
         //             ^^^^^^^^^^^ rename
@@ -728,7 +728,7 @@ async fn rename_variable_in_closure_use_clause() {
         r#"<?php
 function greet(): void {
     $name$0 = "Alice";
-    //^^^^^ rename
+//  ^^^^^ rename
     $greeting = function() use ($name) {
     //                          ^^^^^ rename
         echo "Hello " . $name;
@@ -751,7 +751,7 @@ async fn rename_variable_in_closure_use_by_reference() {
         r#"<?php
 function counter(): void {
     $count$0 = 0;
-    //^^^^^^ rename
+//  ^^^^^^ rename
     $increment = function() use (&$count) {
     //                           ^^^^^^^ rename
         $count++;
@@ -776,7 +776,7 @@ async fn rename_variable_in_closure_multiple_use_vars() {
         r#"<?php
 function process(): void {
     $input$0 = "data";
-    //^^^^^^ rename
+//  ^^^^^^ rename
     $output = "";
     $debug = false;
     $handler = function() use ($input, $output, $debug) {

@@ -60,7 +60,7 @@ class Page implements Renderable {
 }
 $page = new Page();
 echo $page->render();
-//         ^^^^^^ ref
+//          ^^^^^^ ref
 "#,
     )
     .await;

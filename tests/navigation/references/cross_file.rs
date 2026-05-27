@@ -60,7 +60,7 @@ async fn references_distinguishes_cross_namespace_functions() {
 namespace App;
 function gr$0eet(): void {}
 //       ^^^^^ def
-greet();
+  greet();
 //^^^^^ ref
 
 //- /src/domain.php
@@ -108,7 +108,7 @@ async fn references_distinguishes_cross_namespace_function_calls() {
 namespace Alpha;
 function pro$0cess(): void {}
 //       ^^^^^^^ def
-process();
+  process();
 //^^^^^^^ ref
 
 //- /beta.php

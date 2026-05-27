@@ -19,9 +19,9 @@ class Status {
     const INACTIVE = 0;
 }
 $s = Status::ACTIVE;
-//          ^^^^^^ ref
+//           ^^^^^^ ref
 if ($val === Status::ACTIVE) {}
-//                  ^^^^^^ ref
+//                   ^^^^^^ ref
 "#,
     )
     .await;
@@ -38,7 +38,7 @@ class Config {
 
     public static function isDebug(): bool {
         return self::DEBUG;
-        //          ^^^^^ ref
+        //           ^^^^^ ref
     }
 
     public function check(): void {
@@ -64,12 +64,12 @@ class Base {
 class Extended extends Base {
     public function getVersion(): string {
         return parent::VERSION;
-        //            ^^^^^^^ ref
+        //             ^^^^^^^ ref
     }
 }
 
 echo Extended::VERSION;
-//            ^^^^^^^ ref
+//             ^^^^^^^ ref
 "#,
     )
     .await;
@@ -94,7 +94,7 @@ $timeout = AppConfig::TIMEOUT;
 
 function retry() {
     for ($i = 0; $i < AppConfig::TIMEOUT; $i++) {
-    //                             ^^^^^^^ ref
+    //                           ^^^^^^^ ref
         try_request();
     }
 }
@@ -187,11 +187,11 @@ async fn constant_in_default_parameter() {
         r#"<?php
 class Limits {
     const DEF$0AULT_SIZE = 100;
-    //    ^^^^^^^^^^^^^ def
+    //    ^^^^^^^^^^^^ def
 }
 
 function process(int $size = Limits::DEFAULT_SIZE): void {
-//                                     ^^^^^^^^^^^^ ref
+//                                   ^^^^^^^^^^^^ ref
     echo $size;
 }
 "#,
@@ -212,7 +212,7 @@ class HttpCode {
 
 $responses = [
     HttpCode::OK => 'success',
-    //       ^^ ref
+    //        ^^ ref
     HttpCode::NOT_FOUND => 'not found',
 ];
 
@@ -264,12 +264,12 @@ interface HttpMethods {
 class Client implements HttpMethods {
     public function request(): void {
         $timeout = self::GET_TIMEOUT;
-        //              ^^^^^^^^^^^ ref
+        //               ^^^^^^^^^^^ ref
     }
 }
 
 echo HttpMethods::GET_TIMEOUT;
-//               ^^^^^^^^^^^ ref
+//                ^^^^^^^^^^^ ref
 "#,
     )
     .await;

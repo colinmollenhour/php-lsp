@@ -41,7 +41,7 @@ $c = new Config('x');
 echo $c->key;
 //       ^^^ ref
 echo $c?->key;
-//         ^^^ ref
+//        ^^^ ref
 "#,
     )
     .await;
@@ -59,7 +59,7 @@ class Cart {
     public function __construct(private object $item) {}
     //                                          ^^^^ ref
     public function total(): void { $this->it$0em; }
-    //                                      ^^^^ ref
+    //                                     ^^^^ ref
     public function describe(): void { $this->item; }
     //                                        ^^^^ ref
 }
@@ -77,9 +77,9 @@ async fn references_property_access_site() {
         r#"<?php
 class Cart {
     public int $total = 0;
-    //         ^^^^^ def
+    //          ^^^^^ def
     public function total(): int { return $this->total; }
-    //                                          ^^^^^ ref
+    //                                           ^^^^^ ref
 }
 $c = new Cart();
 $c->to$0tal;
@@ -100,9 +100,9 @@ async fn references_property_declaration() {
         r#"<?php
 class Order {
     public string $sta$0tus = '';
-    //            ^^^^^^ def
+    //             ^^^^^^ def
     public function status(): string { return $this->status; }
-    //                                              ^^^^^^ ref
+    //                                               ^^^^^^ ref
 }
 $o = new Order();
 $o->status;

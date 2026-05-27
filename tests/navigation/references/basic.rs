@@ -9,9 +9,9 @@ async fn references_function_same_file() {
         r#"<?php
 function gr$0eet(): void {}
 //       ^^^^^ def
-greet();
+  greet();
 //^^^^^ ref
-greet();
+  greet();
 //^^^^^ ref
 "#,
     )

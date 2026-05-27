@@ -20,7 +20,7 @@ class Entity$0Attribute {}
 //    ^^^^^^^^^^^^^^^ def
 
 #[EntityAttribute]
-// ^^^^^^^^^^^^^^^^ ref
+//^^^^^^^^^^^^^^^ ref
 class User {}
 "#,
     )
@@ -37,7 +37,7 @@ class Route$0Attribute {}
 
 class Controller {
     #[RouteAttribute('/users', 'GET')]
-    // ^^^^^^^^^^^^^^ ref
+    //^^^^^^^^^^^^^^ ref
     public function getUsers(): array {
         return [];
     }
@@ -53,11 +53,11 @@ async fn attribute_on_property() {
     s.check_references_annotated(
         r#"<?php
 class Serialize$0Attribute {}
-//    ^^^^^^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^^^^^^^^ def
 
 class Document {
     #[SerializeAttribute]
-    // ^^^^^^^^^^^^^^^^^ ref
+    //^^^^^^^^^^^^^^^^^^ ref
     public string $content;
 }
 "#,
@@ -74,7 +74,7 @@ class Depreca$0ted {}
 //    ^^^^^^^^^^ def
 
 #[Deprecated]
-// ^^^^^^^^^^ ref
+//^^^^^^^^^^ ref
 function oldFunction(): void {
     echo 'This is deprecated';
 }
@@ -89,11 +89,11 @@ async fn attribute_on_parameter() {
     s.check_references_annotated(
         r#"<?php
 class Validate$0Attribute {}
-//    ^^^^^^^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^^^^^^^ def
 
 function process(
     #[ValidateAttribute('email')]
-    // ^^^^^^^^^^^^^^^^^^ ref
+    //^^^^^^^^^^^^^^^^^ ref
     string $email
 ): void {
     // validate
@@ -114,7 +114,7 @@ class Immuta$0ble {}
 class User {
     public function __construct(
         #[Immutable]
-        // ^^^^^^^^^ ref
+        //^^^^^^^^^ ref
         public readonly string $id,
     ) {}
 }
@@ -132,7 +132,7 @@ class Backable$0Enum {}
 //    ^^^^^^^^^^^^ def
 
 #[BackableEnum]
-// ^^^^^^^^^^^^ ref
+//^^^^^^^^^^^^ ref
 enum Status: int {
     case Active = 1;
     case Inactive = 0;
@@ -148,11 +148,11 @@ async fn attribute_on_enum_case() {
     s.check_references_annotated(
         r#"<?php
 class Default$0Case {}
-//    ^^^^^^^^^ def
+//    ^^^^^^^^^^^ def
 
 enum Priority {
     #[DefaultCase]
-    // ^^^^^^^^^^^ ref
+    //^^^^^^^^^^^ ref
     case Low;
     case Medium;
     case High;
@@ -174,7 +174,7 @@ class Cach$0ed {}
 class Service {
     #[Async]
     #[Cached]
-    // ^^^^^^ ref
+    //^^^^^^ ref
     public function fetchData(): array {
         return [];
     }
@@ -194,7 +194,7 @@ class Required$0Arg {}
 
 class Form {
     #[RequiredArg('email', 'string')]
-    // ^^^^^^^^^^^ ref
+    //^^^^^^^^^^^ ref
     public string $email;
 }
 "#,
@@ -212,9 +212,9 @@ class Permiss$0ion {}
 
 class AdminResource {
     #[Permission('read')]
-    // ^^^^^^^^^ ref
+    //^^^^^^^^^^ ref
     #[Permission('admin')]
-    // ^^^^^^^^^ ref
+    //^^^^^^^^^^ ref
     public function manage(): void {}
 }
 "#,
@@ -232,7 +232,7 @@ class Singleton$0Marker {}
 
 class Cache {
     #[SingletonMarker]
-    // ^^^^^^^^^^^^^^^^ ref
+    //^^^^^^^^^^^^^^^ ref
     public static Cache $instance;
 
     public static function getInstance(): self {
@@ -251,17 +251,17 @@ async fn attribute_cross_file() {
         r#"//- /src/Attributes.php
 <?php
 class Api$0Endpoint {}
-//    ^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^ def
 
 //- /src/Controllers/UserController.php
 <?php
 class UserController {
     #[ApiEndpoint('/users', 'GET')]
-    // ^^^^^^^^^^^ ref
+    //^^^^^^^^^^^ ref
     public function list(): array {}
 
     #[ApiEndpoint('/users/{id}', 'GET')]
-    // ^^^^^^^^^^^ ref
+    //^^^^^^^^^^^ ref
     public function show(int $id): array {}
 }
 "#,
@@ -275,10 +275,10 @@ async fn attribute_on_abstract_class() {
     s.check_references_annotated(
         r#"<?php
 class Abstract$0Base {}
-//    ^^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^^ def
 
 #[AbstractBase]
-// ^^^^^^^^^^^^^ ref
+//^^^^^^^^^^^^ ref
 abstract class Handler {
     abstract public function handle(): void;
 }
@@ -293,10 +293,10 @@ async fn attribute_on_final_class() {
     s.check_references_annotated(
         r#"<?php
 class Immutab$0le {}
-//    ^^^^^^^^^^ def
+//    ^^^^^^^^^ def
 
 #[Immutable]
-// ^^^^^^^^^^ ref
+//^^^^^^^^^ ref
 final class Config {
     public readonly string $path;
 }
@@ -315,7 +315,7 @@ class Required$0Impl {}
 
 interface Repository {
     #[RequiredImpl]
-    // ^^^^^^^^^^^^ ref
+    //^^^^^^^^^^^^ ref
     public function find(int $id): mixed;
 }
 "#,
@@ -329,11 +329,11 @@ async fn attribute_on_static_method() {
     s.check_references_annotated(
         r#"<?php
 class Singleton$0Factory {}
-//    ^^^^^^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^^^^^^ def
 
 class Database {
     #[SingletonFactory]
-    // ^^^^^^^^^^^^^^^^^ ref
+    //^^^^^^^^^^^^^^^^ ref
     public static function getInstance(): self {
         static $instance = null;
         if ($instance === null) {
