@@ -1086,7 +1086,7 @@ pub(crate) fn assert_locations_match(
         let hit = actual
             .iter()
             .enumerate()
-            .position(|(i, (ap, ar))| !matched[i] && ap == ep && ranges_overlap_same_line(er, ar));
+            .position(|(i, (ap, ar))| !matched[i] && ap == ep && annotation_within_range(er, ar));
         match hit {
             Some(i) => matched[i] = true,
             None => missing.push((ep.clone(), *er, tag.clone())),
@@ -1105,31 +1105,49 @@ pub(crate) fn assert_locations_match(
     }
 }
 
-/// Check whether annotation and server range overlap on the same line.
-/// The annotation line must fall within the server's line range. Additionally,
-/// when both are single-line ranges on the same line, their column intervals must
-/// overlap — this prevents matching two completely different identifiers that
-/// happen to share the same line.
-fn ranges_overlap_same_line(
-    expected: &(u32, u32, u32, u32),
-    actual: &(u32, u32, u32, u32),
-) -> bool {
+/// Check whether the annotation caret is aligned with the server's returned
+/// range. The caret's START column must fall inside the actual range
+/// `[start, end)`.
+///
+/// This is asymmetric on purpose. Comment/cursor markers can only push a caret
+/// *rightward* from the true symbol start (the `//` marker occupies the first
+/// columns, the `$0` cursor marker shifts the visual baseline right), so a
+/// caret that begins well *before* the server span is a genuine misalignment
+/// and is rejected. The one exception is the `$` sigil on variables and
+/// properties: a server may return `status` while the caret marks `$status`
+/// (or vice-versa), so one column of left slack is allowed. A caret starting at
+/// or past the span end is rejected — it has drifted off the symbol entirely.
+///
+/// The caret *width* is also bounded: it may not exceed the server span's width
+/// (plus the sigil slack). This is what lets annotations catch a *truncated*
+/// span — e.g. a server returning `\App\W` where the caret marks the full
+/// `\App\Widget`. Marker-shifted carets keep the symbol's width, and a caret
+/// marking a sub-part of a wider server span is narrower, so both still pass;
+/// only a caret wider than the span it matches (the truncation signal) fails.
+const SIGIL_SLACK: u32 = 1;
+
+fn annotation_within_range(expected: &(u32, u32, u32, u32), actual: &(u32, u32, u32, u32)) -> bool {
+    // Annotations are always single-line: esl == eel.
     let (esl, esc, _eel, eec) = *expected;
     let (asl, asc, ael, aec) = *actual;
-    // Expected line must be within the actual range's line span.
-    if !(esl >= asl && esl <= ael) {
+    // Annotation line must fall within the actual range's line span.
+    if esl < asl || esl > ael {
         return false;
     }
-    // When actual is a single-line range on the same line as the annotation,
-    // column intervals must overlap. This catches cases where two identifiers
-    // share the same line but different columns.
-    if asl == ael && asl == esl {
-        // Ranges overlap if neither ends before the other starts.
-        !(aec <= esc || eec <= asc)
-    } else {
-        // Multi-line range; line-containment is sufficient.
-        true
+    // Single-line actual range (the common case): the caret must start at or
+    // after the symbol start (minus the `$` sigil slack) and before its end,
+    // and must not be wider than the span it claims to mark.
+    if asl == ael {
+        let start_ok = asc.saturating_sub(SIGIL_SLACK) <= esc && esc < aec;
+        let width_ok = eec.saturating_sub(esc) <= (aec - asc) + SIGIL_SLACK;
+        return start_ok && width_ok;
     }
+    // Multi-line actual range: enforce the start-column floor only on the
+    // first line; line containment is otherwise sufficient.
+    if esl == asl {
+        return asc.saturating_sub(SIGIL_SLACK) <= esc;
+    }
+    true
 }
 
 pub(crate) fn assert_highlights_match(
@@ -1168,7 +1186,7 @@ pub(crate) fn assert_highlights_match(
             .iter()
             .enumerate()
             .position(|(i, (al, ac, el, ec, _))| {
-                !matched[i] && ranges_overlap_same_line(er, &(*al, *ac, *el, *ec))
+                !matched[i] && annotation_within_range(er, &(*al, *ac, *el, *ec))
             });
         match hit {
             Some(i) => {

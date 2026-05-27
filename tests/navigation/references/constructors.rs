@@ -91,7 +91,7 @@ $w = new \App\Widget();
         )
         .await;
     expect![[r#"
-        Widget.php:3:25-3:36
+        Widget.php:3:20-3:31
         main.php:1:9-1:20"#]]
     .assert_eq(&out);
 }
