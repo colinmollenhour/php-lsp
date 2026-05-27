@@ -2,8 +2,6 @@
 
 use super::*;
 
-use expect_test::expect;
-
 #[tokio::test]
 async fn references_constructor_decl_span_scoped_to_owning_class() {
     // Bug 1: two constructors in the same file — the decl span for Beta's
@@ -75,25 +73,22 @@ async fn references_constructor_fqn_range_covers_full_name() {
     // range covering only `short_name.len()` characters from the `\` in `\App\Widget`,
     // i.e. `\App\W` instead of the full `\App\Widget`.
     let mut s = TestServer::new().await;
-    let out = s
-        .check_references(
-            r#"//- /Widget.php
+    s.check_references_annotated(
+        r#"//- /Widget.php
 <?php
 namespace App;
 class Widget {
     public function __con$0struct() {}
+    //              ^^^^^^^^^^^ def
 }
 
 //- /main.php
 <?php
 $w = new \App\Widget();
+//       ^^^^^^^^^^^ ref
 "#,
-        )
-        .await;
-    expect![[r#"
-        Widget.php:3:20-3:31
-        main.php:1:9-1:20"#]]
-    .assert_eq(&out);
+    )
+    .await;
 }
 
 #[tokio::test]
