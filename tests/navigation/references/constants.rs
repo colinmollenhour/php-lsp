@@ -8,7 +8,6 @@
 
 use super::*;
 
-#[ignore]
 #[tokio::test]
 async fn constant_class_basic() {
     let mut s = TestServer::new().await;
@@ -28,7 +27,6 @@ if ($val === Status::ACTIVE) {}
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_class_self_reference() {
     let mut s = TestServer::new().await;
@@ -45,7 +43,7 @@ class Config {
 
     public function check(): void {
         echo self::DEBUG ? 'debug' : 'prod';
-        //   ^^^^^ ref
+        //         ^^^^^ ref
     }
 }
 "#,
@@ -53,14 +51,13 @@ class Config {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_class_parent_reference() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
 class Base {
-    const VER\$0ION = '1.0';
+    const VERS$0ION = '1.0';
     //    ^^^^^^^ def
 }
 
@@ -78,7 +75,6 @@ echo Extended::VERSION;
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_class_cross_file() {
     let mut s = TestServer::new().await;
@@ -86,7 +82,7 @@ async fn constant_class_cross_file() {
         r#"//- /Config.php
 <?php
 class AppConfig {
-    const TIMEO\$0UT = 30;
+    const TIMEO$0UT = 30;
     //    ^^^^^^^ def
     const MAX_RETRIES = 5;
 }
@@ -113,7 +109,7 @@ async fn constant_global_define_style() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
-define('APP_VE\$0RSION', '2.0.0');
+define('APP_VE$0RSION', '2.0.0');
 //      ^^^^^^^^^^^ def
 
 echo APP_VERSION;
@@ -136,7 +132,7 @@ async fn constant_global_namespace_const() {
         r#"<?php
 namespace App;
 
-const MAX_S\$0IZE = 1000;
+const MAX_S$0IZE = 1000;
 //    ^^^^^^^ def
 
 function validate($input) {
@@ -166,7 +162,7 @@ async fn constant_global_cross_namespace() {
 <?php
 namespace Config;
 
-const DB_H\$0OST = 'localhost';
+const DB_H$0OST = 'localhost';
 //    ^^^^^^^ def
 
 //- /database.php
@@ -187,19 +183,18 @@ class Connection {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_in_default_parameter() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
 class Limits {
-    const DEF\$0AULT_SIZE = 100;
+    const DEF$0AULT_SIZE = 100;
     //    ^^^^^^^^^^^^^ def
 }
 
 function process(int $size = Limits::DEFAULT_SIZE): void {
-//                           ^^^^^^ ref
+//                                     ^^^^^^^^^^^^ ref
     echo $size;
 }
 "#,
@@ -207,14 +202,13 @@ function process(int $size = Limits::DEFAULT_SIZE): void {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_in_array_initializer() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
 class HttpCode {
-    const OK$0 = 200;
+    const O$0K = 200;
     //    ^^ def
     const NOT_FOUND = 404;
 }
@@ -227,14 +221,13 @@ $responses = [
 
 function status(): int {
     return HttpCode::OK;
-    //             ^^ ref
+    //               ^^ ref
 }
 "#,
     )
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_multiple_same_name_different_class() {
     // Same constant name in different classes must not interfere
@@ -242,7 +235,7 @@ async fn constant_multiple_same_name_different_class() {
     s.check_references_annotated(
         r#"<?php
 class DatabaseConfig {
-    const PORT = 5432;
+    const PO$0RT = 5432;
     //    ^^^^ def
 }
 
@@ -260,14 +253,13 @@ $cache_port = CacheConfig::PORT;
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_interface_usage() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
 interface HttpMethods {
-    const GET\$0_TIMEOUT = 30;
+    const GET$0_TIMEOUT = 30;
     //    ^^^^^^^^^^^ def
     const POST_TIMEOUT = 60;
 }

@@ -15,7 +15,9 @@ use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, async_trait};
 
-use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
+use php_ast::{
+    ClassMember, ClassMemberKind, EnumMember, EnumMemberKind, NamespaceBody, Stmt, StmtKind,
+};
 
 use crate::ast::{ParsedDoc, str_offset};
 use crate::autoload::Psr4Map;
@@ -226,7 +228,7 @@ fn build_mir_symbol(
             // normalizes the name. The constructor function does this for us.
             name: StdArc::from(word.to_ascii_lowercase()),
         }),
-        Some(SymbolKind::Property) | None => None,
+        Some(SymbolKind::Property) | Some(SymbolKind::Constant) | None => None,
     }
 }
 
@@ -1356,6 +1358,7 @@ impl LanguageServer for Backend {
             // Check for promoted constructor property params before the character-based
             // heuristic: `$name` in `public function __construct(public string $name)`
             // should find `->name` property accesses, not `$name` variable occurrences.
+            let mut constant_owner: Option<String> = None;
             let (word, kind) = if let Some(doc) = &doc_opt
                 && let Some(prop_name) =
                     promoted_property_at_cursor(doc.source(), &doc.program().stmts, position)
@@ -1369,6 +1372,11 @@ impl LanguageServer for Backend {
                     cursor_is_on_property_decl(doc.source(), stmts, position)
                 {
                     (prop_name, Some(SymbolKind::Property))
+                } else if let Some((const_name, owner)) =
+                    cursor_is_on_constant_decl(doc.source(), stmts, position)
+                {
+                    constant_owner = owner;
+                    (const_name, Some(SymbolKind::Constant))
                 } else {
                     let k = symbol_kind_at(&source, position, &word);
                     (word, k)
@@ -1402,6 +1410,7 @@ impl LanguageServer for Backend {
                         // `resolve_fqn` walks the doc and applies namespace prefix if any.
                         Some(crate::moniker::resolve_fqn(doc, &short_owner, &imports))
                     }
+                    Some(SymbolKind::Constant) => constant_owner.take(),
                     _ => None,
                 }
             });
@@ -3109,6 +3118,103 @@ fn cursor_is_on_property_decl(
                         && let Some(name) = check(source, inner, cursor)
                     {
                         return Some(name);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    check(source, stmts, cursor)
+}
+
+/// When the cursor sits on a class / interface / trait / enum constant
+/// declaration (`const NAME = ...`), return `(const_name, owning_class_short_name)`.
+/// `owning_class_short_name` is the short name of the declaring type; it is used
+/// as a class filter when searching for references so that same-named constants
+/// in different classes don't cross-match.
+fn cursor_is_on_constant_decl(
+    source: &str,
+    stmts: &[Stmt<'_, '_>],
+    position: Position,
+) -> Option<(String, Option<String>)> {
+    let cursor = position_to_byte_offset(source, position)?;
+
+    fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
+        let s = member_span.start as usize;
+        let e = (member_span.end as usize).min(source.len());
+        source
+            .get(s..e)?
+            .find(name)
+            .map(|off| member_span.start + off as u32)
+    }
+
+    fn check_members(source: &str, members: &[ClassMember<'_, '_>], cursor: u32) -> Option<String> {
+        for member in members {
+            if let ClassMemberKind::ClassConst(c) = &member.kind {
+                let name = c.name.to_string();
+                let start = name_offset_in_member(source, member.span, &name).unwrap_or(0);
+                let end = start + name.len() as u32;
+                if cursor >= start && cursor < end {
+                    return Some(name);
+                }
+            }
+        }
+        None
+    }
+
+    fn check_enum_members(
+        source: &str,
+        members: &[EnumMember<'_, '_>],
+        cursor: u32,
+    ) -> Option<String> {
+        for member in members {
+            if let EnumMemberKind::ClassConst(c) = &member.kind {
+                let name = c.name.to_string();
+                let start = name_offset_in_member(source, member.span, &name).unwrap_or(0);
+                let end = start + name.len() as u32;
+                if cursor >= start && cursor < end {
+                    return Some(name);
+                }
+            }
+        }
+        None
+    }
+
+    fn check(
+        source: &str,
+        stmts: &[Stmt<'_, '_>],
+        cursor: u32,
+    ) -> Option<(String, Option<String>)> {
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::Class(c) => {
+                    if let Some(const_name) = check_members(source, &c.members, cursor) {
+                        let owner = c.name.map(|n| n.to_string());
+                        return Some((const_name, owner));
+                    }
+                }
+                StmtKind::Interface(i) => {
+                    if let Some(const_name) = check_members(source, &i.members, cursor) {
+                        return Some((const_name, Some(i.name.to_string())));
+                    }
+                }
+                StmtKind::Trait(t) => {
+                    if let Some(const_name) = check_members(source, &t.members, cursor) {
+                        return Some((const_name, Some(t.name.to_string())));
+                    }
+                }
+                StmtKind::Enum(e) => {
+                    if let Some(const_name) = check_enum_members(source, &e.members, cursor) {
+                        return Some((const_name, Some(e.name.to_string())));
+                    }
+                }
+                StmtKind::Namespace(ns) => {
+                    if let NamespaceBody::Braced(inner) = &ns.body
+                        && let Some(result) = check(source, inner, cursor)
+                    {
+                        return Some(result);
                     }
                 }
                 _ => {}

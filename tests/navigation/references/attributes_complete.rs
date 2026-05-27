@@ -11,14 +11,13 @@
 
 use super::*;
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_class() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
 class Entity$0Attribute {}
-//    ^^^^^^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^^^^^ def
 
 #[EntityAttribute]
 // ^^^^^^^^^^^^^^^^ ref
@@ -28,7 +27,6 @@ class User {}
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_method() {
     let mut s = TestServer::new().await;
@@ -49,7 +47,6 @@ class Controller {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_property() {
     let mut s = TestServer::new().await;
@@ -68,7 +65,6 @@ class Document {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_function() {
     let mut s = TestServer::new().await;
@@ -87,7 +83,6 @@ function oldFunction(): void {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_parameter() {
     let mut s = TestServer::new().await;
@@ -108,7 +103,6 @@ function process(
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_promoted_property() {
     let mut s = TestServer::new().await;
@@ -129,17 +123,16 @@ class User {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_enum() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
 class Backable$0Enum {}
-//    ^^^^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^^ def
 
 #[BackableEnum]
-// ^^^^^^^^^^^^^^ ref
+// ^^^^^^^^^^^^ ref
 enum Status: int {
     case Active = 1;
     case Inactive = 0;
@@ -149,7 +142,6 @@ enum Status: int {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_enum_case() {
     let mut s = TestServer::new().await;
@@ -170,7 +162,6 @@ enum Priority {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_multiple_on_method() {
     let mut s = TestServer::new().await;
@@ -178,10 +169,10 @@ async fn attribute_multiple_on_method() {
         r#"<?php
 class Async {}
 class Cach$0ed {}
+//    ^^^^^^ def
 
 class Service {
     #[Async]
-    // ^^^^^ ref
     #[Cached]
     // ^^^^^^ ref
     public function fetchData(): array {
@@ -193,18 +184,17 @@ class Service {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_with_constructor_arguments() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
 class Required$0Arg {}
-//    ^^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^ def
 
 class Form {
     #[RequiredArg('email', 'string')]
-    // ^^^^^^^^^^^^^ ref
+    // ^^^^^^^^^^^ ref
     public string $email;
 }
 "#,
@@ -212,7 +202,6 @@ class Form {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_repeatable() {
     let mut s = TestServer::new().await;
@@ -233,14 +222,13 @@ class AdminResource {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_static_property() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
 class Singleton$0Marker {}
-//    ^^^^^^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^^^^^ def
 
 class Cache {
     #[SingletonMarker]
@@ -256,25 +244,24 @@ class Cache {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_cross_file() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"//- /src/Attributes.php
 <?php
-class API$0Endpoint {}
+class Api$0Endpoint {}
 //    ^^^^^^^^^^^^ def
 
 //- /src/Controllers/UserController.php
 <?php
 class UserController {
     #[ApiEndpoint('/users', 'GET')]
-    // ^^^^^^^^^^^^ ref
+    // ^^^^^^^^^^^ ref
     public function list(): array {}
 
     #[ApiEndpoint('/users/{id}', 'GET')]
-    // ^^^^^^^^^^^^ ref
+    // ^^^^^^^^^^^ ref
     public function show(int $id): array {}
 }
 "#,
@@ -282,7 +269,6 @@ class UserController {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_abstract_class() {
     let mut s = TestServer::new().await;
@@ -301,7 +287,6 @@ abstract class Handler {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_final_class() {
     let mut s = TestServer::new().await;
@@ -320,18 +305,17 @@ final class Config {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_interface_method() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
 class Required$0Impl {}
-//    ^^^^^^^^^^^^^^^ def
+//    ^^^^^^^^^^^^ def
 
 interface Repository {
     #[RequiredImpl]
-    // ^^^^^^^^^^^^^^ ref
+    // ^^^^^^^^^^^^ ref
     public function find(int $id): mixed;
 }
 "#,
@@ -339,7 +323,6 @@ interface Repository {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn attribute_on_static_method() {
     let mut s = TestServer::new().await;
