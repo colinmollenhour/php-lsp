@@ -1410,7 +1410,19 @@ impl LanguageServer for Backend {
                         // `resolve_fqn` walks the doc and applies namespace prefix if any.
                         Some(crate::moniker::resolve_fqn(doc, &short_owner, &imports))
                     }
-                    Some(SymbolKind::Constant) => constant_owner.take(),
+                    Some(SymbolKind::Constant) => {
+                        let owner = constant_owner.take();
+                        if owner.is_some() {
+                            // Class constant: return the class short name as-is.
+                            owner
+                        } else {
+                            // Global/namespace constant: compute FQN so cross-namespace
+                            // references like `\Config\DB_HOST` can be found.
+                            let imports = self.file_imports(uri);
+                            let fqn = crate::moniker::resolve_fqn(doc, &word, &imports);
+                            if fqn.contains('\\') { Some(fqn) } else { None }
+                        }
+                    }
                     _ => None,
                 }
             });
@@ -3208,6 +3220,20 @@ fn cursor_is_on_constant_decl(
                 StmtKind::Enum(e) => {
                     if let Some(const_name) = check_enum_members(source, &e.members, cursor) {
                         return Some((const_name, Some(e.name.to_string())));
+                    }
+                }
+                StmtKind::Const(items) => {
+                    for item in items.iter() {
+                        let name = item.name.to_string();
+                        let s = item.span.start as usize;
+                        let e = (item.span.end as usize).min(source.len());
+                        if let Some(off) = source.get(s..e).and_then(|sl| sl.find(&name)) {
+                            let start = item.span.start + off as u32;
+                            let end = start + name.len() as u32;
+                            if cursor >= start && cursor < end {
+                                return Some((name, None));
+                            }
+                        }
                     }
                 }
                 StmtKind::Namespace(ns) => {

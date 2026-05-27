@@ -712,6 +712,147 @@ impl<'arena, 'src> Visitor<'arena, 'src> for ConstantRefsVisitor<'_> {
     }
 }
 
+// ── Global constant reference walker ─────────────────────────────────────────
+
+/// Collect spans where `const_name` is used as a global/namespace-level constant.
+/// Matches bare identifiers (`MAX_SIZE`) and, when `const_fqn` is supplied,
+/// also qualified names (`\Config\DB_HOST`, `Config\DB_HOST`). Emits the span
+/// of just the constant name portion (not any namespace qualifier prefix).
+///
+/// Only matches identifiers in value positions — function-call callees, class
+/// names in `new` / static access / `instanceof`, and class-const member names
+/// are excluded.
+///
+/// Also emits the declaration span when the name appears in a `StmtKind::Const`
+/// item (top-level or inside a braced namespace).
+pub fn global_constant_refs_in_stmts(
+    source: &str,
+    stmts: &[Stmt<'_, '_>],
+    const_name: &str,
+    const_fqn: Option<&str>,
+    out: &mut Vec<Span>,
+) {
+    let mut v = GlobalConstRefsVisitor {
+        source,
+        const_name,
+        const_fqn,
+        out: Vec::new(),
+    };
+    for stmt in stmts {
+        let _ = v.visit_stmt(stmt);
+    }
+    out.append(&mut v.out);
+}
+
+struct GlobalConstRefsVisitor<'a> {
+    source: &'a str,
+    const_name: &'a str,
+    /// FQN of the constant (e.g. `"Config\\DB_HOST"`). When set, also matches
+    /// `\Config\DB_HOST` and `Config\DB_HOST` in identifier position, emitting
+    /// a span pointing at just the `DB_HOST` portion.
+    const_fqn: Option<&'a str>,
+    out: Vec<Span>,
+}
+
+impl<'arena, 'src> Visitor<'arena, 'src> for GlobalConstRefsVisitor<'_> {
+    fn visit_stmt(&mut self, stmt: &Stmt<'arena, 'src>) -> ControlFlow<()> {
+        if let StmtKind::Const(items) = &stmt.kind {
+            for item in items.iter() {
+                if item.name == self.const_name {
+                    let name = item.name.to_string();
+                    if let Some(start) = str_offset_in_range(self.source, item.span, &name) {
+                        self.out.push(Span {
+                            start,
+                            end: start + name.len() as u32,
+                        });
+                    }
+                }
+                // Visit the value expression for any constant references inside it.
+                let _ = self.visit_expr(&item.value);
+            }
+            return ControlFlow::Continue(());
+        }
+        walk_stmt(self, stmt)
+    }
+
+    fn visit_expr(&mut self, expr: &Expr<'arena, 'src>) -> ControlFlow<()> {
+        match &expr.kind {
+            ExprKind::Identifier(name) => {
+                let s = name.as_str();
+                // Bare name in same namespace.
+                let name_offset = if s == self.const_name {
+                    Some(0usize)
+                } else if let Some(fqn) = self.const_fqn {
+                    // Qualified: `Config\DB_HOST` or `\Config\DB_HOST`.
+                    let bare_fqn = s.trim_start_matches('\\');
+                    if bare_fqn == fqn {
+                        // Offset of const_name within the identifier string.
+                        Some(s.len() - self.const_name.len())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(off) = name_offset {
+                    let start = expr.span.start + off as u32;
+                    self.out.push(Span {
+                        start,
+                        end: start + self.const_name.len() as u32,
+                    });
+                }
+                ControlFlow::Continue(())
+            }
+
+            // Function call: skip the callee name, only visit arguments.
+            ExprKind::FunctionCall(f) => {
+                for arg in f.args.iter() {
+                    let _ = self.visit_arg(arg);
+                }
+                ControlFlow::Continue(())
+            }
+
+            // Static method call: skip class and method names, only visit arguments.
+            ExprKind::StaticMethodCall(call) => {
+                for arg in call.args.iter() {
+                    let _ = self.visit_arg(arg);
+                }
+                ControlFlow::Continue(())
+            }
+            ExprKind::StaticDynMethodCall(call) => {
+                for arg in call.args.iter() {
+                    let _ = self.visit_arg(arg);
+                }
+                ControlFlow::Continue(())
+            }
+
+            // New expression: skip the class name, only visit constructor arguments.
+            ExprKind::New(new_expr) => {
+                for arg in new_expr.args.iter() {
+                    let _ = self.visit_arg(arg);
+                }
+                ControlFlow::Continue(())
+            }
+
+            // Static property / class-const access: skip entirely (class names and
+            // class-const member names are not global constant references).
+            ExprKind::StaticPropertyAccess(_)
+            | ExprKind::ClassConstAccess(_)
+            | ExprKind::ClassConstAccessDynamic { .. }
+            | ExprKind::StaticPropertyAccessDynamic { .. } => ControlFlow::Continue(()),
+
+            // instanceof right-hand side is a class name, not a constant.
+            ExprKind::Binary(b) if b.op == php_ast::BinaryOp::Instanceof => {
+                let _ = self.visit_expr(b.left);
+                // Skip b.right — it's a class name identifier, not a constant.
+                ControlFlow::Continue(())
+            }
+
+            _ => walk_expr(self, expr),
+        }
+    }
+}
+
 // ── Class-reference walker ────────────────────────────────────────────────────
 
 /// Collect spans for `new ClassName(...)` expressions only — excludes type hints,

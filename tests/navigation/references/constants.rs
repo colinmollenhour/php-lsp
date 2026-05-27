@@ -124,7 +124,6 @@ if (defined('APP_VERSION')) {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_global_namespace_const() {
     let mut s = TestServer::new().await;
@@ -137,7 +136,7 @@ const MAX_S$0IZE = 1000;
 
 function validate($input) {
     if (strlen($input) > MAX_SIZE) {
-    //               ^^^^^^^ ref
+    //                       ^^^^^^^^ ref
         throw new Exception('too large');
     }
 }
@@ -145,7 +144,7 @@ function validate($input) {
 class Validator {
     public function check(string $s): bool {
         return strlen($s) <= MAX_SIZE;
-        //                  ^^^^^^^ ref
+        //                   ^^^^^^^^ ref
     }
 }
 "#,
@@ -153,7 +152,6 @@ class Validator {
     .await;
 }
 
-#[ignore]
 #[tokio::test]
 async fn constant_global_cross_namespace() {
     let mut s = TestServer::new().await;
@@ -171,12 +169,12 @@ namespace App\Database;
 
 function connect() {
     $host = \Config\DB_HOST;
-    //           ^^^^^^^ ref
+    //              ^^^^^^^ ref
 }
 
 class Connection {
     private string $host = \Config\DB_HOST;
-    //                           ^^^^^^^ ref
+    //                             ^^^^^^^ ref
 }
 "#,
     )
