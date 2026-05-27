@@ -16,7 +16,8 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, async_trait};
 
 use php_ast::{
-    ClassMember, ClassMemberKind, EnumMember, EnumMemberKind, NamespaceBody, Stmt, StmtKind,
+    ClassMember, ClassMemberKind, EnumMember, EnumMemberKind, ExprKind, NamespaceBody, Stmt,
+    StmtKind,
 };
 
 use crate::ast::{ParsedDoc, str_offset};
@@ -3233,6 +3234,22 @@ fn cursor_is_on_constant_decl(
                             if cursor >= start && cursor < end {
                                 return Some((name, None));
                             }
+                        }
+                    }
+                }
+                StmtKind::Expression(expr) => {
+                    // Detect cursor inside `define('NAME', value)` string literal.
+                    if let ExprKind::FunctionCall(f) = &expr.kind
+                        && let ExprKind::Identifier(id) = &f.name.kind
+                        && id.as_str() == "define"
+                        && let Some(first_arg) = f.args.first()
+                        && let ExprKind::String(s) = &first_arg.value.kind
+                    {
+                        // String content starts one byte after the opening quote.
+                        let start = first_arg.value.span.start + 1;
+                        let end = start + s.len() as u32;
+                        if cursor >= start && cursor < end {
+                            return Some((s.to_string(), None));
                         }
                     }
                 }

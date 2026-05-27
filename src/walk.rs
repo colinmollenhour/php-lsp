@@ -772,6 +772,24 @@ impl<'arena, 'src> Visitor<'arena, 'src> for GlobalConstRefsVisitor<'_> {
             }
             return ControlFlow::Continue(());
         }
+        // Handle `define('NAME', value)` declaration at statement level.
+        if let StmtKind::Expression(expr) = &stmt.kind
+            && let ExprKind::FunctionCall(f) = &expr.kind
+            && let ExprKind::Identifier(id) = &f.name.kind
+            && id.as_str() == "define"
+            && let Some(first_arg) = f.args.first()
+            && let ExprKind::String(s) = &first_arg.value.kind
+            && *s == self.const_name
+        {
+            // Span covers the string content excluding the surrounding quotes.
+            let start = first_arg.value.span.start + 1;
+            self.out.push(Span {
+                start,
+                end: start + s.len() as u32,
+            });
+            // Don't recurse: the second arg (value) is not a constant reference.
+            return ControlFlow::Continue(());
+        }
         walk_stmt(self, stmt)
     }
 
