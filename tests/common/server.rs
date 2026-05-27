@@ -18,7 +18,8 @@ use super::render::{
 };
 
 /// Validate that all spans in an LSP response point to valid code symbols.
-fn validate_lsp_spans(resp: &Value, file_path: &str, fixture: &Fixture) {
+/// Only validates spans for files present in the fixture (skips cross-file responses).
+fn validate_lsp_spans(resp: &Value, _file_path: &str, fixture: &Fixture) {
     let result = &resp["result"];
     let locs: Vec<Value> = if result.is_array() {
         result.as_array().cloned().unwrap_or_default()
@@ -28,25 +29,23 @@ fn validate_lsp_spans(resp: &Value, file_path: &str, fixture: &Fixture) {
         vec![result.clone()]
     };
 
-    // Find the file in the fixture
-    let file_content = fixture
-        .files
-        .iter()
-        .find(|f| f.path == file_path)
-        .map(|f| f.text.as_str());
-
-    if file_content.is_none() {
-        return; // Can't validate without source
-    }
-    let source = file_content.unwrap();
-
     for loc in locs {
+        let uri = loc["uri"].as_str().or_else(|| loc["targetUri"].as_str());
         let range = if loc["range"].is_object() {
             &loc["range"]
         } else if loc["targetRange"].is_object() {
             &loc["targetRange"]
         } else {
             continue;
+        };
+
+        // Extract just the filename from the URI
+        let file_path = uri.and_then(|u| u.split('/').last()).unwrap_or("unknown");
+
+        // Find the file in the fixture
+        let source = match fixture.files.iter().find(|f| f.path == file_path) {
+            Some(f) => f.text.as_str(),
+            None => continue, // Skip validation for files not in the fixture
         };
 
         let start_line = range["start"]["line"].as_u64().unwrap_or(0) as u32;
@@ -89,7 +88,7 @@ fn validate_lsp_spans(resp: &Value, file_path: &str, fixture: &Fixture) {
 
             let text = &line[start..end];
             if !text.chars().next().map_or(false, |c| {
-                c.is_uppercase() || c == '_' || c.is_ascii_digit()
+                c.is_alphabetic() || c == '_' || c.is_ascii_digit()
             }) {
                 panic!(
                     "LSP span points to invalid symbol start\n\

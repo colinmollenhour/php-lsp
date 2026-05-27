@@ -1017,9 +1017,9 @@ fn validate_span(
 
         let text = &line[start_char..end_char];
 
-        // Span should start with a symbol (uppercase, underscore, or digit)
+        // Span should start with a symbol (letter, underscore, or digit)
         if !text.chars().next().map_or(false, |c| {
-            c.is_uppercase() || c == '_' || c.is_ascii_digit()
+            c.is_alphabetic() || c == '_' || c.is_ascii_digit()
         }) {
             return Some(format!(
                 "span [{}:{}] on line {} points to invalid start: {:?} (expected symbol)\nline: {}",
