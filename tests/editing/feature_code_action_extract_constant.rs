@@ -123,3 +123,90 @@ interface Status {
         .await;
     expect!["<action not found: Extract constant>"].assert_eq(&out);
 }
+
+#[tokio::test]
+async fn extract_constant_in_trait() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+trait Logging {
+    public function log(): void {
+        $level = $0"info"$0;
+    }
+}
+"#,
+            "Extract constant",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        trait Logging {
+            private const INFO = "info";
+            public function log(): void {
+                $level = self::INFO;
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn extract_constant_after_interface_at_file_scope() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+interface PaymentGateway {
+    public function charge(): void;
+}
+$fee = $0250$0;
+"#,
+            "Extract constant",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        const CONSTANT_250 = 250;
+        interface PaymentGateway {
+            public function charge(): void;
+        }
+        $fee = CONSTANT_250;
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn extract_constant_non_literal_returns_no_action() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$x = $0foo()$0;
+"#,
+            "Extract constant",
+        )
+        .await;
+    expect!["<action not found: Extract constant>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn extract_constant_file_scope_inserts_before_use_statement() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$x = $0"hello"$0;
+use Foo\Bar;
+"#,
+            "Extract constant",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        const HELLO = "hello";
+        $x = HELLO;
+        use Foo\Bar;
+    "#]]
+    .assert_eq(&out);
+}

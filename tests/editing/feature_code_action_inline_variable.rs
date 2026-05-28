@@ -150,3 +150,61 @@ echo $0$x$0 + $x;
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn inline_variable_no_action_when_multiple_assignments() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$tmp = 1;
+$tmp = 2;
+return $0$tmp$0;
+"#,
+            "Inline variable '$tmp'",
+        )
+        .await;
+    expect!["<action not found: Inline variable '$tmp'>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inline_variable_no_action_when_later_assignment_exists() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$tmp = 1;
+echo $0$tmp$0;
+$tmp = 2;
+"#,
+            "Inline variable '$tmp'",
+        )
+        .await;
+    expect!["<action not found: Inline variable '$tmp'>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn inline_variable_equality_does_not_block_inline() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$x = 1;
+if ($x == 2) {
+    echo $0$x$0;
+}
+"#,
+            "Inline variable '$x'",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        if (1 == 2) {
+            echo 1;
+        }
+    "#]]
+    .assert_eq(&out);
+}

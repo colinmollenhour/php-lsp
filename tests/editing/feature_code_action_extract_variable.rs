@@ -138,3 +138,33 @@ class Service {
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn extract_variable_no_action_for_empty_selection() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$x = foo();$0
+"#,
+            "Extract variable",
+        )
+        .await;
+    expect!["<action not found: Extract variable>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn extract_variable_no_action_for_plain_variable() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$x = $0$foo$0;
+"#,
+            "Extract variable",
+        )
+        .await;
+    expect!["<action not found: Extract variable>"].assert_eq(&out);
+}
