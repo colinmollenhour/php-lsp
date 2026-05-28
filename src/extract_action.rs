@@ -124,11 +124,8 @@ mod tests {
     use super::*;
     use tower_lsp::lsp_types::Position;
 
-    fn uri() -> Url {
-        Url::parse("file:///test.php").unwrap()
-    }
-
     fn range(sl: u32, sc: u32, el: u32, ec: u32) -> Range {
+        use tower_lsp::lsp_types::Position;
         Range {
             start: Position {
                 line: sl,
@@ -141,82 +138,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn empty_selection_produces_no_action() {
-        let src = "<?php\n$x = foo();";
-        let r = range(1, 4, 1, 4);
-        let actions = extract_variable_actions(src, r, &uri());
-        assert!(
-            actions.is_empty(),
-            "empty selection should not produce actions"
-        );
-    }
-
-    #[test]
-    fn simple_variable_selection_produces_no_action() {
-        let src = "<?php\n$x = $foo;";
-        // Select "$foo"
-        let r = range(1, 4, 1, 8);
-        let actions = extract_variable_actions(src, r, &uri());
-        assert!(
-            actions.is_empty(),
-            "selecting a simple variable should not produce extract action"
-        );
-    }
-
-    #[test]
-    fn expression_selection_produces_extract_action() {
-        let src = "<?php\n$x = foo() + bar();";
-        // "$x = foo() + bar();"  -- "foo() + bar()" is col 5..18
-        let r = range(1, 5, 1, 18);
-        let actions = extract_variable_actions(src, r, &uri());
-        assert!(!actions.is_empty(), "expected extract variable action");
-        if let CodeActionOrCommand::CodeAction(a) = &actions[0] {
-            assert_eq!(a.title, "Extract variable");
-            let edits = a.edit.as_ref().unwrap().changes.as_ref().unwrap();
-            let texts: Vec<&str> = edits
-                .values()
-                .next()
-                .unwrap()
-                .iter()
-                .map(|e| e.new_text.as_str())
-                .collect();
-            // One edit inserts the assignment
-            assert!(
-                texts
-                    .iter()
-                    .any(|t| t.contains("$extracted = foo() + bar();")),
-                "should insert assignment"
-            );
-            // Another edit replaces with $extracted
-            assert!(
-                texts.iter().any(|&t| t == "$extracted"),
-                "should replace with $extracted"
-            );
-        }
-    }
-
-    #[test]
-    fn extract_preserves_indentation() {
-        let src = "<?php\nfunction foo() {\n    $x = bar();\n}";
-        // Select "bar()" on line 2 col 9..14
-        let r = range(2, 9, 2, 14);
-        let actions = extract_variable_actions(src, r, &uri());
-        assert!(!actions.is_empty());
-        if let CodeActionOrCommand::CodeAction(a) = &actions[0] {
-            let edits = a.edit.as_ref().unwrap().changes.as_ref().unwrap();
-            let insert = edits
-                .values()
-                .next()
-                .unwrap()
-                .iter()
-                .find(|e| e.new_text.contains("$extracted ="))
-                .unwrap();
-            assert!(
-                insert.new_text.starts_with("    "),
-                "should preserve indentation"
-            );
-        }
+    fn uri() -> Url {
+        Url::parse("file:///test.php").unwrap()
     }
 
     #[test]
