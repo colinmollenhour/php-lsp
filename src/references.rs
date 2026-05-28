@@ -40,11 +40,11 @@ pub enum SymbolKind {
 }
 
 fn class_has_ancestor(
-    codebase: &mir_analyzer::db::MirDb,
+    codebase: &mir_analyzer::db::MirDbStorage,
     class_fqcn: &str,
     target_fqcn: &str,
 ) -> bool {
-    mir_analyzer::db::extends_or_implements_via_db(codebase, class_fqcn, target_fqcn)
+    mir_analyzer::db::extends_or_implements(codebase, class_fqcn, target_fqcn)
 }
 
 /// Find all locations where `word` is referenced across the given documents.
@@ -167,7 +167,7 @@ pub fn find_references_codebase(
     all_docs: &[(Url, Arc<ParsedDoc>)],
     include_declaration: bool,
     kind: Option<SymbolKind>,
-    codebase: &mir_analyzer::db::MirDb,
+    codebase: &mir_analyzer::db::MirDbStorage,
     lookup_refs: &RefLookup<'_>,
 ) -> Option<Vec<Location>> {
     find_references_codebase_with_target(
@@ -191,7 +191,7 @@ pub fn find_references_codebase_with_target(
     _include_declaration: bool,
     kind: Option<SymbolKind>,
     _target_fqn: Option<&str>,
-    _codebase: &mir_analyzer::db::MirDb,
+    _codebase: &mir_analyzer::db::MirDbStorage,
     _lookup_refs: &RefLookup<'_>,
 ) -> Option<Vec<Location>> {
     match kind {
@@ -406,7 +406,7 @@ fn collect_local_type_decl_fqns(doc: &ParsedDoc) -> HashSet<String> {
                             .as_deref()
                             .map(|n| format!("{n}\\"))
                             .unwrap_or_default();
-                        for s in inner.iter() {
+                        for s in inner.stmts.iter() {
                             if let Some(n) = name_of(&s.kind) {
                                 out.insert(format!("{prefix}{n}"));
                             }
@@ -604,7 +604,7 @@ fn collect_declaration_spans(
                     out.push(declaration_name_span(source, &name.to_string(), stmt.span));
                 }
                 if want_method || want_property || want_constant {
-                    for member in c.members.iter() {
+                    for member in c.body.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) if want_method && m.name == word => {
                                 // Scope the name search to the member span,
@@ -660,7 +660,7 @@ fn collect_declaration_spans(
                     ));
                 }
                 if want_method || want_constant {
-                    for member in i.members.iter() {
+                    for member in i.body.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) if want_method && m.name == word => {
                                 out.push(declaration_name_span(
@@ -690,7 +690,7 @@ fn collect_declaration_spans(
                     ));
                 }
                 if want_method || want_property || want_constant {
-                    for member in t.members.iter() {
+                    for member in t.body.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) if want_method && m.name == word => {
                                 out.push(declaration_name_span(
@@ -726,7 +726,7 @@ fn collect_declaration_spans(
                         stmt.span,
                     ));
                 }
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Method(m) if want_method && m.name == word => {
                             out.push(declaration_name_span(
@@ -779,7 +779,7 @@ fn collect_declaration_spans(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_declaration_spans(source, inner, word, kind, out);
+                    collect_declaration_spans(source, &inner.stmts, word, kind, out);
                 }
             }
             _ => {}

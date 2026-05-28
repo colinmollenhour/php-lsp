@@ -184,7 +184,7 @@ fn param_type_for(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 }
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         for p in m.params.iter() {
                             if p.name == word
@@ -197,7 +197,7 @@ fn param_type_for(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 }
             }
             StmtKind::Interface(i) => {
-                for member in i.members.iter() {
+                for member in i.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         for p in m.params.iter() {
                             if p.name == word
@@ -210,7 +210,7 @@ fn param_type_for(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 }
             }
             StmtKind::Trait(trait_) => {
-                for member in trait_.members.iter() {
+                for member in trait_.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         for p in m.params.iter() {
                             if p.name == word
@@ -223,7 +223,7 @@ fn param_type_for(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 }
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind {
                         for p in m.params.iter() {
                             if p.name == word
@@ -237,7 +237,7 @@ fn param_type_for(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(type_hint) = param_type_for(inner, word)
+                    && let Some(type_hint) = param_type_for(&inner.stmts, word)
                 {
                     return Some(type_hint);
                 }
@@ -306,7 +306,7 @@ fn find_class_range(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], name: &str) -> O
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(r) = find_class_range(sv, inner, name)
+                    && let Some(r) = find_class_range(sv, &inner.stmts, name)
                 {
                     return Some(r);
                 }

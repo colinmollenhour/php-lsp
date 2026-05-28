@@ -79,7 +79,7 @@ fn symbols_from_statements(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>]) -> Vec<Do
         match &stmt.kind {
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    symbols.extend(symbols_from_statements(sv, inner));
+                    symbols.extend(symbols_from_statements(sv, &inner.stmts));
                 }
             }
             _ => {
@@ -164,6 +164,7 @@ fn statement_to_symbol(sv: SourceView<'_>, stmt: &Stmt<'_, '_>) -> Option<Docume
                 .map(|_| true);
 
             let children: Vec<DocumentSymbol> = c
+                .body
                 .members
                 .iter()
                 .flat_map(|member| -> Vec<DocumentSymbol> {
@@ -249,6 +250,7 @@ fn statement_to_symbol(sv: SourceView<'_>, stmt: &Stmt<'_, '_>) -> Option<Docume
                 .filter(|raw| parse_docblock(raw).deprecated.is_some())
                 .map(|_| true);
             let children: Vec<DocumentSymbol> = i
+                .body
                 .members
                 .iter()
                 .filter_map(|member| match &member.kind {
@@ -312,6 +314,7 @@ fn statement_to_symbol(sv: SourceView<'_>, stmt: &Stmt<'_, '_>) -> Option<Docume
                 .filter(|raw| parse_docblock(raw).deprecated.is_some())
                 .map(|_| true);
             let children: Vec<DocumentSymbol> = t
+                .body
                 .members
                 .iter()
                 .filter_map(|member| {
@@ -360,6 +363,7 @@ fn statement_to_symbol(sv: SourceView<'_>, stmt: &Stmt<'_, '_>) -> Option<Docume
                 .filter(|raw| parse_docblock(raw).deprecated.is_some())
                 .map(|_| true);
             let children: Vec<DocumentSymbol> = e
+                .body
                 .members
                 .iter()
                 .filter_map(|member| match &member.kind {

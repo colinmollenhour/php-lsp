@@ -90,7 +90,7 @@ fn collect_overrides(stmts: &[Stmt<'_, '_>], meta: &mut PhpStormMeta) {
                 if name.as_deref() == Some("PHPSTORM_META")
                     && let NamespaceBody::Braced(inner) = &ns.body
                 {
-                    collect_overrides(inner, meta);
+                    collect_overrides(&inner.stmts, meta);
                 }
             }
             StmtKind::Expression(expr) => {

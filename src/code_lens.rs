@@ -68,7 +68,7 @@ fn collect_lenses(
                     // per class for overrides lookups on each method.
                     let parents = collect_direct_supertypes(c, all_docs);
 
-                    for member in c.members.iter() {
+                    for member in c.body.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) => {
                                 let method_name = m.name.as_str().unwrap_or_default();
@@ -154,7 +154,7 @@ fn collect_lenses(
                 // Usages: classes that `use` this trait.
                 let usages = trait_usage_locations(trait_name, all_docs);
                 out.push(impl_count_lens(range, uri, usages));
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
                             let method_name = m.name.as_str().unwrap_or_default();
@@ -186,7 +186,7 @@ fn collect_lenses(
                 let enum_name = e.name.as_str().unwrap_or_default();
                 let range = sv.name_range(enum_name);
                 out.push(ref_count_lens(range, enum_name, uri, all_docs, None));
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Method(m) => {
                             let method_name = m.name.as_str().unwrap_or_default();
@@ -210,7 +210,7 @@ fn collect_lenses(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_lenses(inner, sv, uri, all_docs, out);
+                    collect_lenses(&inner.stmts, sv, uri, all_docs, out);
                 }
             }
             _ => {}
@@ -334,7 +334,7 @@ fn collect_trait_usages_in_stmts(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Class(c) => {
-                let uses_trait = c.members.iter().any(|m| {
+                let uses_trait = c.body.members.iter().any(|m| {
                     if let ClassMemberKind::TraitUse(t) = &m.kind {
                         t.traits
                             .iter()
@@ -352,7 +352,7 @@ fn collect_trait_usages_in_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_trait_usages_in_stmts(trait_name, inner, sv, uri, out);
+                    collect_trait_usages_in_stmts(trait_name, &inner.stmts, sv, uri, out);
                 }
             }
             _ => {}
@@ -376,7 +376,7 @@ fn collect_direct_supertypes(
             .unwrap_or(parent_short);
         out.push(resolved);
     }
-    for member in c.members.iter() {
+    for member in c.body.members.iter() {
         if let ClassMemberKind::TraitUse(t) = &member.kind {
             for name in t.traits.iter() {
                 let s = name.to_string_repr().into_owned();
@@ -419,7 +419,7 @@ fn find_method_name_range(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Class(c) if c.name.as_ref().and_then(|n| n.as_str()) == Some(parent_name) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -428,7 +428,7 @@ fn find_method_name_range(
                 }
             }
             StmtKind::Trait(t) if t.name == parent_name => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -438,7 +438,8 @@ fn find_method_name_range(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(r) = find_method_name_range(inner, parent_name, method_name, sv)
+                    && let Some(r) =
+                        find_method_name_range(&inner.stmts, parent_name, method_name, sv)
                 {
                     return Some(r);
                 }

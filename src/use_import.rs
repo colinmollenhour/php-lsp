@@ -18,7 +18,7 @@ pub(crate) fn find_fqn_for_class(doc: &ParsedDoc, name: &str) -> Option<String> 
             StmtKind::Namespace(ns) => {
                 let ns_name = ns.name.as_ref().map(|n| n.to_string_repr().to_string());
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    for inner_stmt in inner.iter() {
+                    for inner_stmt in inner.stmts.iter() {
                         if let StmtKind::Class(c) = &inner_stmt.kind
                             && c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string())
                         {

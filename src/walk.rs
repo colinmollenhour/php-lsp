@@ -327,12 +327,12 @@ fn collect_method_scope(
         return false;
     }
     if let Some(body) = &m.body {
-        for inner in body.iter() {
+        for inner in body.stmts.iter() {
             if collect_in_fn_at(inner, var_name, byte_off, out) {
                 return true;
             }
         }
-        var_refs_in_stmts(body, var_name, out);
+        var_refs_in_stmts(&body.stmts, var_name, out);
     }
     for p in m.params.iter() {
         if p.name == var_name {
@@ -373,7 +373,7 @@ fn collect_in_fn_at(
             if byte_off < stmt.span.start as usize || byte_off >= stmt.span.end as usize {
                 return false;
             }
-            for inner in f.body.iter() {
+            for inner in f.body.stmts.iter() {
                 if collect_in_fn_at(inner, var_name, byte_off, out) {
                     return true;
                 }
@@ -383,14 +383,16 @@ fn collect_in_fn_at(
                     out.push((p.span, DocumentHighlightKind::WRITE));
                 }
             }
-            var_refs_in_stmts(&f.body, var_name, out);
+            var_refs_in_stmts(&f.body.stmts, var_name, out);
             true
         }
-        StmtKind::Class(c) => collect_in_class_members(&c.members, var_name, byte_off, out),
-        StmtKind::Trait(t) => collect_in_class_members(&t.members, var_name, byte_off, out),
-        StmtKind::Interface(i) => collect_in_class_members(&i.members, var_name, byte_off, out),
+        StmtKind::Class(c) => collect_in_class_members(&c.body.members, var_name, byte_off, out),
+        StmtKind::Trait(t) => collect_in_class_members(&t.body.members, var_name, byte_off, out),
+        StmtKind::Interface(i) => {
+            collect_in_class_members(&i.body.members, var_name, byte_off, out)
+        }
         StmtKind::Enum(e) => {
-            for member in e.members.iter() {
+            for member in e.body.members.iter() {
                 if let EnumMemberKind::Method(m) = &member.kind
                     && collect_method_scope(m, member.span, var_name, byte_off, out)
                 {
@@ -401,7 +403,7 @@ fn collect_in_fn_at(
         }
         StmtKind::Namespace(ns) => {
             if let NamespaceBody::Braced(inner) = &ns.body {
-                for s in inner.iter() {
+                for s in inner.stmts.iter() {
                     if collect_in_fn_at(s, var_name, byte_off, out) {
                         return true;
                     }

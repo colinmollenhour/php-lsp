@@ -113,7 +113,7 @@ impl ParsedDoc {
             std::mem::transmute::<&bumpalo::Bump, &'static bumpalo::Bump>(arena_box.as_ref())
         };
 
-        let result = php_rs_parser::parse(arena_ref, src_ref);
+        let result = php_rs_parser::parse_arena(arena_ref, src_ref);
 
         let line_starts = build_line_starts(src_ref);
 

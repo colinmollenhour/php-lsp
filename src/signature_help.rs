@@ -194,7 +194,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 return Some(format_params_str(&f.params));
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == word
                     {
@@ -202,7 +202,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                     }
                 }
                 if c.name.as_ref().map(|n| n.to_string()) == Some(word.to_string()) {
-                    for member in c.members.iter() {
+                    for member in c.body.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind
                             && m.name == "__construct"
                         {
@@ -212,7 +212,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 }
             }
             StmtKind::Interface(i) => {
-                for member in i.members.iter() {
+                for member in i.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == word
                     {
@@ -221,7 +221,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 }
             }
             StmtKind::Trait(t) => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == word
                     {
@@ -230,7 +230,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 }
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind
                         && m.name == word
                     {
@@ -240,7 +240,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(s) = find_signature(inner, word)
+                    && let Some(s) = find_signature(&inner.stmts, word)
                 {
                     return Some(s);
                 }

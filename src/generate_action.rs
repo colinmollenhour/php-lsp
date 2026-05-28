@@ -58,7 +58,7 @@ fn collect_constructor<'a>(
                 }
 
                 // Skip if constructor already exists.
-                let has_ctor = c.members.iter().any(|m| {
+                let has_ctor = c.body.members.iter().any(|m| {
                     matches!(&m.kind, ClassMemberKind::Method(method) if method.name == "__construct")
                 });
                 if has_ctor {
@@ -75,7 +75,7 @@ fn collect_constructor<'a>(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_constructor(inner, sv, range, uri, out);
+                    collect_constructor(&inner.stmts, sv, range, uri, out);
                 }
             }
             _ => {}
@@ -100,6 +100,7 @@ fn collect_getters_setters<'a>(
                 }
 
                 let existing: HashSet<String> = c
+                    .body
                     .members
                     .iter()
                     .filter_map(|m| {
@@ -162,7 +163,7 @@ fn collect_getters_setters<'a>(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_getters_setters(inner, sv, range, uri, out);
+                    collect_getters_setters(&inner.stmts, sv, range, uri, out);
                 }
             }
             _ => {}
@@ -174,6 +175,7 @@ fn collect_getters_setters<'a>(
 
 fn non_static_props(c: &php_ast::ClassDecl<'_, '_>) -> Vec<Prop> {
     let mut props: Vec<Prop> = c
+        .body
         .members
         .iter()
         .filter_map(|m| {
@@ -190,7 +192,7 @@ fn non_static_props(c: &php_ast::ClassDecl<'_, '_>) -> Vec<Prop> {
         .collect();
 
     // Also collect constructor-promoted properties.
-    if let Some(ctor) = c.members.iter().find_map(|m| {
+    if let Some(ctor) = c.body.members.iter().find_map(|m| {
         if let ClassMemberKind::Method(method) = &m.kind
             && method.name == "__construct"
         {

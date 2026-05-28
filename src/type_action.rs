@@ -34,7 +34,7 @@ fn collect(
             StmtKind::Function(f) => {
                 let fn_line = sv.position_of(stmt.span.start).line;
                 if line_in_range(fn_line, range) && f.return_type.is_none() {
-                    let returns_value = body_has_value_return(&f.body);
+                    let returns_value = body_has_value_return(&f.body.stmts);
                     let type_str = if returns_value { "mixed" } else { "void" };
                     if let Some(insert) =
                         find_close_paren_offset(sv.source(), stmt.span.start as usize)
@@ -43,10 +43,10 @@ fn collect(
                     }
                 }
                 // Recurse into nested functions
-                collect_in_stmts(&f.body, sv, range, uri, out);
+                collect_in_stmts(&f.body.stmts, sv, range, uri, out);
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         if m.name == "__construct" {
                             continue;
@@ -58,7 +58,7 @@ fn collect(
                             && let Some(insert) =
                                 find_close_paren_offset(sv.source(), member.span.start as usize)
                         {
-                            let type_str = if body_has_value_return(body) {
+                            let type_str = if body_has_value_return(&body.stmts) {
                                 "mixed"
                             } else {
                                 "void"
@@ -69,7 +69,7 @@ fn collect(
                 }
             }
             StmtKind::Trait(t) => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && let fn_line = sv.position_of(member.span.start).line
                         && line_in_range(fn_line, range)
@@ -78,7 +78,7 @@ fn collect(
                         && let Some(insert) =
                             find_close_paren_offset(sv.source(), member.span.start as usize)
                     {
-                        let type_str = if body_has_value_return(body) {
+                        let type_str = if body_has_value_return(&body.stmts) {
                             "mixed"
                         } else {
                             "void"
@@ -88,7 +88,7 @@ fn collect(
                 }
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind
                         && let fn_line = sv.position_of(member.span.start).line
                         && line_in_range(fn_line, range)
@@ -97,7 +97,7 @@ fn collect(
                         && let Some(insert) =
                             find_close_paren_offset(sv.source(), member.span.start as usize)
                     {
-                        let type_str = if body_has_value_return(body) {
+                        let type_str = if body_has_value_return(&body.stmts) {
                             "mixed"
                         } else {
                             "void"
@@ -108,7 +108,7 @@ fn collect(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect(inner, sv, range, uri, out);
+                    collect(&inner.stmts, sv, range, uri, out);
                 }
             }
             _ => {}
@@ -157,14 +157,16 @@ fn stmt_has_value_return(stmt: &Stmt<'_, '_>) -> bool {
         StmtKind::Foreach(f) => stmt_has_value_return(f.body),
         StmtKind::DoWhile(d) => stmt_has_value_return(d.body),
         StmtKind::TryCatch(t) => {
-            body_has_value_return(&t.body)
-                || t.catches.iter().any(|c| body_has_value_return(&c.body))
+            body_has_value_return(&t.body.stmts)
+                || t.catches
+                    .iter()
+                    .any(|c| body_has_value_return(&c.body.stmts))
                 || t.finally
                     .as_ref()
-                    .map(|f| body_has_value_return(f))
+                    .map(|f| body_has_value_return(&f.stmts))
                     .unwrap_or(false)
         }
-        StmtKind::Block(inner) => body_has_value_return(inner),
+        StmtKind::Block(inner) => body_has_value_return(&inner.stmts),
         _ => false,
     }
 }

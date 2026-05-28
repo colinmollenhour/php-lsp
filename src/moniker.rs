@@ -100,7 +100,8 @@ fn walk_for_member(
                         } else {
                             format!("{ns_name}\\")
                         };
-                        if let Some(id) = walk_for_member(inner, source, cursor_byte, word, &prefix)
+                        if let Some(id) =
+                            walk_for_member(&inner.stmts, source, cursor_byte, word, &prefix)
                         {
                             return Some(id);
                         }
@@ -120,7 +121,7 @@ fn walk_for_member(
                 }
                 let Some(class_name) = c.name else { continue };
                 let class_name_str = class_name.to_string();
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let Some(id) = match_class_member(
                         &member.kind,
                         source,
@@ -139,7 +140,7 @@ fn walk_for_member(
                     continue;
                 }
                 let interface_name = i.name.to_string();
-                for member in i.members.iter() {
+                for member in i.body.members.iter() {
                     if let Some(id) = match_class_member(
                         &member.kind,
                         source,
@@ -158,7 +159,7 @@ fn walk_for_member(
                     continue;
                 }
                 let trait_name = t.name.to_string();
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let Some(id) = match_class_member(
                         &member.kind,
                         source,
@@ -176,7 +177,7 @@ fn walk_for_member(
                 if !span_contains(stmt.span.start, stmt.span.end, cursor_byte) {
                     continue;
                 }
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     let id = match &member.kind {
                         EnumMemberKind::Method(m) if m.name == word => cursor_on_name_in_span(
                             source,
@@ -316,7 +317,7 @@ fn resolve_fqn_for_moniker(
                             .as_ref()
                             .map(|n| format!("{n}\\"))
                             .unwrap_or_default();
-                        for s in inner.iter() {
+                        for s in inner.stmts.iter() {
                             if matches_top(&s.kind, bare) {
                                 return format!("{ns_prefix}{bare}");
                             }
@@ -410,7 +411,7 @@ pub(crate) fn resolve_fqn(
                             .as_ref()
                             .map(|n| format!("{n}\\"))
                             .unwrap_or_default();
-                        for s in inner.iter() {
+                        for s in inner.stmts.iter() {
                             if matches_top(&s.kind, bare) {
                                 return format!("{ns_prefix}{bare}");
                             }

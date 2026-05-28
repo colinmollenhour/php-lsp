@@ -224,19 +224,21 @@ fn find_call_type_in_stmts(
             StmtKind::Echo(exprs) => exprs
                 .iter()
                 .find_map(|e| find_call_type_in_expr(e, cursor, vars, method_returns)),
-            StmtKind::Function(f) => find_call_type_in_stmts(&f.body, cursor, vars, method_returns),
-            StmtKind::Class(c) => c.members.iter().find_map(|m| {
+            StmtKind::Function(f) => {
+                find_call_type_in_stmts(&f.body.stmts, cursor, vars, method_returns)
+            }
+            StmtKind::Class(c) => c.body.members.iter().find_map(|m| {
                 if let ClassMemberKind::Method(method) = &m.kind
                     && let Some(body) = &method.body
                 {
-                    find_call_type_in_stmts(body, cursor, vars, method_returns)
+                    find_call_type_in_stmts(&body.stmts, cursor, vars, method_returns)
                 } else {
                     None
                 }
             }),
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    find_call_type_in_stmts(inner, cursor, vars, method_returns)
+                    find_call_type_in_stmts(&inner.stmts, cursor, vars, method_returns)
                 } else {
                     None
                 }
@@ -321,7 +323,7 @@ fn collect_method_returns_stmts(
                     Some(n) => n.to_string(),
                     None => continue,
                 };
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && let Some(ret) = extract_method_return_class(
                             source,
@@ -339,7 +341,7 @@ fn collect_method_returns_stmts(
             }
             StmtKind::Trait(t) => {
                 let trait_name = t.name.to_string();
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && let Some(ret) = extract_method_return_class(
                             source,
@@ -357,7 +359,7 @@ fn collect_method_returns_stmts(
             }
             StmtKind::Enum(e) => {
                 let enum_name = e.name.to_string();
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind
                         && let Some(ret) = extract_method_return_class(
                             source,
@@ -375,7 +377,7 @@ fn collect_method_returns_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_method_returns_stmts(source, inner, out, doc);
+                    collect_method_returns_stmts(source, &inner.stmts, out, doc);
                 }
             }
             _ => {}
@@ -398,7 +400,7 @@ fn collect_function_returns_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_function_returns_stmts(source, inner, out, doc);
+                    collect_function_returns_stmts(source, &inner.stmts, out, doc);
                 }
             }
             _ => {}
@@ -419,7 +421,7 @@ fn collect_static_method_returns_stmts(
                     Some(n) => n.to_string(),
                     None => continue,
                 };
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.is_static
                         && let Some(ret) = extract_method_return_class(
@@ -438,7 +440,7 @@ fn collect_static_method_returns_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_static_method_returns_stmts(source, inner, out, doc);
+                    collect_static_method_returns_stmts(source, &inner.stmts, out, doc);
                 }
             }
             _ => {}
@@ -684,7 +686,7 @@ fn collect_types_stmts(
                 }
                 collect_types_stmts(
                     source,
-                    &f.body,
+                    &f.body.stmts,
                     map,
                     meta,
                     method_returns,
@@ -695,7 +697,7 @@ fn collect_types_stmts(
             }
             StmtKind::Class(c) => {
                 let class_name = c.name.map(|n| n.to_string());
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         // Only collect params/body when cursor is inside this method (or no cursor).
                         let in_scope = cursor_byte
@@ -749,7 +751,7 @@ fn collect_types_stmts(
                         if let Some(body) = &m.body {
                             collect_types_stmts(
                                 source,
-                                body,
+                                &body.stmts,
                                 map,
                                 meta,
                                 method_returns,
@@ -762,7 +764,7 @@ fn collect_types_stmts(
                 }
             }
             StmtKind::Trait(t) => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         let in_scope = cursor_byte
                             .is_none_or(|cb| member.span.start <= cb && cb <= member.span.end);
@@ -780,7 +782,7 @@ fn collect_types_stmts(
                         if let Some(body) = &m.body {
                             collect_types_stmts(
                                 source,
-                                body,
+                                &body.stmts,
                                 map,
                                 meta,
                                 method_returns,
@@ -793,7 +795,7 @@ fn collect_types_stmts(
                 }
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind {
                         let in_scope = cursor_byte
                             .is_none_or(|cb| member.span.start <= cb && cb <= member.span.end);
@@ -811,7 +813,7 @@ fn collect_types_stmts(
                         if let Some(body) = &m.body {
                             collect_types_stmts(
                                 source,
-                                body,
+                                &body.stmts,
                                 map,
                                 meta,
                                 method_returns,
@@ -827,7 +829,7 @@ fn collect_types_stmts(
                 if let NamespaceBody::Braced(inner) = &ns.body {
                     collect_types_stmts(
                         source,
-                        inner,
+                        &inner.stmts,
                         map,
                         meta,
                         method_returns,
@@ -921,7 +923,7 @@ fn collect_types_stmts(
             StmtKind::TryCatch(t) => {
                 collect_types_stmts(
                     source,
-                    &t.body,
+                    &t.body.stmts,
                     map,
                     meta,
                     method_returns,
@@ -946,7 +948,7 @@ fn collect_types_stmts(
                     }
                     collect_types_stmts(
                         source,
-                        &catch.body,
+                        &catch.body.stmts,
                         map,
                         meta,
                         method_returns,
@@ -958,7 +960,7 @@ fn collect_types_stmts(
                 if let Some(finally) = &t.finally {
                     collect_types_stmts(
                         source,
-                        finally,
+                        &finally.stmts,
                         map,
                         meta,
                         method_returns,
@@ -1163,7 +1165,7 @@ fn collect_types_expr(
                 .collect();
             collect_types_stmts(
                 source,
-                &c.body,
+                &c.body.stmts,
                 map,
                 meta,
                 method_returns,
@@ -1321,7 +1323,7 @@ fn parent_in_stmts(stmts: &[Stmt<'_, '_>], class_name: &str) -> Option<String> {
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let found @ Some(_) = parent_in_stmts(inner, class_name)
+                    && let found @ Some(_) = parent_in_stmts(&inner.stmts, class_name)
                 {
                     return found;
                 }
@@ -1382,7 +1384,7 @@ fn collect_members_stmts(
                         out.methods.push((method.name.clone(), method.is_static));
                     }
                 }
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
                             out.methods.push((m.name.to_string(), m.is_static));
@@ -1436,7 +1438,7 @@ fn collect_members_stmts(
                     out.methods.push(("tryFrom".to_string(), true));
                 }
                 // User-declared cases, methods, and constants.
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Case(c) => {
                             out.constants.push(c.name.to_string());
@@ -1454,7 +1456,7 @@ fn collect_members_stmts(
             }
             StmtKind::Trait(t) if t.name == class_name => {
                 out.found = true;
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
                             out.methods.push((m.name.to_string(), m.is_static));
@@ -1476,7 +1478,7 @@ fn collect_members_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    let result = collect_members_stmts(source, inner, class_name, out);
+                    let result = collect_members_stmts(source, &inner.stmts, class_name, out);
                     if result.is_some() {
                         return result;
                     }
@@ -1507,7 +1509,7 @@ fn mixin_classes_in_stmts(source: &str, stmts: &[Stmt<'_, '_>], class_name: &str
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    let found = mixin_classes_in_stmts(source, inner, class_name);
+                    let found = mixin_classes_in_stmts(source, &inner.stmts, class_name);
                     if !found.is_empty() {
                         return found;
                     }
@@ -1562,7 +1564,7 @@ fn collect_class_ranges_in_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_class_ranges_in_stmts(sv, inner, out);
+                    collect_class_ranges_in_stmts(sv, &inner.stmts, out);
                 }
             }
             _ => {}
@@ -1588,7 +1590,7 @@ fn enclosing_class_range_in_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(r) = enclosing_class_range_in_stmts(sv, inner, pos)
+                    && let Some(r) = enclosing_class_range_in_stmts(sv, &inner.stmts, pos)
                 {
                     return Some(r);
                 }
@@ -1636,7 +1638,7 @@ fn enclosing_class_in_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(found) = enclosing_class_in_stmts(sv, inner, pos)
+                    && let Some(found) = enclosing_class_in_stmts(sv, &inner.stmts, pos)
                 {
                     return Some(found);
                 }
@@ -1673,7 +1675,7 @@ fn collect_method_params_stmts(
             StmtKind::Class(c)
                 if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
             {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -1686,7 +1688,7 @@ fn collect_method_params_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_method_params_stmts(inner, class_name, method_name, out);
+                    collect_method_params_stmts(&inner.stmts, class_name, method_name, out);
                 }
             }
             _ => {}
@@ -1705,7 +1707,7 @@ fn is_enum_in_stmts(stmts: &[Stmt<'_, '_>], name: &str) -> bool {
             StmtKind::Enum(e) if e.name == name => return true,
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && is_enum_in_stmts(inner, name)
+                    && is_enum_in_stmts(&inner.stmts, name)
                 {
                     return true;
                 }
@@ -1728,7 +1730,7 @@ fn is_backed_enum_in_stmts(stmts: &[Stmt<'_, '_>], name: &str) -> bool {
             StmtKind::Enum(e) if e.name == name => return e.scalar_type.is_some(),
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && is_backed_enum_in_stmts(inner, name)
+                    && is_backed_enum_in_stmts(&inner.stmts, name)
                 {
                     return true;
                 }
@@ -1749,7 +1751,7 @@ fn collect_params_stmts(stmts: &[Stmt<'_, '_>], func_name: &str, out: &mut Vec<S
                 return;
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == func_name
                     {
@@ -1762,7 +1764,7 @@ fn collect_params_stmts(stmts: &[Stmt<'_, '_>], func_name: &str, out: &mut Vec<S
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_params_stmts(inner, func_name, out);
+                    collect_params_stmts(&inner.stmts, func_name, out);
                 }
             }
             _ => {}

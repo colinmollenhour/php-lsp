@@ -176,7 +176,7 @@ fn collect_implementations(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_implementations(inner, word, fqn, sv, uri, out);
+                    collect_implementations(&inner.stmts, word, fqn, sv, uri, out);
                 }
             }
             _ => {}

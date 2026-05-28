@@ -133,7 +133,7 @@ fn collect_defs_stmts(stmts: &[Stmt<'_, '_>], map: &mut HashMap<String, FuncDef>
                 );
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         let (params, variadic_last) = params_from_list(&m.params);
                         let return_type = m.return_type.as_ref().map(|t| format_type_hint(t));
@@ -165,7 +165,7 @@ fn collect_defs_stmts(stmts: &[Stmt<'_, '_>], map: &mut HashMap<String, FuncDef>
                 }
             }
             StmtKind::Trait(t) => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         let (params, variadic_last) = params_from_list(&m.params);
                         let return_type = m.return_type.as_ref().map(|t| format_type_hint(t));
@@ -182,7 +182,7 @@ fn collect_defs_stmts(stmts: &[Stmt<'_, '_>], map: &mut HashMap<String, FuncDef>
                 }
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind {
                         let (params, variadic_last) = params_from_list(&m.params);
                         let return_type = m.return_type.as_ref().map(|t| format_type_hint(t));
@@ -200,7 +200,7 @@ fn collect_defs_stmts(stmts: &[Stmt<'_, '_>], map: &mut HashMap<String, FuncDef>
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_defs_stmts(inner, map);
+                    collect_defs_stmts(&inner.stmts, map);
                 }
             }
             // Register closure/arrow-function variables so `$fn(...)` call sites get hints.
@@ -275,38 +275,38 @@ fn hints_in_stmt(
             }
         }
         StmtKind::Function(f) => {
-            hints_in_stmts(sv, &f.body, defs, type_map, range, out);
+            hints_in_stmts(sv, &f.body.stmts, defs, type_map, range, out);
         }
         StmtKind::Class(c) => {
-            for member in c.members.iter() {
+            for member in c.body.members.iter() {
                 if let ClassMemberKind::Method(m) = &member.kind
                     && let Some(body) = &m.body
                 {
-                    hints_in_stmts(sv, body, defs, type_map, range, out);
+                    hints_in_stmts(sv, &body.stmts, defs, type_map, range, out);
                 }
             }
         }
         StmtKind::Trait(t) => {
-            for member in t.members.iter() {
+            for member in t.body.members.iter() {
                 if let ClassMemberKind::Method(m) = &member.kind
                     && let Some(body) = &m.body
                 {
-                    hints_in_stmts(sv, body, defs, type_map, range, out);
+                    hints_in_stmts(sv, &body.stmts, defs, type_map, range, out);
                 }
             }
         }
         StmtKind::Enum(e) => {
-            for member in e.members.iter() {
+            for member in e.body.members.iter() {
                 if let EnumMemberKind::Method(m) = &member.kind
                     && let Some(body) = &m.body
                 {
-                    hints_in_stmts(sv, body, defs, type_map, range, out);
+                    hints_in_stmts(sv, &body.stmts, defs, type_map, range, out);
                 }
             }
         }
         StmtKind::Namespace(ns) => {
             if let NamespaceBody::Braced(inner) = &ns.body {
-                hints_in_stmts(sv, inner, defs, type_map, range, out);
+                hints_in_stmts(sv, &inner.stmts, defs, type_map, range, out);
             }
         }
         StmtKind::If(i) => {
@@ -363,15 +363,15 @@ fn hints_in_stmt(
             hints_in_stmt(sv, f.body, defs, type_map, range, out);
         }
         StmtKind::TryCatch(t) => {
-            hints_in_stmts(sv, &t.body, defs, type_map, range, out);
+            hints_in_stmts(sv, &t.body.stmts, defs, type_map, range, out);
             for catch in t.catches.iter() {
-                hints_in_stmts(sv, &catch.body, defs, type_map, range, out);
+                hints_in_stmts(sv, &catch.body.stmts, defs, type_map, range, out);
             }
             if let Some(finally) = &t.finally {
-                hints_in_stmts(sv, finally, defs, type_map, range, out);
+                hints_in_stmts(sv, &finally.stmts, defs, type_map, range, out);
             }
         }
-        StmtKind::Block(stmts) => hints_in_stmts(sv, stmts, defs, type_map, range, out),
+        StmtKind::Block(stmts) => hints_in_stmts(sv, &stmts.stmts, defs, type_map, range, out),
         _ => {}
     }
 }
@@ -444,7 +444,7 @@ fn hints_in_expr(
         }
         // Walk into closure bodies so nested function calls get hints.
         ExprKind::Closure(c) => {
-            hints_in_stmts(sv, &c.body, defs, type_map, range, out);
+            hints_in_stmts(sv, &c.body.stmts, defs, type_map, range, out);
         }
         // Walk into arrow function bodies so nested calls get hints.
         // No return-type hint: the annotation is already visible in the source,

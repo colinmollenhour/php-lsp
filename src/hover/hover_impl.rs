@@ -61,7 +61,7 @@ fn scan_statements(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 return Some(sig);
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) if m.name == word => {
                             let prefix = format_method_prefix(
@@ -92,7 +92,7 @@ fn scan_statements(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 return Some(format!("interface {}", word));
             }
             StmtKind::Interface(i) => {
-                for member in i.members.iter() {
+                for member in i.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) if m.name == word => {
                             let prefix = format_method_prefix(
@@ -123,7 +123,7 @@ fn scan_statements(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 return Some(format!("trait {}", word));
             }
             StmtKind::Trait(t) => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) if m.name == word => {
                             let prefix = format_method_prefix(
@@ -167,7 +167,7 @@ fn scan_statements(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                 return Some(sig);
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Case(c) if c.name == word => {
                             let value_str = c
@@ -205,7 +205,7 @@ fn scan_statements(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(s) = scan_statements(inner, word)
+                    && let Some(s) = scan_statements(&inner.stmts, word)
                 {
                     return Some(s);
                 }

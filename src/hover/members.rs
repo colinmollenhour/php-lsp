@@ -26,7 +26,7 @@ fn find_property_info_in_stmts<'a>(
             StmtKind::Class(c)
                 if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
             {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Property(p) if p.name == prop_name => {
                             let modifiers = format_prop_prefix(
@@ -92,7 +92,7 @@ fn find_property_info_in_stmts<'a>(
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
                     && let Some(t) =
-                        find_property_info_in_stmts(source, inner, class_name, prop_name)
+                        find_property_info_in_stmts(source, &inner.stmts, class_name, prop_name)
                 {
                     return Some(t);
                 }
@@ -125,7 +125,7 @@ fn scan_method_of_class_impl<'a>(
                 if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
             {
                 // 1. Direct method lookup.
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -143,7 +143,7 @@ fn scan_method_of_class_impl<'a>(
                 }
                 // 2. Walk trait uses within the same document.
                 let mut trait_names: Vec<String> = Vec::new();
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::TraitUse(tu) = &member.kind {
                         for tn in tu.traits.iter() {
                             let s = tn.to_string_repr();
@@ -174,7 +174,7 @@ fn scan_method_of_class_impl<'a>(
                 return None;
             }
             StmtKind::Trait(t) if t.name == class_name => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -193,7 +193,7 @@ fn scan_method_of_class_impl<'a>(
                 return None;
             }
             StmtKind::Enum(e) if e.name == class_name => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -213,7 +213,8 @@ fn scan_method_of_class_impl<'a>(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    let result = scan_method_of_class_impl(root, inner, class_name, method_name);
+                    let result =
+                        scan_method_of_class_impl(root, &inner.stmts, class_name, method_name);
                     if result.is_some() {
                         return result;
                     }
@@ -234,7 +235,7 @@ pub(crate) fn scan_enum_case_of_class(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Enum(e) if e.name == class_name => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Case(c) = &member.kind
                         && c.name == case_name
                     {
@@ -251,7 +252,7 @@ pub(crate) fn scan_enum_case_of_class(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(s) = scan_enum_case_of_class(inner, class_name, case_name)
+                    && let Some(s) = scan_enum_case_of_class(&inner.stmts, class_name, case_name)
                 {
                     return Some(s);
                 }
@@ -273,7 +274,7 @@ pub(crate) fn scan_class_const_of_class(
             StmtKind::Class(c)
                 if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
             {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::ClassConst(k) = &member.kind
                         && k.name == const_name
                     {
@@ -283,7 +284,7 @@ pub(crate) fn scan_class_const_of_class(
                 return None;
             }
             StmtKind::Interface(i) if i.name == class_name => {
-                for member in i.members.iter() {
+                for member in i.body.members.iter() {
                     if let ClassMemberKind::ClassConst(k) = &member.kind
                         && k.name == const_name
                     {
@@ -293,7 +294,7 @@ pub(crate) fn scan_class_const_of_class(
                 return None;
             }
             StmtKind::Enum(e) if e.name == class_name => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::ClassConst(k) = &member.kind
                         && k.name == const_name
                     {
@@ -303,7 +304,7 @@ pub(crate) fn scan_class_const_of_class(
                 return None;
             }
             StmtKind::Trait(t) if t.name == class_name => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::ClassConst(k) = &member.kind
                         && k.name == const_name
                     {
@@ -314,7 +315,7 @@ pub(crate) fn scan_class_const_of_class(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(s) = scan_class_const_of_class(inner, class_name, const_name)
+                    && let Some(s) = scan_class_const_of_class(&inner.stmts, class_name, const_name)
                 {
                     return Some(s);
                 }
@@ -334,7 +335,7 @@ fn find_method_sig_in_trait(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Trait(t) if t.name == trait_name => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -351,7 +352,7 @@ fn find_method_sig_in_trait(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(s) = find_method_sig_in_trait(inner, trait_name, method_name)
+                    && let Some(s) = find_method_sig_in_trait(&inner.stmts, trait_name, method_name)
                 {
                     return Some(s);
                 }
@@ -377,7 +378,7 @@ pub(crate) fn find_parent_class_name(stmts: &[Stmt<'_, '_>], class_name: &str) -
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(s) = find_parent_class_name(inner, class_name)
+                    && let Some(s) = find_parent_class_name(&inner.stmts, class_name)
                 {
                     return Some(s);
                 }
@@ -448,7 +449,7 @@ fn find_method_docblock_impl<'a>(
                 if c.name.as_ref().map(|n| n.to_string()) == Some(class_name.to_string()) =>
             {
                 // Direct lookup.
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -457,7 +458,7 @@ fn find_method_docblock_impl<'a>(
                     }
                 }
                 // Walk trait uses.
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::TraitUse(tu) = &member.kind {
                         for tn in tu.traits.iter() {
                             let s = tn.to_string_repr();
@@ -483,7 +484,7 @@ fn find_method_docblock_impl<'a>(
                 return None;
             }
             StmtKind::Trait(t) if t.name == class_name => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -494,7 +495,7 @@ fn find_method_docblock_impl<'a>(
                 return None;
             }
             StmtKind::Enum(e) if e.name == class_name => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind
                         && m.name == method_name
                     {
@@ -506,8 +507,13 @@ fn find_method_docblock_impl<'a>(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    let result =
-                        find_method_docblock_impl(source, root, inner, class_name, method_name);
+                    let result = find_method_docblock_impl(
+                        source,
+                        root,
+                        &inner.stmts,
+                        class_name,
+                        method_name,
+                    );
                     if result.is_some() {
                         return result;
                     }

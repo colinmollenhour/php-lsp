@@ -129,7 +129,7 @@ impl DocumentStore {
             Arc::new(self.psr4.read().unwrap().clone());
         let session =
             Arc::new(mir_analyzer::AnalysisSession::new(php_version).with_class_resolver(resolver));
-        session.ensure_essential_stubs_loaded();
+        session.ensure_all_stubs();
         *guard = Some((php_version, Arc::clone(&session)));
         session
     }
@@ -469,7 +469,7 @@ impl DocumentStore {
     /// Returns LSP-style 0-based line/column.
     pub fn session_references_to(
         &self,
-        symbol: &mir_analyzer::Symbol,
+        symbol: &mir_analyzer::Name,
     ) -> Vec<(Arc<str>, u32, u32, u32)> {
         let php_version = self.workspace_php_version();
         let session = self.analysis_session(php_version);
@@ -477,10 +477,10 @@ impl DocumentStore {
             .references_to(symbol)
             .into_iter()
             .map(|(file, range)| {
-                // mir uses 1-based lines, 0-based codepoint columns.
+                // mir 0.30+ uses 1-based lines and 1-based columns; LSP uses 0-based.
                 let line = range.start.line.saturating_sub(1);
-                let col_start = range.start.column;
-                let col_end = range.end.column;
+                let col_start = range.start.column.saturating_sub(1);
+                let col_end = range.end.column.saturating_sub(1);
                 (file, line, col_start, col_end)
             })
             .collect()
@@ -536,8 +536,9 @@ impl DocumentStore {
             let file: Arc<str> = Arc::from(uri.as_str());
             session.ingest_file(file.clone(), doc.source_arc());
             let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
+            let owned_program = php_ast::owned::to_owned_program(doc.program());
             let analyzer = mir_analyzer::FileAnalyzer::new(&session);
-            analyzer.analyze(file, doc.source(), doc.program(), &source_map);
+            analyzer.analyze(file, doc.source(), &owned_program, &source_map);
         }
     }
 
@@ -628,20 +629,21 @@ impl DocumentStore {
             // produces a spurious `UndefinedClass`.
             let fqns = crate::references::collect_referenced_class_fqns(&doc);
             for fqcn in &fqns {
-                let _ = session.lazy_load_class(fqcn);
+                let _ = session.load_class(fqcn);
             }
         }
         let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
+        let owned_program = php_ast::owned::to_owned_program(doc.program());
         let analysis = {
             let _s = tracing::debug_span!("FileAnalyzer::analyze").entered();
             let analyzer = mir_analyzer::FileAnalyzer::new(&session);
-            analyzer.analyze(file.clone(), doc.source(), doc.program(), &source_map)
+            analyzer.analyze(file.clone(), doc.source(), &owned_program, &source_map)
         };
         // Workspace-level class issues for this file (circular inheritance,
         // override violations, abstract-method gaps).
         let class_issues = {
             let _s = tracing::debug_span!("session.class_issues_for").entered();
-            session.class_issues_for(std::slice::from_ref(&file))
+            session.class_issues(std::slice::from_ref(&file))
         };
         let combined: Vec<mir_issues::Issue> = analysis
             .issues

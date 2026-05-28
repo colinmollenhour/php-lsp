@@ -38,7 +38,7 @@ fn collect_from_statements_before(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_from_statements_before(inner, items, line, sv, doc);
+                    collect_from_statements_before(&inner.stmts, items, line, sv, doc);
                 }
             }
             // Non-variable items: always include
@@ -90,7 +90,7 @@ fn collect_from_statements_with_doc(
                         ..Default::default()
                     });
                 }
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
                             let method_name_str = m.name.to_string();
@@ -155,7 +155,7 @@ fn collect_from_statements_with_doc(
                     kind: Some(CompletionItemKind::ENUM),
                     ..Default::default()
                 });
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Case(c) = &member.kind {
                         items.push(CompletionItem {
                             label: format!("{}::{}", e.name, &c.name.to_string()),
@@ -167,7 +167,7 @@ fn collect_from_statements_with_doc(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_from_statements_with_doc(inner, items, doc);
+                    collect_from_statements_with_doc(&inner.stmts, items, doc);
                 }
             }
             StmtKind::Expression(e) => {

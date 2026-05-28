@@ -133,7 +133,7 @@ fn find_declaration_item(
                 });
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == name
                     {
@@ -153,7 +153,7 @@ fn find_declaration_item(
                 }
             }
             StmtKind::Trait(t) => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == name
                     {
@@ -173,7 +173,7 @@ fn find_declaration_item(
                 }
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind
                         && m.name == name
                     {
@@ -194,7 +194,7 @@ fn find_declaration_item(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(item) = find_declaration_item(name, inner, sv, uri)
+                    && let Some(item) = find_declaration_item(name, &inner.stmts, sv, uri)
                 {
                     return Some(item);
                 }
@@ -244,7 +244,7 @@ fn enclosing_in_stmt(
             })
         }
         StmtKind::Class(c) => {
-            for member in c.members.iter() {
+            for member in c.body.members.iter() {
                 let m_range = sv.range_of(member.span);
                 if range_contains(m_range, pos)
                     && let ClassMemberKind::Method(m) = &member.kind
@@ -265,7 +265,7 @@ fn enclosing_in_stmt(
             None
         }
         StmtKind::Trait(t) => {
-            for member in t.members.iter() {
+            for member in t.body.members.iter() {
                 let m_range = sv.range_of(member.span);
                 if range_contains(m_range, pos)
                     && let ClassMemberKind::Method(m) = &member.kind
@@ -286,7 +286,7 @@ fn enclosing_in_stmt(
             None
         }
         StmtKind::Enum(e) => {
-            for member in e.members.iter() {
+            for member in e.body.members.iter() {
                 let m_range = sv.range_of(member.span);
                 if range_contains(m_range, pos)
                     && let EnumMemberKind::Method(m) = &member.kind
@@ -308,7 +308,7 @@ fn enclosing_in_stmt(
         }
         StmtKind::Namespace(ns) => {
             if let NamespaceBody::Braced(inner) = &ns.body {
-                return enclosing_function(sv, inner, pos, uri);
+                return enclosing_function(sv, &inner.stmts, pos, uri);
             }
             None
         }
@@ -334,45 +334,45 @@ fn collect_calls_for(fn_name: &str, stmts: &[Stmt<'_, '_>], out: &mut Vec<(Strin
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) if f.name == fn_name => {
-                calls_in_stmts(&f.body, out);
+                calls_in_stmts(&f.body.stmts, out);
                 return;
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == fn_name
                         && let Some(body) = &m.body
                     {
-                        calls_in_stmts(body, out);
+                        calls_in_stmts(&body.stmts, out);
                         return;
                     }
                 }
             }
             StmtKind::Trait(t) => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == fn_name
                         && let Some(body) = &m.body
                     {
-                        calls_in_stmts(body, out);
+                        calls_in_stmts(&body.stmts, out);
                         return;
                     }
                 }
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind
                         && m.name == fn_name
                         && let Some(body) = &m.body
                     {
-                        calls_in_stmts(body, out);
+                        calls_in_stmts(&body.stmts, out);
                         return;
                     }
                 }
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_calls_for(fn_name, inner, out);
+                    collect_calls_for(fn_name, &inner.stmts, out);
                 }
             }
             _ => {}

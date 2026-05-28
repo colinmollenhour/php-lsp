@@ -158,7 +158,7 @@ fn find_enclosing_class(
                 if range.start.line < class_start || range.end.line > class_end {
                     continue;
                 }
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         let method_start = sv.position_of(member.span.start).line;
                         let method_end = sv.position_of(member.span.end).line;
@@ -170,7 +170,7 @@ fn find_enclosing_class(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(r) = find_enclosing_class(inner, sv, range)
+                    && let Some(r) = find_enclosing_class(&inner.stmts, sv, range)
                 {
                     return Some(r);
                 }
