@@ -65,6 +65,7 @@ fn collect_actions(
 
                 // Gather method names already in this class.
                 let existing: HashSet<String> = c
+                    .body
                     .members
                     .iter()
                     .filter_map(|m| {
@@ -151,7 +152,7 @@ fn collect_actions(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_actions(inner, sv, all_docs, file_imports, range, uri, out);
+                    collect_actions(&inner.stmts, sv, all_docs, file_imports, range, uri, out);
                 }
             }
             _ => {}
@@ -215,6 +216,7 @@ fn collect_abstract_methods_fqn(
                 };
                 if fqn_eq(fqn, &declared_fqn) {
                     let stubs = i
+                        .body
                         .members
                         .iter()
                         .filter_map(|m| {
@@ -248,6 +250,7 @@ fn collect_abstract_methods_fqn(
                 };
                 if fqn_eq(fqn, &declared_fqn) {
                     let stubs = c
+                        .body
                         .members
                         .iter()
                         .filter_map(|m| {
@@ -282,7 +285,8 @@ fn collect_abstract_methods_fqn(
                         Some(n) => n.clone(),
                         None => current_ns.to_string(),
                     };
-                    if let Some(stubs) = collect_abstract_methods_fqn(inner, fqn, &child_ns) {
+                    if let Some(stubs) = collect_abstract_methods_fqn(&inner.stmts, fqn, &child_ns)
+                    {
                         return Some(stubs);
                     }
                 }
@@ -303,6 +307,7 @@ fn collect_abstract_methods(stmts: &[Stmt<'_, '_>], name: &str) -> Option<Vec<Me
         match &stmt.kind {
             StmtKind::Interface(i) if i.name == name => {
                 let stubs = i
+                    .body
                     .members
                     .iter()
                     .filter_map(|m| {
@@ -329,6 +334,7 @@ fn collect_abstract_methods(stmts: &[Stmt<'_, '_>], name: &str) -> Option<Vec<Me
                     && c.modifiers.is_abstract =>
             {
                 let stubs = c
+                    .body
                     .members
                     .iter()
                     .filter_map(|m| {
@@ -356,7 +362,7 @@ fn collect_abstract_methods(stmts: &[Stmt<'_, '_>], name: &str) -> Option<Vec<Me
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(stubs) = collect_abstract_methods(inner, name)
+                    && let Some(stubs) = collect_abstract_methods(&inner.stmts, name)
                 {
                     return Some(stubs);
                 }

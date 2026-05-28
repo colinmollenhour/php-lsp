@@ -162,7 +162,7 @@ fn collect_stmts(
                         if index.namespace.is_none() {
                             index.namespace = ns_name.clone();
                         }
-                        collect_stmts(source, view, inner, ns_str, index);
+                        collect_stmts(source, view, &inner.stmts, ns_str, index);
                     }
                     NamespaceBody::Simple => {
                         // Unbraced namespace: all following stmts belong to it.
@@ -221,7 +221,7 @@ fn collect_stmts(
                     name_char: name_char(&class_name_str),
                 };
 
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
                             let mdoc = docblock_before(source, member.span.start).map(|s| s.into());
@@ -313,7 +313,7 @@ fn collect_stmts(
                     name_char: name_char(&i.name.to_string()),
                 };
 
-                for member in i.members.iter() {
+                for member in i.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
                             let mdoc = docblock_before(source, member.span.start).map(|s| s.into());
@@ -363,7 +363,7 @@ fn collect_stmts(
                     name_char: name_char(&t.name.to_string()),
                 };
 
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
                             let mdoc = docblock_before(source, member.span.start).map(|s| s.into());
@@ -436,7 +436,7 @@ fn collect_stmts(
                     name_char: name_char(&e.name.to_string()),
                 };
 
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Case(c) => {
                             enum_def.cases.push(c.name.to_string().into());

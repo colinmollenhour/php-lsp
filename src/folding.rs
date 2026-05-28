@@ -24,7 +24,7 @@ fn fold_stmts(stmts: &[Stmt<'_, '_>], sv: SourceView<'_>, out: &mut Vec<FoldingR
 /// where the outer statement already covers the same span as the inner `Block`.
 fn fold_body(body: &Stmt<'_, '_>, sv: SourceView<'_>, out: &mut Vec<FoldingRange>) {
     if let StmtKind::Block(stmts) = &body.kind {
-        fold_stmts(stmts, sv, out);
+        fold_stmts(&stmts.stmts, sv, out);
     }
 }
 
@@ -34,13 +34,13 @@ fn fold_stmt(stmt: &Stmt<'_, '_>, sv: SourceView<'_>, out: &mut Vec<FoldingRange
             let start_line = sv.line_of(stmt.span.start);
             let end_line = sv.line_of(stmt.span.end);
             push(out, start_line, end_line, None);
-            fold_stmts(&f.body, sv, out);
+            fold_stmts(&f.body.stmts, sv, out);
         }
         StmtKind::Class(c) => {
             let start_line = sv.line_of(stmt.span.start);
             let end_line = sv.line_of(stmt.span.end);
             push(out, start_line, end_line, None);
-            for member in c.members.iter() {
+            for member in c.body.members.iter() {
                 if let ClassMemberKind::Method(m) = &member.kind {
                     let m_start = sv.line_of(member.span.start);
                     // member.span.end is exclusive and includes the trailing newline;
@@ -48,7 +48,7 @@ fn fold_stmt(stmt: &Stmt<'_, '_>, sv: SourceView<'_>, out: &mut Vec<FoldingRange
                     let m_end = sv.line_of(member.span.end.saturating_sub(1));
                     push(out, m_start, m_end, None);
                     if let Some(body) = &m.body {
-                        fold_stmts(body, sv, out);
+                        fold_stmts(&body.stmts, sv, out);
                     }
                 }
             }
@@ -58,14 +58,14 @@ fn fold_stmt(stmt: &Stmt<'_, '_>, sv: SourceView<'_>, out: &mut Vec<FoldingRange
             let end_line = sv.line_of(stmt.span.end);
             push(out, start_line, end_line, None);
             // Interface methods are abstract (no body) — nothing to fold per method.
-            for member in i.members.iter() {
+            for member in i.body.members.iter() {
                 if let ClassMemberKind::Method(m) = &member.kind
                     && let Some(body) = &m.body
                 {
                     let m_start = sv.line_of(member.span.start);
                     let m_end = sv.line_of(member.span.end.saturating_sub(1));
                     push(out, m_start, m_end, None);
-                    fold_stmts(body, sv, out);
+                    fold_stmts(&body.stmts, sv, out);
                 }
             }
         }
@@ -73,13 +73,13 @@ fn fold_stmt(stmt: &Stmt<'_, '_>, sv: SourceView<'_>, out: &mut Vec<FoldingRange
             let start_line = sv.line_of(stmt.span.start);
             let end_line = sv.line_of(stmt.span.end);
             push(out, start_line, end_line, None);
-            for member in t.members.iter() {
+            for member in t.body.members.iter() {
                 if let ClassMemberKind::Method(m) = &member.kind {
                     let m_start = sv.line_of(member.span.start);
                     let m_end = sv.line_of(member.span.end.saturating_sub(1));
                     push(out, m_start, m_end, None);
                     if let Some(body) = &m.body {
-                        fold_stmts(body, sv, out);
+                        fold_stmts(&body.stmts, sv, out);
                     }
                 }
             }
@@ -88,13 +88,13 @@ fn fold_stmt(stmt: &Stmt<'_, '_>, sv: SourceView<'_>, out: &mut Vec<FoldingRange
             let start_line = sv.line_of(stmt.span.start);
             let end_line = sv.line_of(stmt.span.end);
             push(out, start_line, end_line, None);
-            for member in e.members.iter() {
+            for member in e.body.members.iter() {
                 if let EnumMemberKind::Method(m) = &member.kind {
                     let m_start = sv.line_of(member.span.start);
                     let m_end = sv.line_of(member.span.end.saturating_sub(1));
                     push(out, m_start, m_end, None);
                     if let Some(body) = &m.body {
-                        fold_stmts(body, sv, out);
+                        fold_stmts(&body.stmts, sv, out);
                     }
                 }
             }
@@ -139,26 +139,26 @@ fn fold_stmt(stmt: &Stmt<'_, '_>, sv: SourceView<'_>, out: &mut Vec<FoldingRange
             let start_line = sv.line_of(stmt.span.start);
             let end_line = sv.line_of(stmt.span.end);
             push(out, start_line, end_line, None);
-            fold_stmts(&t.body, sv, out);
+            fold_stmts(&t.body.stmts, sv, out);
             for catch in t.catches.iter() {
-                fold_stmts(&catch.body, sv, out);
+                fold_stmts(&catch.body.stmts, sv, out);
             }
             if let Some(finally) = &t.finally {
-                fold_stmts(finally, sv, out);
+                fold_stmts(&finally.stmts, sv, out);
             }
         }
         StmtKind::Block(stmts) => {
             let start_line = sv.line_of(stmt.span.start);
             let end_line = sv.line_of(stmt.span.end);
             push(out, start_line, end_line, None);
-            fold_stmts(stmts, sv, out);
+            fold_stmts(&stmts.stmts, sv, out);
         }
         StmtKind::Namespace(ns) => {
             let start_line = sv.line_of(stmt.span.start);
             let end_line = sv.line_of(stmt.span.end);
             push(out, start_line, end_line, None);
             if let NamespaceBody::Braced(inner) = &ns.body {
-                fold_stmts(inner, sv, out);
+                fold_stmts(&inner.stmts, sv, out);
             }
         }
         _ => {}

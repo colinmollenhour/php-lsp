@@ -503,7 +503,7 @@ pub fn find_docblock(
                 return Some(parse_docblock(&raw));
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) if m.name == word => {
                             let raw = docblock_before(source, member.span.start)?;
@@ -518,7 +518,7 @@ pub fn find_docblock(
                 }
             }
             StmtKind::Interface(i) => {
-                for member in i.members.iter() {
+                for member in i.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) if m.name == word => {
                             let raw = docblock_before(source, member.span.start)?;
@@ -533,7 +533,7 @@ pub fn find_docblock(
                 }
             }
             StmtKind::Trait(t) => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == word
                     {
@@ -543,7 +543,7 @@ pub fn find_docblock(
                 }
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Method(m) if m.name == word => {
                             let raw = docblock_before(source, member.span.start)?;
@@ -563,7 +563,7 @@ pub fn find_docblock(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(db) = find_docblock(source, inner, word)
+                    && let Some(db) = find_docblock(source, &inner.stmts, word)
                 {
                     return Some(db);
                 }

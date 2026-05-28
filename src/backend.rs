@@ -163,7 +163,7 @@ impl Backend {
 
     /// Current MirDb snapshot for the workspace, owned by the
     /// `AnalysisSession`. Cheap clone (Arc-wrapped internals).
-    fn codebase(&self) -> mir_analyzer::db::MirDb {
+    fn codebase(&self) -> mir_analyzer::db::MirDbStorage {
         let php_version = self.docs.workspace_php_version();
         let session = self.docs.analysis_session(php_version);
         session.snapshot_db()
@@ -203,7 +203,7 @@ impl Backend {
     }
 }
 
-/// Build a `mir_analyzer::Symbol` from the cursor-resolved `(word, kind,
+/// Build a `mir_analyzer::Name` from the cursor-resolved `(word, kind,
 /// target_fqn)` triple, when there's enough information to construct one.
 /// Returns `None` when:
 /// - `kind` is `None` (cursor not on a recognizable symbol) or `Property`
@@ -213,17 +213,17 @@ fn build_mir_symbol(
     word: &str,
     kind: Option<crate::references::SymbolKind>,
     target_fqn: Option<&str>,
-) -> Option<mir_analyzer::Symbol> {
+) -> Option<mir_analyzer::Name> {
     use crate::references::SymbolKind;
     use std::sync::Arc as StdArc;
     match kind {
         Some(SymbolKind::Function) => {
-            target_fqn.map(|fqn| mir_analyzer::Symbol::Function(StdArc::from(fqn)))
+            target_fqn.map(|fqn| mir_analyzer::Name::Function(StdArc::from(fqn)))
         }
         Some(SymbolKind::Class) => {
-            target_fqn.map(|fqn| mir_analyzer::Symbol::Class(StdArc::from(fqn)))
+            target_fqn.map(|fqn| mir_analyzer::Name::Class(StdArc::from(fqn)))
         }
-        Some(SymbolKind::Method) => target_fqn.map(|owning| mir_analyzer::Symbol::Method {
+        Some(SymbolKind::Method) => target_fqn.map(|owning| mir_analyzer::Name::Method {
             class: StdArc::from(owning),
             // PHP method dispatch is case-insensitive — Symbol::method
             // normalizes the name. The constructor function does this for us.
@@ -253,7 +253,7 @@ async fn compute_dependent_publishes_owned(
         // surface the orphaned dependents.
         let php_version = docs.workspace_php_version();
         let session = docs.analysis_session(php_version);
-        let analyses = session.analyze_dependents_of(changed_uri.as_str());
+        let analyses = session.reanalyze_dependents(changed_uri.as_str());
         if analyses.is_empty() {
             return Vec::new();
         }
@@ -283,7 +283,7 @@ async fn compute_dependent_publishes_owned(
             .iter()
             .map(|(u, _)| Arc::from(u.as_str()))
             .collect();
-        let class_issues = session.class_issues_for(&dep_files);
+        let class_issues = session.class_issues(&dep_files);
         let mut class_issues_by_file: std::collections::HashMap<Arc<str>, Vec<mir_issues::Issue>> =
             std::collections::HashMap::new();
         for issue in class_issues {
@@ -3011,7 +3011,7 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Class(c) => {
-                    for member in c.members.iter() {
+                    for member in c.body.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind {
                             let name = m.name.to_string();
                             let start =
@@ -3024,7 +3024,7 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                     }
                 }
                 StmtKind::Interface(i) => {
-                    for member in i.members.iter() {
+                    for member in i.body.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind {
                             let name = m.name.to_string();
                             let start =
@@ -3037,7 +3037,7 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                     }
                 }
                 StmtKind::Trait(t) => {
-                    for member in t.members.iter() {
+                    for member in t.body.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind {
                             let name = m.name.to_string();
                             let start =
@@ -3050,7 +3050,7 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                     }
                 }
                 StmtKind::Enum(e) => {
-                    for member in e.members.iter() {
+                    for member in e.body.members.iter() {
                         if let EnumMemberKind::Method(m) = &member.kind {
                             let name = m.name.to_string();
                             let start =
@@ -3064,7 +3064,7 @@ fn cursor_is_on_method_decl(source: &str, stmts: &[Stmt<'_, '_>], position: Posi
                 }
                 StmtKind::Namespace(ns) => {
                     if let NamespaceBody::Braced(inner) = &ns.body
-                        && check(source, inner, cursor)
+                        && check(source, &inner.stmts, cursor)
                     {
                         return true;
                     }
@@ -3101,7 +3101,7 @@ fn cursor_is_on_property_decl(
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Class(c) => {
-                    for member in c.members.iter() {
+                    for member in c.body.members.iter() {
                         if let ClassMemberKind::Property(p) = &member.kind {
                             let name = p.name.to_string();
                             let start =
@@ -3114,7 +3114,7 @@ fn cursor_is_on_property_decl(
                     }
                 }
                 StmtKind::Trait(t) => {
-                    for member in t.members.iter() {
+                    for member in t.body.members.iter() {
                         if let ClassMemberKind::Property(p) = &member.kind {
                             let name = p.name.to_string();
                             let start =
@@ -3128,7 +3128,7 @@ fn cursor_is_on_property_decl(
                 }
                 StmtKind::Namespace(ns) => {
                     if let NamespaceBody::Braced(inner) = &ns.body
-                        && let Some(name) = check(source, inner, cursor)
+                        && let Some(name) = check(source, &inner.stmts, cursor)
                     {
                         return Some(name);
                     }
@@ -3203,23 +3203,23 @@ fn cursor_is_on_constant_decl(
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Class(c) => {
-                    if let Some(const_name) = check_members(source, &c.members, cursor) {
+                    if let Some(const_name) = check_members(source, &c.body.members, cursor) {
                         let owner = c.name.map(|n| n.to_string());
                         return Some((const_name, owner));
                     }
                 }
                 StmtKind::Interface(i) => {
-                    if let Some(const_name) = check_members(source, &i.members, cursor) {
+                    if let Some(const_name) = check_members(source, &i.body.members, cursor) {
                         return Some((const_name, Some(i.name.to_string())));
                     }
                 }
                 StmtKind::Trait(t) => {
-                    if let Some(const_name) = check_members(source, &t.members, cursor) {
+                    if let Some(const_name) = check_members(source, &t.body.members, cursor) {
                         return Some((const_name, Some(t.name.to_string())));
                     }
                 }
                 StmtKind::Enum(e) => {
-                    if let Some(const_name) = check_enum_members(source, &e.members, cursor) {
+                    if let Some(const_name) = check_enum_members(source, &e.body.members, cursor) {
                         return Some((const_name, Some(e.name.to_string())));
                     }
                 }
@@ -3255,7 +3255,7 @@ fn cursor_is_on_constant_decl(
                 }
                 StmtKind::Namespace(ns) => {
                     if let NamespaceBody::Braced(inner) = &ns.body
-                        && let Some(result) = check(source, inner, cursor)
+                        && let Some(result) = check(source, &inner.stmts, cursor)
                     {
                         return Some(result);
                     }
@@ -3295,7 +3295,7 @@ fn class_name_at_construct_decl(
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Class(c) => {
-                    for member in c.members.iter() {
+                    for member in c.body.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind
                             && m.name == "__construct"
                         {
@@ -3328,7 +3328,7 @@ fn class_name_at_construct_decl(
                         .unwrap_or_default();
                     match &ns.body {
                         NamespaceBody::Braced(inner) => {
-                            if let Some(name) = check(source, inner, cursor, &ns_name) {
+                            if let Some(name) = check(source, &inner.stmts, cursor, &ns_name) {
                                 return Some(name);
                             }
                         }
@@ -3364,7 +3364,7 @@ fn promoted_property_at_cursor(
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Class(c) => {
-                    for member in c.members.iter() {
+                    for member in c.body.members.iter() {
                         if let ClassMemberKind::Method(m) = &member.kind
                             && m.name == "__construct"
                         {
@@ -3386,7 +3386,7 @@ fn promoted_property_at_cursor(
                 }
                 StmtKind::Namespace(ns) => {
                     if let NamespaceBody::Braced(inner) = &ns.body
-                        && let Some(name) = check(source, inner, cursor)
+                        && let Some(name) = check(source, &inner.stmts, cursor)
                     {
                         return Some(name);
                     }

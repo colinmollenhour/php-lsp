@@ -53,12 +53,15 @@ fn find_closure_in_stmt(
             find_closure_in_expr(source, expr, cursor_byte, word_len)
         }
         StmtKind::Return(Some(expr)) => find_closure_in_expr(source, expr, cursor_byte, word_len),
-        StmtKind::Function(f) => find_closure_in_stmts(source, &f.body, cursor_byte, word_len),
+        StmtKind::Function(f) => {
+            find_closure_in_stmts(source, &f.body.stmts, cursor_byte, word_len)
+        }
         StmtKind::Class(c) => {
-            for member in c.members.iter() {
+            for member in c.body.members.iter() {
                 if let ClassMemberKind::Method(m) = &member.kind
                     && let Some(body) = &m.body
-                    && let Some(sig) = find_closure_in_stmts(source, body, cursor_byte, word_len)
+                    && let Some(sig) =
+                        find_closure_in_stmts(source, &body.stmts, cursor_byte, word_len)
                 {
                     return Some(sig);
                 }
@@ -67,12 +70,14 @@ fn find_closure_in_stmt(
         }
         StmtKind::Namespace(ns) => {
             if let NamespaceBody::Braced(inner) = &ns.body {
-                find_closure_in_stmts(source, inner, cursor_byte, word_len)
+                find_closure_in_stmts(source, &inner.stmts, cursor_byte, word_len)
             } else {
                 None
             }
         }
-        StmtKind::Block(inner) => find_closure_in_stmts(source, inner, cursor_byte, word_len),
+        StmtKind::Block(inner) => {
+            find_closure_in_stmts(source, &inner.stmts, cursor_byte, word_len)
+        }
         StmtKind::If(i) => {
             if let Some(sig) = find_closure_in_expr(source, &i.condition, cursor_byte, word_len)
                 .or_else(|| find_closure_in_stmt(source, i.then_branch, cursor_byte, word_len))
@@ -118,17 +123,18 @@ fn find_closure_in_stmt(
         StmtKind::Foreach(f) => find_closure_in_expr(source, &f.expr, cursor_byte, word_len)
             .or_else(|| find_closure_in_stmt(source, f.body, cursor_byte, word_len)),
         StmtKind::TryCatch(t) => {
-            if let Some(sig) = find_closure_in_stmts(source, &t.body, cursor_byte, word_len) {
+            if let Some(sig) = find_closure_in_stmts(source, &t.body.stmts, cursor_byte, word_len) {
                 return Some(sig);
             }
             for catch in t.catches.iter() {
-                if let Some(sig) = find_closure_in_stmts(source, &catch.body, cursor_byte, word_len)
+                if let Some(sig) =
+                    find_closure_in_stmts(source, &catch.body.stmts, cursor_byte, word_len)
                 {
                     return Some(sig);
                 }
             }
             if let Some(finally) = &t.finally {
-                find_closure_in_stmts(source, finally, cursor_byte, word_len)
+                find_closure_in_stmts(source, &finally.stmts, cursor_byte, word_len)
             } else {
                 None
             }

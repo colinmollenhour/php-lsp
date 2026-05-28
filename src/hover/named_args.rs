@@ -271,7 +271,7 @@ fn find_param_sig_in_stmts(
                     .map(|cn| cn == &c.name.as_ref().map(|n| n.to_string()).unwrap_or_default())
                     .unwrap_or(false) =>
             {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == callee_name
                     {
@@ -289,7 +289,7 @@ fn find_param_sig_in_stmts(
                     .map(|cn| cn == &t.name.to_string())
                     .unwrap_or(false) =>
             {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == callee_name
                     {
@@ -303,8 +303,13 @@ fn find_param_sig_in_stmts(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(r) =
-                        find_param_sig_in_stmts(source, inner, callee_name, class_name, label)
+                    && let Some(r) = find_param_sig_in_stmts(
+                        source,
+                        &inner.stmts,
+                        callee_name,
+                        class_name,
+                        label,
+                    )
                 {
                     return Some(r);
                 }

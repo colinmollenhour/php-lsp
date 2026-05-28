@@ -86,7 +86,7 @@ fn collect_promote<'a>(
                 }
 
                 // Find the constructor.
-                let ctor_member = c.members.iter().find(|m| {
+                let ctor_member = c.body.members.iter().find(|m| {
                     matches!(&m.kind, ClassMemberKind::Method(method) if method.name == "__construct")
                 });
                 let ctor_member = match ctor_member {
@@ -106,7 +106,7 @@ fn collect_promote<'a>(
                 // Only include non-static properties that have a visibility modifier.
                 let mut prop_info: HashMap<String, (u32, u32, &'static str, bool, Option<String>)> =
                     HashMap::new();
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Property(p) = &member.kind
                         && !p.is_static
                         && p.visibility.is_some()
@@ -159,7 +159,7 @@ fn collect_promote<'a>(
 
                     // Search constructor body for `$this->paramName = $paramName`.
                     let assign_span =
-                        find_this_assign(sv.source(), ctor_body, &param_name.to_string());
+                        find_this_assign(sv.source(), &ctor_body.stmts, &param_name.to_string());
                     let (assign_start, assign_end) = match assign_span {
                         Some(s) => s,
                         None => continue,
@@ -203,7 +203,7 @@ fn collect_promote<'a>(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_promote(inner, sv, range, uri, out);
+                    collect_promote(&inner.stmts, sv, range, uri, out);
                 }
             }
             _ => {}

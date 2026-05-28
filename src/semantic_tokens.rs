@@ -408,7 +408,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
             if let Some(rt) = &f.return_type {
                 push_type_hint(out, sv, rt);
             }
-            collect_stmts(sv, &f.body, out);
+            collect_stmts(sv, &f.body.stmts, out);
         }
         StmtKind::Class(c) => {
             push_attributes(out, sv, &c.attributes);
@@ -419,7 +419,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
                 }
                 push_name(out, sv, &name.to_string(), TT_CLASS, mods);
             }
-            for member in c.members.iter() {
+            for member in c.body.members.iter() {
                 collect_class_member(sv, member, out);
             }
         }
@@ -432,7 +432,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
             push_attributes(out, sv, &t.attributes);
             let mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
             push_name(out, sv, &t.name.to_string(), TT_CLASS, mods);
-            for member in t.members.iter() {
+            for member in t.body.members.iter() {
                 collect_class_member(sv, member, out);
             }
         }
@@ -440,7 +440,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
             push_attributes(out, sv, &e.attributes);
             let mods = MOD_DECLARATION | deprecated_mod(sv.source(), stmt.span.start);
             push_name(out, sv, &e.name.to_string(), TT_CLASS, mods);
-            for member in e.members.iter() {
+            for member in e.body.members.iter() {
                 match &member.kind {
                     EnumMemberKind::Case(c) => {
                         push_attributes(out, sv, &c.attributes);
@@ -469,7 +469,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
                             push_type_hint(out, sv, rt);
                         }
                         if let Some(body) = &m.body {
-                            collect_stmts(sv, body, out);
+                            collect_stmts(sv, &body.stmts, out);
                         }
                     }
                     EnumMemberKind::ClassConst(k) => {
@@ -490,7 +490,7 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
         }
         StmtKind::Namespace(ns) => {
             if let NamespaceBody::Braced(inner) = &ns.body {
-                collect_stmts(sv, inner, out);
+                collect_stmts(sv, &inner.stmts, out);
             }
         }
         StmtKind::Use(_) => {}
@@ -538,18 +538,18 @@ fn collect_stmt(sv: SourceView<'_>, stmt: &Stmt<'_, '_>, out: &mut Vec<RawToken>
             collect_stmt(sv, f.body, out);
         }
         StmtKind::TryCatch(t) => {
-            collect_stmts(sv, &t.body, out);
+            collect_stmts(sv, &t.body.stmts, out);
             for catch in t.catches.iter() {
-                collect_stmts(sv, &catch.body, out);
+                collect_stmts(sv, &catch.body.stmts, out);
             }
             if let Some(finally) = &t.finally {
-                collect_stmts(sv, finally, out);
+                collect_stmts(sv, &finally.stmts, out);
             }
         }
-        StmtKind::Block(stmts) => collect_stmts(sv, stmts, out),
+        StmtKind::Block(stmts) => collect_stmts(sv, &stmts.stmts, out),
         StmtKind::Switch(s) => {
             collect_expr(sv, &s.expr, out);
-            for case in s.cases.iter() {
+            for case in s.body.cases.iter() {
                 if let Some(v) = &case.value {
                     collect_expr(sv, v, out);
                 }
@@ -586,7 +586,7 @@ fn collect_class_member(
             push_type_hint(out, sv, rt);
         }
         if let Some(body) = &m.body {
-            collect_stmts(sv, body, out);
+            collect_stmts(sv, &body.stmts, out);
         }
     } else if let ClassMemberKind::Property(p) = &member.kind {
         push_attributes(out, sv, &p.attributes);
@@ -736,7 +736,7 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
             if let Some(rt) = &c.return_type {
                 push_type_hint(out, sv, rt);
             }
-            collect_stmts(sv, &c.body, out);
+            collect_stmts(sv, &c.body.stmts, out);
         }
         ExprKind::ArrowFunction(af) => {
             for p in af.params.iter() {

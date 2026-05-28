@@ -58,7 +58,7 @@ pub(super) fn collect_attribute_classes(
                     .unwrap_or_default();
                 match &ns.body {
                     NamespaceBody::Braced(inner) => {
-                        collect_attribute_classes(inner, &ns_name, out);
+                        collect_attribute_classes(&inner.stmts, &ns_name, out);
                     }
                     NamespaceBody::Simple => {
                         cur_ns = ns_name;
@@ -238,7 +238,7 @@ pub(super) fn collect_classes_with_ns(
                     .unwrap_or_default();
                 match &ns.body {
                     NamespaceBody::Braced(inner) => {
-                        collect_classes_with_ns(inner, &ns_name, items);
+                        collect_classes_with_ns(&inner.stmts, &ns_name, items);
                     }
                     NamespaceBody::Simple => {
                         // Unbraced namespace: applies to all subsequent statements.
@@ -339,7 +339,7 @@ pub(super) fn collect_fqns_with_prefix(
                     })
                     .unwrap_or_else(|| ns.to_string());
                 if let NamespaceBody::Braced(inner) = &ns_stmt.body {
-                    collect_fqns_with_prefix(inner, &ns_name, prefix, out);
+                    collect_fqns_with_prefix(&inner.stmts, &ns_name, prefix, out);
                 }
             }
             _ => {}

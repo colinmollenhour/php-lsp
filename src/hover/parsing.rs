@@ -151,7 +151,7 @@ pub fn resolve_use_alias(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(s) = resolve_use_alias(inner, word)
+                    && let Some(s) = resolve_use_alias(&inner.stmts, word)
                 {
                     return Some(s);
                 }

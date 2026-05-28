@@ -27,9 +27,10 @@ pub fn semantic_diagnostics(
     let file: std::sync::Arc<str> = std::sync::Arc::from(uri.as_str());
     session.ingest_file(file.clone(), doc.source_arc());
     let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
+    let owned_program = php_ast::owned::to_owned_program(doc.program());
     let analyzer = mir_analyzer::FileAnalyzer::new(session);
-    let analysis = analyzer.analyze(file.clone(), doc.source(), doc.program(), &source_map);
-    let class_issues = session.class_issues_for(std::slice::from_ref(&file));
+    let analysis = analyzer.analyze(file.clone(), doc.source(), &owned_program, &source_map);
+    let class_issues = session.class_issues(std::slice::from_ref(&file));
     analysis
         .issues
         .into_iter()
@@ -160,7 +161,7 @@ fn collect_duplicate_decls(
                         } else {
                             format!("{}\\{}", current_ns, ns_name)
                         };
-                        collect_duplicate_decls(sv, inner, &child_ns, seen, diags);
+                        collect_duplicate_decls(sv, &inner.stmts, &child_ns, seen, diags);
                     }
                     php_ast::NamespaceBody::Simple => {
                         // Unbraced namespace: subsequent siblings belong to this namespace.
@@ -238,11 +239,40 @@ fn is_identifier_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
+/// Returns true for issue kinds whose location was stored by the collector
+/// (0-indexed columns). Body-analysis issues use `offset_to_line_col` which
+/// is 1-indexed since mir 0.29; collector-stored locations were not changed.
+fn uses_codebase_location(kind: &mir_issues::IssueKind) -> bool {
+    use mir_issues::IssueKind;
+    matches!(
+        kind,
+        IssueKind::CircularInheritance { .. }
+            | IssueKind::FinalClassExtended { .. }
+            | IssueKind::UnimplementedAbstractMethod { .. }
+            | IssueKind::UnimplementedInterfaceMethod { .. }
+            | IssueKind::FinalMethodOverridden { .. }
+            | IssueKind::OverriddenMethodAccess { .. }
+            | IssueKind::MethodSignatureMismatch { .. }
+            | IssueKind::InvalidTraitUse { .. }
+    )
+}
+
 fn to_lsp_diagnostic(issue: mir_issues::Issue) -> Diagnostic {
-    // mir-analyzer uses 1-based line numbers; LSP uses 0-based.
+    // mir 0.29+ uses 1-based lines everywhere; LSP uses 0-based.
+    // Columns: body-analysis uses 1-indexed offset_to_line_col; collector-
+    // stored locations (class/trait declarations) remain 0-indexed.
     let line = issue.location.line.saturating_sub(1);
-    let col_start = issue.location.col_start as u32;
-    let col_end = issue.location.col_end as u32;
+    let (col_start, col_end) = if uses_codebase_location(&issue.kind) {
+        (
+            issue.location.col_start as u32,
+            issue.location.col_end as u32,
+        )
+    } else {
+        (
+            issue.location.col_start.saturating_sub(1) as u32,
+            issue.location.col_end.saturating_sub(1) as u32,
+        )
+    };
     Diagnostic {
         range: Range {
             start: Position {

@@ -42,7 +42,7 @@ fn collect(
                 }
             }
             StmtKind::Class(c) => {
-                for member in c.members.iter() {
+                for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         let fn_line = sv.position_of(member.span.start).line;
                         if line_in_range(fn_line, range)
@@ -59,7 +59,7 @@ fn collect(
                 }
             }
             StmtKind::Trait(t) => {
-                for member in t.members.iter() {
+                for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
                         let fn_line = sv.position_of(member.span.start).line;
                         if line_in_range(fn_line, range)
@@ -76,7 +76,7 @@ fn collect(
                 }
             }
             StmtKind::Enum(e) => {
-                for member in e.members.iter() {
+                for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind {
                         let fn_line = sv.position_of(member.span.start).line;
                         if line_in_range(fn_line, range)
@@ -94,7 +94,7 @@ fn collect(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect(inner, uri, sv, range, out);
+                    collect(&inner.stmts, uri, sv, range, out);
                 }
             }
             _ => {}

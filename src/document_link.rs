@@ -38,20 +38,20 @@ fn collect_in_stmt(
                 collect_in_expr(expr, sv, uri, out);
             }
         }
-        StmtKind::Function(f) => collect_in_stmts(&f.body, sv, uri, out),
+        StmtKind::Function(f) => collect_in_stmts(&f.body.stmts, sv, uri, out),
         StmtKind::Class(c) => {
             use php_ast::ClassMemberKind;
-            for member in c.members.iter() {
+            for member in c.body.members.iter() {
                 if let ClassMemberKind::Method(m) = &member.kind
                     && let Some(body) = &m.body
                 {
-                    collect_in_stmts(body, sv, uri, out);
+                    collect_in_stmts(&body.stmts, sv, uri, out);
                 }
             }
         }
         StmtKind::Namespace(ns) => {
             if let NamespaceBody::Braced(inner) = &ns.body {
-                collect_in_stmts(inner, sv, uri, out);
+                collect_in_stmts(&inner.stmts, sv, uri, out);
             }
         }
         _ => {}

@@ -156,21 +156,21 @@ fn collect_spans_stmt(stmt: &Stmt<'_, '_>, off: u32, out: &mut Vec<(u32, u32)>) 
             for p in f.params.iter() {
                 collect_spans_param(p, off, out);
             }
-            collect_spans_stmts(&f.body, off, out);
+            collect_spans_stmts(&f.body.stmts, off, out);
         }
         StmtKind::Class(c) => collect_class_members(c, off, out),
         StmtKind::Interface(i) => {
-            for member in i.members.iter() {
+            for member in i.body.members.iter() {
                 collect_class_member(member, off, out);
             }
         }
         StmtKind::Trait(t) => {
-            for member in t.members.iter() {
+            for member in t.body.members.iter() {
                 collect_class_member(member, off, out);
             }
         }
         StmtKind::Enum(en) => {
-            for member in en.members.iter() {
+            for member in en.body.members.iter() {
                 if !push_if_contains(member.span.start, member.span.end, off, out) {
                     continue;
                 }
@@ -180,7 +180,7 @@ fn collect_spans_stmt(stmt: &Stmt<'_, '_>, off: u32, out: &mut Vec<(u32, u32)>) 
                             collect_spans_param(p, off, out);
                         }
                         if let Some(body) = &m.body {
-                            collect_spans_stmts(body, off, out);
+                            collect_spans_stmts(&body.stmts, off, out);
                         }
                     }
                     EnumMemberKind::Case(c) => {
@@ -197,7 +197,7 @@ fn collect_spans_stmt(stmt: &Stmt<'_, '_>, off: u32, out: &mut Vec<(u32, u32)>) 
         }
         StmtKind::Namespace(ns) => {
             if let NamespaceBody::Braced(inner) = &ns.body {
-                collect_spans_stmts(inner, off, out);
+                collect_spans_stmts(&inner.stmts, off, out);
             }
         }
         StmtKind::If(i) => {
@@ -244,7 +244,7 @@ fn collect_spans_stmt(stmt: &Stmt<'_, '_>, off: u32, out: &mut Vec<(u32, u32)>) 
         }
         StmtKind::Switch(sw) => {
             collect_spans_expr(&sw.expr, off, out);
-            for case in sw.cases.iter() {
+            for case in sw.body.cases.iter() {
                 if !push_if_contains(case.span.start, case.span.end, off, out) {
                     continue;
                 }
@@ -255,18 +255,18 @@ fn collect_spans_stmt(stmt: &Stmt<'_, '_>, off: u32, out: &mut Vec<(u32, u32)>) 
             }
         }
         StmtKind::TryCatch(t) => {
-            collect_spans_stmts(&t.body, off, out);
+            collect_spans_stmts(&t.body.stmts, off, out);
             for catch in t.catches.iter() {
                 if !push_if_contains(catch.span.start, catch.span.end, off, out) {
                     continue;
                 }
-                collect_spans_stmts(&catch.body, off, out);
+                collect_spans_stmts(&catch.body.stmts, off, out);
             }
             if let Some(finally) = &t.finally {
-                collect_spans_stmts(finally, off, out);
+                collect_spans_stmts(&finally.stmts, off, out);
             }
         }
-        StmtKind::Block(stmts) => collect_spans_stmts(stmts, off, out),
+        StmtKind::Block(stmts) => collect_spans_stmts(&stmts.stmts, off, out),
         StmtKind::Expression(e) => collect_spans_expr(e, off, out),
         StmtKind::Echo(args) => {
             for a in args.iter() {
@@ -323,7 +323,7 @@ fn collect_spans_stmt(stmt: &Stmt<'_, '_>, off: u32, out: &mut Vec<(u32, u32)>) 
 }
 
 fn collect_class_members(c: &ClassDecl<'_, '_>, off: u32, out: &mut Vec<(u32, u32)>) {
-    for member in c.members.iter() {
+    for member in c.body.members.iter() {
         collect_class_member(member, off, out);
     }
 }
@@ -342,7 +342,7 @@ fn collect_class_member(
                 collect_spans_param(p, off, out);
             }
             if let Some(body) = &m.body {
-                collect_spans_stmts(body, off, out);
+                collect_spans_stmts(&body.stmts, off, out);
             }
         }
         ClassMemberKind::Property(p) => {
@@ -357,7 +357,7 @@ fn collect_class_member(
                     collect_spans_param(hp, off, out);
                 }
                 match &hook.body {
-                    PropertyHookBody::Block(stmts) => collect_spans_stmts(stmts, off, out),
+                    PropertyHookBody::Block(stmts) => collect_spans_stmts(&stmts.stmts, off, out),
                     PropertyHookBody::Expression(e) => collect_spans_expr(e, off, out),
                     PropertyHookBody::Abstract => {}
                 }
@@ -380,7 +380,7 @@ fn collect_spans_param(p: &Param<'_, '_>, off: u32, out: &mut Vec<(u32, u32)>) {
             continue;
         }
         match &hook.body {
-            PropertyHookBody::Block(stmts) => collect_spans_stmts(stmts, off, out),
+            PropertyHookBody::Block(stmts) => collect_spans_stmts(&stmts.stmts, off, out),
             PropertyHookBody::Expression(e) => collect_spans_expr(e, off, out),
             PropertyHookBody::Abstract => {}
         }
@@ -532,7 +532,7 @@ fn collect_spans_expr(expr: &Expr<'_, '_>, off: u32, out: &mut Vec<(u32, u32)>) 
             for p in c.params.iter() {
                 collect_spans_param(p, off, out);
             }
-            collect_spans_stmts(&c.body, off, out);
+            collect_spans_stmts(&c.body.stmts, off, out);
         }
         ExprKind::ArrowFunction(a) => {
             for p in a.params.iter() {
