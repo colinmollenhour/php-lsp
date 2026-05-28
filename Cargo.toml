@@ -40,10 +40,10 @@ dhat = { version = "0.3", optional = true }
 mimalloc = { version = "0.1", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-mir-analyzer = "0.27"
-mir-issues = "0.27"
-mir-codebase = "0.27"
-mir-types = "0.27"
+mir-analyzer = "0.28"
+mir-issues = "0.28"
+mir-codebase = "0.28"
+mir-types = "0.28"
 php-rs-parser = "0.13"
 php-ast = "0.13"
 bumpalo = { version = "3", features = ["collections"] }
@@ -67,7 +67,7 @@ expect-test = "1"
 indexmap = "2"
 criterion = { version = "0.8", features = ["html_reports"] }
 iai-callgrind = "0.16"
-serial_test = "2"
+serial_test = "3"
 
 [[bench]]
 name = "iai_critical"
