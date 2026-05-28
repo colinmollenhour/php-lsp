@@ -258,3 +258,37 @@ class Logger {
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn extract_method_no_action_for_single_line_selection() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class Foo {
+    public function run(): void {
+        $0$x = 1;$0
+    }
+}
+"#,
+            "Extract method",
+        )
+        .await;
+    expect!["<action not found: Extract method>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn extract_method_no_action_outside_class() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$0$a = 1;
+$b = 2;
+$c = 3;$0
+"#,
+            "Extract method",
+        )
+        .await;
+    expect!["<action not found: Extract method>"].assert_eq(&out);
+}

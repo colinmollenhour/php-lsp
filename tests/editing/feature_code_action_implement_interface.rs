@@ -210,3 +210,34 @@ class $0ConsoleLogger$0 implements Logger {}
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn implement_abstract_class_method() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+abstract class Shape {
+    abstract public function area(): float;
+}
+class $0Circle$0 extends Shape {}
+"#,
+            "Implement missing method",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        abstract class Shape {
+            abstract public function area(): float;
+        }
+        class Circle extends Shape {
+            public function area(): float
+            {
+                throw new \RuntimeException('Not implemented');
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
+}

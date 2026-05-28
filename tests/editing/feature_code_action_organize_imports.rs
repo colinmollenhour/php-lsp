@@ -371,3 +371,45 @@ class Service {
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn organize_imports_no_action_when_aliased_import_is_used() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+use App\Mailer as Mail;
+
+$m = new Mail();$0
+"#,
+            "Organize imports",
+        )
+        .await;
+    expect!["<action not found: Organize imports>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn organize_imports_function_only_group_has_no_blank_line() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+use function Zlib\deflate;
+use function App\format;
+
+deflate(format('x'));$0
+"#,
+            "Organize imports",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        use function App\format;
+        use function Zlib\deflate;
+
+        deflate(format('x'));
+    "#]]
+    .assert_eq(&out);
+}
