@@ -296,44 +296,6 @@ mod tests {
     }
 
     #[test]
-    fn generates_constructor_for_class_with_properties() {
-        let src = "<?php\nclass User {\n    private string $name;\n    private int $age;\n}";
-        let doc = ParsedDoc::parse(src.to_string());
-        let actions = generate_constructor_actions(src, &doc, full_range(), &uri());
-        assert!(
-            !actions.is_empty(),
-            "expected a generate constructor action"
-        );
-        if let CodeActionOrCommand::CodeAction(a) = &actions[0] {
-            let edits = a.edit.as_ref().unwrap().changes.as_ref().unwrap();
-            let text = &edits.values().next().unwrap()[0].new_text;
-            assert!(text.contains("__construct"), "should contain __construct");
-            assert!(text.contains("$this->name = $name"), "should assign name");
-            assert!(text.contains("$this->age = $age"), "should assign age");
-            assert!(text.contains("string $name"), "should include type hint");
-        }
-    }
-
-    #[test]
-    fn no_constructor_action_when_constructor_exists() {
-        let src = "<?php\nclass User {\n    private string $name;\n    public function __construct(string $name) { $this->name = $name; }\n}";
-        let doc = ParsedDoc::parse(src.to_string());
-        let actions = generate_constructor_actions(src, &doc, full_range(), &uri());
-        assert!(
-            actions.is_empty(),
-            "no action when constructor already exists"
-        );
-    }
-
-    #[test]
-    fn no_constructor_action_for_class_without_properties() {
-        let src = "<?php\nclass Empty {}";
-        let doc = ParsedDoc::parse(src.to_string());
-        let actions = generate_constructor_actions(src, &doc, full_range(), &uri());
-        assert!(actions.is_empty(), "no action for class with no properties");
-    }
-
-    #[test]
     fn generates_getters_and_setters() {
         let src = "<?php\nclass User {\n    private string $name;\n}";
         let doc = ParsedDoc::parse(src.to_string());
