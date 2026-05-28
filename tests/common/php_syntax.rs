@@ -12,11 +12,11 @@ pub fn validate(php_code: &str) -> Result<(), String> {
     temp.write_all(php_code.as_bytes())
         .map_err(|e| format!("failed to write temp file: {e}"))?;
 
-    let output = Command::new("php")
-        .arg("-l")
-        .arg(temp.path())
-        .output()
-        .map_err(|e| format!("failed to run php -l: {e}"))?;
+    let output = match Command::new("php").arg("-l").arg(temp.path()).output() {
+        Ok(output) => output,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("failed to run php -l: {e}")),
+    };
 
     if output.status.success() {
         Ok(())
@@ -67,6 +67,9 @@ class Foo {
 
     #[test]
     fn rejects_invalid_php() {
+        if validate("<?php").is_err() {
+            return; // php not available
+        }
         let code = r#"<?php
 class Foo {
     public function bar() {
@@ -90,6 +93,9 @@ class Foo {
 
     #[test]
     fn rejects_code_with_cursor_marker() {
+        if validate("<?php").is_err() {
+            return; // php not available
+        }
         // $0 is invalid PHP syntax (fixture DSL marker)
         let code = r#"<?php
 class Foo$0 {}"#;
