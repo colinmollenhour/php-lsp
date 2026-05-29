@@ -4946,3 +4946,89 @@ $i->$0
         Keyword     yield"#]]
     .assert_eq(&out);
 }
+
+// --- Bundled phpstorm-stubs bridge (mir-analyzer) -------------------------
+//
+// These exercise the SessionStubResolver wired in `backend.rs::completion`,
+// which surfaces members for stdlib classes that are NOT in the small
+// hand-written `src/stubs.rs` set, plus the user-shadows-builtin precedence.
+//
+// Note: mir stores method names lowercased (PHP method names are
+// case-insensitive), so the bridge-sourced labels are lowercase.
+
+/// Like `labels`, but sends an explicit trigger character so the `::` / `->`
+/// member paths fire (the invoked-without-trigger path only handles `->`).
+async fn labels_trigger(s: &mut TestServer, src: &str, trigger: &str) -> Vec<String> {
+    use serde_json::json;
+    let opened = s.open_fixture(src).await;
+    let c = opened.cursor().clone();
+    let uri = s.uri(&c.path);
+    let resp = s
+        .client()
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": c.line, "character": c.character },
+                "context": { "triggerKind": 2, "triggerCharacter": trigger },
+            }),
+        )
+        .await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    items
+        .iter()
+        .filter_map(|i| i["label"].as_str().map(str::to_owned))
+        .collect()
+}
+
+#[tokio::test]
+async fn completion_builtin_arrayobject_via_bridge() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels_trigger(&mut s, "<?php\n$o = new ArrayObject();\n$o->$0\n", ">").await;
+    // `append`/`getArrayCopy` are own methods, asserted with original camelCase
+    // spelling (the bridge uses `MethodDef.name`, not the lowercased lookup key);
+    // `count` is inherited from Countable and must appear via the inheritance
+    // walk over pushed ancestors.
+    assert_labels_contain(
+        &ls,
+        &["append", "getArrayCopy", "count"],
+        "ArrayObject instance members should come from bundled stubs",
+    );
+}
+
+#[tokio::test]
+async fn completion_builtin_datetimeimmutable_static_via_bridge() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels_trigger(&mut s, "<?php\nDateTimeImmutable::$0\n", ":").await;
+    assert_labels_contain(
+        &ls,
+        &["createFromFormat"],
+        "DateTimeImmutable static members should come from bundled stubs",
+    );
+}
+
+#[tokio::test]
+async fn completion_user_class_shadows_builtin_name() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    // A user-defined `ArrayObject` must win over the bundled stub.
+    let ls = labels_trigger(
+        &mut s,
+        "<?php\nclass ArrayObject {\n    public function userOnlyMethod(): void {}\n}\n$o = new ArrayObject();\n$o->$0\n",
+        ">",
+    )
+    .await;
+    assert_labels_contain(&ls, &["userOnlyMethod"], "user ArrayObject should be used");
+    // The bundled-stub method must NOT leak in when the user class shadows it.
+    assert_label_not_present(
+        &ls,
+        "getArrayCopy",
+        "bundled stub must not be merged with the shadowing user class",
+    );
+}

@@ -4,18 +4,33 @@ use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat,
 
 use crate::ast::ParsedDoc;
 use crate::stubs::builtin_class_members;
+use crate::stubs_bridge::BuiltinClassResolver;
 use crate::type_map::{
-    enclosing_class_at, is_backed_enum, is_enum, members_of_class, mixin_classes_of,
+    ClassMembers, enclosing_class_at, is_backed_enum, is_enum, members_of_class, mixin_classes_of,
     parent_class_name,
 };
 use crate::util::utf16_offset_to_byte;
 
 use super::callable_item;
 
+/// Resolve a built-in class's members with exclusive precedence:
+/// mir-analyzer's bundled stubs (when a resolver is present) first, then the
+/// hand-written `src/stubs.rs` fallback. Only ever called for class names not
+/// found in any user document.
+fn builtin_members(
+    class_name: &str,
+    resolver: Option<&dyn BuiltinClassResolver>,
+) -> Option<ClassMembers> {
+    resolver
+        .and_then(|r| r.class_members(class_name))
+        .or_else(|| builtin_class_members(class_name))
+}
+
 pub(super) fn all_instance_members(
     class_name: &str,
     doc: &ParsedDoc,
     other_docs: &[Arc<ParsedDoc>],
+    resolver: Option<&dyn BuiltinClassResolver>,
 ) -> Vec<CompletionItem> {
     let all: Vec<&ParsedDoc> = std::iter::once(doc)
         .chain(other_docs.iter().map(|d| d.as_ref()))
@@ -30,6 +45,7 @@ pub(super) fn all_instance_members(
             continue;
         }
         let mut parent: Option<String> = None;
+        let mut found_in_docs = false;
         // PHP defines a class in exactly one file, so stop scanning once the
         // defining doc is hit. Without the early break, member completion
         // walks every workspace doc for every class in the inheritance chain.
@@ -38,6 +54,7 @@ pub(super) fn all_instance_members(
             if !members.found {
                 continue;
             }
+            found_in_docs = true;
             parent = members.parent.clone();
             for (name, is_static) in members.methods {
                 if !is_static && seen_names.insert(name.clone()) {
@@ -94,8 +111,9 @@ pub(super) fn all_instance_members(
             }
             break;
         }
-        // Fall back to built-in stubs if the class wasn't found in any user doc
-        if let Some(stub) = builtin_class_members(&current) {
+        // Built-in stubs (mir bridge → hand-written) ONLY when the class is not
+        // a user class — a user class shadowing a built-in name wins.
+        if !found_in_docs && let Some(stub) = builtin_members(&current, resolver) {
             if parent.is_none() {
                 parent = stub.parent.clone();
             }
@@ -108,9 +126,15 @@ pub(super) fn all_instance_members(
                 if !is_static {
                     let label = format!("${name}");
                     if seen_names.insert(label.clone()) {
+                        let is_readonly = stub.readonly_properties.contains(name);
                         items.push(CompletionItem {
                             label,
                             kind: Some(CompletionItemKind::PROPERTY),
+                            detail: if is_readonly {
+                                Some("readonly".to_string())
+                            } else {
+                                None
+                            },
                             ..Default::default()
                         });
                     }
@@ -125,6 +149,11 @@ pub(super) fn all_instance_members(
                     });
                 }
             }
+            // Recurse into ancestors/traits surfaced by the bridge so inherited
+            // built-in members (e.g. Countable::count on ArrayObject) appear.
+            for trait_name in &stub.trait_uses {
+                queue.push(trait_name.clone());
+            }
         }
         if let Some(p) = parent {
             queue.push(p);
@@ -137,6 +166,7 @@ pub(super) fn all_static_members(
     class_name: &str,
     doc: &ParsedDoc,
     other_docs: &[Arc<ParsedDoc>],
+    resolver: Option<&dyn BuiltinClassResolver>,
 ) -> Vec<CompletionItem> {
     let all: Vec<&ParsedDoc> = std::iter::once(doc)
         .chain(other_docs.iter().map(|d| d.as_ref()))
@@ -150,11 +180,13 @@ pub(super) fn all_static_members(
             continue;
         }
         let mut parent: Option<String> = None;
+        let mut found_in_docs = false;
         for d in &all {
             let members = members_of_class(d, &current);
             if !members.found {
                 continue;
             }
+            found_in_docs = true;
             parent = members.parent.clone();
             for (name, is_static) in members.methods {
                 if is_static && seen_names.insert(name.clone()) {
@@ -188,8 +220,8 @@ pub(super) fn all_static_members(
             }
             break;
         }
-        // Fall back to built-in stubs for static members
-        if let Some(stub) = builtin_class_members(&current) {
+        // Built-in stubs (mir bridge → hand-written) ONLY when not a user class.
+        if !found_in_docs && let Some(stub) = builtin_members(&current, resolver) {
             if parent.is_none() {
                 parent = stub.parent.clone();
             }
@@ -218,6 +250,11 @@ pub(super) fn all_static_members(
                         ..Default::default()
                     });
                 }
+            }
+            // Recurse into ancestors/traits surfaced by the bridge so inherited
+            // built-in static members appear.
+            for trait_name in &stub.trait_uses {
+                queue.push(trait_name.clone());
             }
         }
         if let Some(p) = parent {

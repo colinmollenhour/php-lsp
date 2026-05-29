@@ -42,7 +42,8 @@ use crate::folding::folding_ranges;
 use crate::formatting::{format_document, format_range};
 use crate::generate_action::{generate_constructor_actions, generate_getters_setters_actions};
 use crate::hover::{
-    class_hover_from_index, docs_for_symbol_from_index, hover_info, signature_for_symbol_from_index,
+    class_hover_from_index, docs_for_symbol_from_index, hover_info_with_resolver,
+    signature_for_symbol_from_index,
 };
 use crate::implement_action::implement_missing_actions;
 use crate::implementation::{find_implementations, find_implementations_from_workspace};
@@ -1152,6 +1153,11 @@ impl LanguageServer for Backend {
                 Some(&*meta_guard)
             };
             let imports = self.file_imports(uri);
+            // Built-in class member resolver backed by mir's bundled stubs.
+            // Bind the Arc<AnalysisSession> to a local so the borrow outlives ctx.
+            let php_version = self.docs.workspace_php_version();
+            let session = self.docs.analysis_session(php_version);
+            let builtin_resolver = crate::stubs_bridge::SessionStubResolver::new(&session);
             let ctx = CompletionCtx {
                 source: Some(&source),
                 position: Some(position),
@@ -1160,6 +1166,7 @@ impl LanguageServer for Backend {
                 file_imports: Some(&imports),
                 doc_returns: doc_returns.as_deref(),
                 other_returns: Some(&other_returns),
+                builtin_resolver: Some(&builtin_resolver),
             };
             Ok(Some(CompletionResponse::Array(filtered_completions_at(
                 &doc,
@@ -1673,7 +1680,17 @@ impl LanguageServer for Backend {
                 .get_method_returns_salsa(uri)
                 .unwrap_or_else(|| std::sync::Arc::new(Default::default()));
             let other_docs = self.docs.other_docs_with_returns(uri, &self.open_urls());
-            let result = hover_info(&source, &doc, &doc_returns, position, &other_docs);
+            let php_version = self.docs.workspace_php_version();
+            let session = self.docs.analysis_session(php_version);
+            let builtin_resolver = crate::stubs_bridge::SessionStubResolver::new(&session);
+            let result = hover_info_with_resolver(
+                &source,
+                &doc,
+                &doc_returns,
+                position,
+                &other_docs,
+                Some(&builtin_resolver),
+            );
             if result.is_some() {
                 return Ok(result);
             }

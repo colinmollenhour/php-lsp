@@ -2,6 +2,20 @@
 
 All notable changes to php-lsp are documented here.
 
+## [Unreleased]
+
+### Features
+
+- **Full standard-library completion & hover**: `->` / `::` member completion and
+  built-in class hover now resolve members for the entire PHP standard library and
+  bundled extensions (e.g. `ArrayObject`, `DateTimeImmutable`, SPL, DOM, …) by
+  bridging to the phpstorm-stubs already bundled in mir-analyzer, instead of only
+  the small hand-written stub set. Public members only, version-aware, no
+  configuration required. The hand-written stubs remain as a no-session fallback.
+  A user-defined class shadowing a built-in name resolves to the user class. All
+  mir-internal coupling is confined to the new `src/stubs_bridge.rs` module, and
+  the `mir-*` crates are pinned to `=0.30.0`.
+
 ## [0.5.0] — 2026-05-15
 
 ### Features

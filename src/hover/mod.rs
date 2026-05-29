@@ -7,7 +7,10 @@ mod parsing;
 mod symbols;
 
 pub use formatting::format_params_str;
-pub use hover_impl::hover_info;
+// `hover_info` is the no-resolver entry kept for the public API and tests;
+// `hover_info_with_resolver` is what the backend uses.
+#[allow(unused_imports)]
+pub use hover_impl::{hover_info, hover_info_with_resolver};
 pub use parsing::extract_receiver_var_before_cursor;
 pub use parsing::resolve_use_alias;
 pub use symbols::{

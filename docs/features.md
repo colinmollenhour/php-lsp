@@ -15,7 +15,9 @@
 - PHP signature for functions, methods, classes, interfaces, traits, and enums
 - Variable type hover — shows inferred class
 - Property type hover — `(property) ClassName::$prop: TypeHint`
-- Built-in class hover (PDO, DateTime, Exception, …) from bundled stubs
+- Built-in class hover for the full PHP standard library and bundled extensions
+  (PDO, DateTime, `ArrayObject`, `DateTimeImmutable`, SPL, …), resolved on demand
+  from the phpstorm-stubs bundled in mir-analyzer (version-aware, no config)
 - `use` alias hover — shows fully-qualified class name
 - `@param` / `@return` / `@throws` / `@deprecated` / `@see` / `@link` / `@template` / `@mixin` docblock annotations
 - Deprecated symbols show a `> Deprecated` banner
@@ -26,7 +28,10 @@
 - Keywords, ~200 built-in PHP functions, superglobals, classes, methods, properties, constants, enum cases
 - `->` / `?->` completions scoped to the inferred receiver type
 - `ClassName::` / `self::` / `static::` / `parent::` static members and constants
-- Built-in class member completions (Exception, DateTime, PDO, SPL, iterators, …)
+- Built-in class member completions for the full PHP standard library and bundled
+  extensions (`ArrayObject`, `DateTimeImmutable`, SPL, iterators, …), resolved on
+  demand from mir-analyzer's bundled phpstorm-stubs — public members only, with
+  inherited members surfaced via the inheritance walk; version-aware, no config
 - Method-chain type inference; `self`/`static` fluent return types; union types
 - `@param` docblock inference; `instanceof` type narrowing
 - Constructor-chain `(new DateTime())->`; bound-closure `$this`

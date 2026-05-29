@@ -204,6 +204,11 @@ pub struct CompletionCtx<'a> {
     /// Salsa-memoized method-return maps aligned with `other_docs`. Must be
     /// the same length as `other_docs` when set, or `None` to build inline.
     pub other_returns: Option<&'a [Arc<MethodReturnsMap>]>,
+    /// Resolver for built-in / standard-library class members backed by
+    /// mir-analyzer's bundled phpstorm-stubs. `None` (the default) falls back
+    /// to the hand-written `src/stubs.rs` set. Only consulted for class names
+    /// not found in any user document.
+    pub builtin_resolver: Option<&'a dyn crate::stubs_bridge::BuiltinClassResolver>,
 }
 
 /// Completions filtered by trigger character, with optional context
@@ -270,7 +275,9 @@ pub fn filtered_completions_at(
                     let mut seen = std::collections::HashSet::new();
                     for class_name in class_names.split('|') {
                         let class_name = class_name.trim();
-                        for item in all_instance_members(class_name, doc, other_docs) {
+                        for item in
+                            all_instance_members(class_name, doc, other_docs, ctx.builtin_resolver)
+                        {
                             if seen.insert(item.label.clone()) {
                                 items.push(item);
                             }
@@ -292,7 +299,7 @@ pub fn filtered_completions_at(
             if let (Some(src), Some(pos)) = (source, position)
                 && let Some(class_name) = resolve_static_receiver(src, doc, other_docs, pos)
             {
-                let items = all_static_members(&class_name, doc, other_docs);
+                let items = all_static_members(&class_name, doc, other_docs, ctx.builtin_resolver);
                 if !items.is_empty() {
                     return items;
                 }
@@ -401,7 +408,12 @@ pub fn filtered_completions_at(
                         let mut items = Vec::new();
                         let mut seen = std::collections::HashSet::new();
                         for class_name in cls.split('|') {
-                            for item in all_instance_members(class_name.trim(), doc, other_docs) {
+                            for item in all_instance_members(
+                                class_name.trim(),
+                                doc,
+                                other_docs,
+                                ctx.builtin_resolver,
+                            ) {
                                 if seen.insert(item.label.clone()) {
                                     items.push(item);
                                 }

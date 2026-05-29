@@ -57,6 +57,7 @@ pub mod semantic_diagnostics;
 mod semantic_tokens;
 mod signature_help;
 mod stubs;
+pub mod stubs_bridge;
 pub mod symbols;
 #[cfg(test)]
 mod test_utils;

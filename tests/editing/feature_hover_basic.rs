@@ -324,3 +324,28 @@ class Service {
     )
     .await;
 }
+
+// --- Built-in stdlib class hover via the bundled phpstorm-stubs bridge -----
+
+#[tokio::test]
+async fn hover_builtin_stdlib_class_via_bridge() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    // ArrayObject is not in the hand-written `src/stubs.rs` set, so this hover
+    // can only succeed via the mir-analyzer bundled-stubs bridge.
+    let out = s
+        .check_hover(
+            r#"<?php
+$o = new ArrayOb$0ject();
+"#,
+        )
+        .await;
+    assert!(
+        out.contains("built-in class"),
+        "expected built-in class hover, got: {out}"
+    );
+    assert!(
+        out.contains("append") || out.contains("getArrayCopy") || out.contains("Methods:"),
+        "expected ArrayObject members in hover, got: {out}"
+    );
+}
