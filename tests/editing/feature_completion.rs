@@ -147,6 +147,30 @@ $u->na$0
 }
 
 #[tokio::test]
+async fn completion_arrow_excludes_class_constants() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+class Config {
+    const VERSION = '1.0';
+    public string $name = '';
+    public function getName(): string { return $this->name; }
+}
+$c = new Config();
+$c->$0
+"#,
+        )
+        .await;
+    // Constants (VERSION) must not appear in arrow completion; only instance members.
+    expect![[r#"
+        Property    $name
+        Method      getName"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
 async fn completion_double_colon_static_method() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
