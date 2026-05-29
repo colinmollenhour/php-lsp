@@ -1362,11 +1362,11 @@ class Circle extends Base implements Shape {}
 }
 
 // Without a `use` import the handler passes fqn=None.
-// A class that writes `extends \Animal` (backslash-qualified) must NOT be
-// returned when searching for bare "Animal" — `name_matches` requires the
-// fqn parameter to bridge global-namespace qualifiers.
+// A class that writes `extends \Animal` (backslash-qualified) refers to the
+// global-namespace Animal — it must be found when searching for a global-
+// namespace interface `Animal` (no namespace declaration).
 #[tokio::test]
-async fn implementation_fqn_backslash_prefix_not_matched_without_context() {
+async fn implementation_global_namespace_backslash_prefix_matched() {
     let mut s = TestServer::new().await;
     let out = s
         .check_implementation(
@@ -1380,7 +1380,7 @@ class Dog extends \Animal {}
 "#,
         )
         .await;
-    expect!["<none>"].assert_eq(&out);
+    expect!["Dog.php:1:6-1:9"].assert_eq(&out);
 }
 
 // With `use App\Animal` the handler resolves fqn="App\Animal".

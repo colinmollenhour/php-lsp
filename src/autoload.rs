@@ -18,6 +18,62 @@ pub fn is_valid_php_version(v: &str) -> bool {
     SUPPORTED_PHP_VERSIONS.contains(&v)
 }
 
+/// Clamp an unsupported PHP version string to the nearest supported version.
+///
+/// The version is parsed as `"major.minor"`. If it is below the minimum
+/// supported version it is clamped to `PHP_7_4`; if it is above the maximum
+/// it is clamped to `PHP_8_5`. Already-valid versions are returned unchanged.
+pub fn clamp_php_version(v: &str) -> &'static str {
+    if is_valid_php_version(v) {
+        return SUPPORTED_PHP_VERSIONS
+            .iter()
+            .find(|&&s| s == v)
+            .copied()
+            .unwrap_or(PHP_8_5);
+    }
+    let (major, minor) = match v.split_once('.') {
+        Some((maj, min)) => {
+            // min may be "1.5" for patch versions like "8.1.5" — take only the first token.
+            let min_part = min.split('.').next().unwrap_or(min);
+            (
+                maj.parse::<u32>().unwrap_or(0),
+                min_part.parse::<u32>().unwrap_or(0),
+            )
+        }
+        None => (v.parse::<u32>().unwrap_or(0), 0),
+    };
+    // SUPPORTED_PHP_VERSIONS is sorted ascending; pick the closest boundary.
+    let (min_maj, min_min) = SUPPORTED_PHP_VERSIONS
+        .first()
+        .and_then(|s| s.split_once('.'))
+        .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
+        .unwrap_or((7, 4));
+    let (max_maj, max_min) = SUPPORTED_PHP_VERSIONS
+        .last()
+        .and_then(|s| s.split_once('.'))
+        .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
+        .unwrap_or((8, 5));
+    if (major, minor) < (min_maj, min_min) {
+        SUPPORTED_PHP_VERSIONS.first().copied().unwrap_or(PHP_7_4)
+    } else if (major, minor) > (max_maj, max_min) {
+        SUPPORTED_PHP_VERSIONS.last().copied().unwrap_or(PHP_8_5)
+    } else {
+        // Between min and max but not in the list — pick the highest version ≤ input.
+        SUPPORTED_PHP_VERSIONS
+            .iter()
+            .filter(|&&s| {
+                let (a, b) = s
+                    .split_once('.')
+                    .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
+                    .unwrap_or((0, 0));
+                (a, b) <= (major, minor)
+            })
+            .next_back()
+            .copied()
+            .unwrap_or(PHP_7_4)
+    }
+}
+
 /// PSR-4 namespace-prefix → base-directory mapping built from `composer.json`
 /// and `vendor/composer/installed.json`.
 ///
@@ -795,5 +851,33 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let result = load_project_config_json(&[dir.path().to_path_buf()]);
         assert!(result.is_none());
+    }
+
+    // --- clamp_php_version ---
+
+    #[test]
+    fn clamp_valid_version_unchanged() {
+        for &v in SUPPORTED_PHP_VERSIONS {
+            assert_eq!(clamp_php_version(v), v);
+        }
+    }
+
+    #[test]
+    fn clamp_old_version_to_minimum() {
+        assert_eq!(clamp_php_version("5.6"), PHP_7_4);
+        assert_eq!(clamp_php_version("7.0"), PHP_7_4);
+        assert_eq!(clamp_php_version("7.3"), PHP_7_4);
+    }
+
+    #[test]
+    fn clamp_future_version_to_maximum() {
+        assert_eq!(clamp_php_version("9.0"), PHP_8_5);
+        assert_eq!(clamp_php_version("10.1"), PHP_8_5);
+    }
+
+    #[test]
+    fn clamp_between_versions_picks_highest_below() {
+        // 8.1.5 is not in the list but should clamp to 8.1
+        assert_eq!(clamp_php_version("8.1.5"), PHP_8_1);
     }
 }
