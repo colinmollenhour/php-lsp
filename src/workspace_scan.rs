@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rayon::prelude::*;
 use tower_lsp::Client;
 use tower_lsp::lsp_types::Url;
 use tower_lsp::lsp_types::request::{
@@ -38,7 +39,8 @@ pub(crate) async fn send_refresh_requests(client: &Client) {
 /// it is indexed).  Returns the number of files indexed.
 ///
 /// Phase 1 — directory traversal: async, serial (I/O-bound; tokio handles it well).
-/// Phase 2 — file reading + parsing: concurrent, bounded by available CPU cores.
+/// Phase 2a — file reading: async, up to 64 concurrent reads (I/O-bound).
+/// Phase 2b — parsing + indexing: parallel via rayon (CPU-bound, work-stealing pool).
 ///
 /// Post-salsa: we only populate the DocumentStore here. The codebase is built
 /// on demand by the salsa `codebase` query the first time a feature asks for
@@ -151,74 +153,67 @@ pub(crate) async fn scan_workspace(
         }
     }
 
-    // Phase 2: read and parse files concurrently, bounded by available CPU cores.
-    let parallelism = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4);
-    let sem = Arc::new(tokio::sync::Semaphore::new(parallelism));
-    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let mut set: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+    // Phase 2a: read files concurrently (I/O-bound).
+    // A semaphore of 64 avoids saturating the OS file-descriptor table while
+    // still allowing substantial I/O parallelism independent of CPU count.
+    let io_sem = Arc::new(tokio::sync::Semaphore::new(64));
+    let mut read_set: tokio::task::JoinSet<Option<(Url, String)>> = tokio::task::JoinSet::new();
 
     for path in php_files {
-        let permit = Arc::clone(&sem).acquire_owned().await.unwrap();
-        let docs = Arc::clone(&docs);
-        let open_files = open_files.clone();
-        let cache = cache.clone();
-        let count = Arc::clone(&count);
-        set.spawn(async move {
+        let permit = Arc::clone(&io_sem).acquire_owned().await.unwrap();
+        read_set.spawn(async move {
             let _permit = permit;
-            let Ok(text) = tokio::fs::read_to_string(&path).await else {
-                return;
-            };
-            let Ok(uri) = Url::from_file_path(&path) else {
-                return;
-            };
-            tokio::task::spawn_blocking(move || {
-                // Skip files the editor has already opened — their buffer
-                // is authoritative; scan must not overwrite their salsa
-                // input with disk contents.
-                if open_files.contains(&uri) {
-                    return;
-                }
-
-                // Phase K2b read path: if the on-disk cache has a FileIndex
-                // for this (uri, content) key, mirror the text and seed
-                // the cached index — `file_index` will return it directly
-                // on the first query, skipping parse + extract entirely.
-                // An edit later clears the seeded index via `mirror_text`.
-                let cache_key = cache
-                    .as_ref()
-                    .map(|_| crate::cache::WorkspaceCache::key_for(uri.as_str(), &text));
-                if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref())
-                    && let Some(index) = cache.read::<crate::file_index::FileIndex>(key)
-                {
-                    docs.mirror_text(&uri, &text);
-                    docs.seed_cached_index(&uri, Arc::new(index));
-                    count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    return;
-                }
-
-                // Cache miss: parse, extract FileIndex, mirror, and write
-                // the index to the on-disk cache for the next cold start.
-                let doc = parse_document_no_diags(&text);
-                if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref()) {
-                    let index = crate::file_index::FileIndex::extract(&doc);
-                    let _ = cache.write(key, &index);
-                    docs.mirror_text(&uri, &text);
-                    docs.seed_cached_index(&uri, Arc::new(index));
-                } else {
-                    docs.index_from_doc(uri.clone(), &doc);
-                }
-                count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            })
-            .await
-            .ok();
+            let text = tokio::fs::read_to_string(&path).await.ok()?;
+            let uri = Url::from_file_path(&path).ok()?;
+            Some((uri, text))
         });
     }
 
-    while set.join_next().await.is_some() {}
+    let mut file_contents: Vec<(Url, String)> = Vec::new();
+    while let Some(Ok(Some(pair))) = read_set.join_next().await {
+        file_contents.push(pair);
+    }
 
-    count.load(std::sync::atomic::Ordering::Relaxed)
+    // Phase 2b: parse and index files in parallel (CPU-bound).
+    // A single spawn_blocking hands off to rayon's work-stealing pool,
+    // eliminating the per-file spawn_blocking overhead of the old approach.
+    tokio::task::spawn_blocking(move || {
+        file_contents
+            .par_iter()
+            .map(|(uri, text)| -> usize {
+                // Skip files the editor has already opened — their buffer
+                // is authoritative; scan must not overwrite their salsa
+                // input with disk contents.
+                if open_files.contains(uri) {
+                    return 0;
+                }
+
+                let cache_key = cache
+                    .as_ref()
+                    .map(|_| crate::cache::WorkspaceCache::key_for(uri.as_str(), text));
+                if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref())
+                    && let Some(index) = cache.read::<crate::file_index::FileIndex>(key)
+                {
+                    docs.mirror_text(uri, text);
+                    docs.seed_cached_index(uri, Arc::new(index));
+                    return 1;
+                }
+
+                let doc = parse_document_no_diags(text);
+                if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref()) {
+                    let index = crate::file_index::FileIndex::extract(&doc);
+                    let _ = cache.write(key, &index);
+                    docs.mirror_text(uri, text);
+                    docs.seed_cached_index(uri, Arc::new(index));
+                } else {
+                    docs.index_from_doc(uri.clone(), &doc);
+                }
+                1
+            })
+            .sum()
+    })
+    .await
+    .unwrap_or(0)
 }
 
 #[cfg(test)]
