@@ -1,5 +1,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
+
+use arc_swap::ArcSwap;
 
 use dashmap::DashMap;
 use salsa::Setter;
@@ -73,8 +75,9 @@ pub struct DocumentStore {
     workspace: Workspace,
     /// Shared PSR-4 namespace-to-path map. Shared with `Backend` via `Arc`
     /// so updates from `initialized` (when composer.json is loaded) are
-    /// visible here without any additional wiring.
-    psr4: Arc<RwLock<Psr4Map>>,
+    /// visible here without any additional wiring. `ArcSwap` makes reads
+    /// lock-free — a poisoned guard can no longer crash a request handler.
+    psr4: Arc<ArcSwap<Psr4Map>>,
     /// mir-analyzer's `AnalysisSession` — owns the workspace MirDb, runs
     /// Pass-2 analysis, and lazy-loads dependencies via PSR-4. Built lazily
     /// on first use; rebuilt when PHP version changes.
@@ -103,7 +106,7 @@ impl DocumentStore {
             parsed_cache: DashMap::new(),
             next_file_id: AtomicU32::new(0),
             workspace,
-            psr4: Arc::new(RwLock::new(Psr4Map::empty())),
+            psr4: Arc::new(ArcSwap::from_pointee(Psr4Map::empty())),
             analysis_session: Mutex::new(None),
         }
     }
@@ -125,8 +128,7 @@ impl DocumentStore {
         // Build a fresh session. Hand it the shared PSR-4 map so it can
         // lazy-resolve `UndefinedClass` candidates without us having to mirror
         // every vendor file upfront.
-        let resolver: Arc<dyn mir_analyzer::ClassResolver> =
-            Arc::new(self.psr4.read().unwrap().clone());
+        let resolver: Arc<dyn mir_analyzer::ClassResolver> = self.psr4.load_full();
         let session =
             Arc::new(mir_analyzer::AnalysisSession::new(php_version).with_class_resolver(resolver));
         session.ensure_all_stubs();
@@ -139,11 +141,11 @@ impl DocumentStore {
         self.with_host(|h| self.workspace.php_version(h.db()))
     }
 
-    /// Return the `Arc<RwLock<Psr4Map>>` so callers can share it.
-    /// `Backend` clones this arc at construction time so writes to the lock
+    /// Return the `Arc<ArcSwap<Psr4Map>>` so callers can share it.
+    /// `Backend` clones this arc at construction time so writes
     /// (e.g. loading composer.json on `initialized`) are immediately visible
     /// to `lazy_load_psr4_imports` without extra plumbing.
-    pub fn psr4_arc(&self) -> Arc<RwLock<Psr4Map>> {
+    pub fn psr4_arc(&self) -> Arc<ArcSwap<Psr4Map>> {
         Arc::clone(&self.psr4)
     }
 
@@ -579,7 +581,7 @@ impl DocumentStore {
         if fqns.is_empty() {
             return;
         }
-        let psr4 = self.psr4.read().unwrap();
+        let psr4 = self.psr4.load();
         let paths: Vec<std::path::PathBuf> =
             fqns.iter().filter_map(|fqcn| psr4.resolve(fqcn)).collect();
         drop(psr4);
@@ -1086,7 +1088,9 @@ mod tests {
         let store = DocumentStore::new();
 
         // Inject a PSR-4 map pointing at the tmp dir.
-        *store.psr4.write().unwrap() = crate::autoload::Psr4Map::load(tmp.path());
+        store
+            .psr4
+            .store(Arc::new(crate::autoload::Psr4Map::load(tmp.path())));
 
         // Mirror the consuming file (Entity not yet in source_files).
         // Uses Entity as a parameter type hint — the analyzer resolves these
