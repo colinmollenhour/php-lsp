@@ -11,22 +11,23 @@ use crate::ast::{ParsedDoc, SourceView};
 /// (given as its `to_string_repr()` string) refers to the symbol we are
 /// searching for.
 ///
-/// Two forms are accepted:
+/// Three forms are accepted:
 /// - Short-name match: `repr == word`
 ///   Covers the common case where both files use the same unqualified name.
 /// - FQN match: `repr` (with any leading `\` stripped) `== fqn`
 ///   Covers files that write the fully-qualified form (`\App\Animal` or
 ///   `App\Animal`) while the cursor file imports the class with a `use`
 ///   statement and the cursor sits on the short alias.
-// TODO: when `fqn` is `None` and `word` contains no namespace separator,
-// `\word` (a global-namespace backslash-qualified form) is not matched.
-// Example: searching for bare `Animal` (cursor on a global-namespace interface
-// with no `use` import) will miss any class that writes `extends \Animal`.
-// Fix: treat `repr.trim_start_matches('\\') == word` as a match when `word`
-// has no `\` and `fqn` is `None`.
+/// - Global-namespace backslash match: `repr.trim_start_matches('\\') == word`
+///   when `fqn` is `None` and `word` has no namespace separator.
+///   Covers the case where a class writes `extends \Animal` (explicit global-
+///   namespace form) and the cursor sits on a global-namespace `Animal`
+///   interface with no `use` import.
 #[inline]
 fn name_matches(repr: &str, word: &str, fqn: Option<&str>) -> bool {
-    repr == word || fqn.is_some_and(|f| repr.trim_start_matches('\\') == f)
+    repr == word
+        || fqn.is_some_and(|f| repr.trim_start_matches('\\') == f)
+        || (fqn.is_none() && !word.contains('\\') && repr.trim_start_matches('\\') == word)
 }
 
 /// Return all `Location`s where a class declares `extends Name` or

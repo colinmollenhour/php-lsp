@@ -470,21 +470,24 @@ impl LanguageServer for Backend {
                 )
                 .await;
             // Show a visible warning when auto-detection yields a version outside
-            // our supported range (e.g. a legacy project with ">=5.6" in composer.json).
-            // TODO: instead of storing and using the unsupported version, consider clamping
-            // it to the nearest supported version so analysis stays meaningful.
-            if source != "set by editor" && !crate::autoload::is_valid_php_version(&ver) {
+            // our supported range (e.g. a legacy project with ">=5.6" in composer.json),
+            // then clamp to the nearest supported version so analysis stays meaningful.
+            let ver = if source != "set by editor" && !crate::autoload::is_valid_php_version(&ver) {
+                let clamped = crate::autoload::clamp_php_version(&ver);
                 self.client
                     .show_message(
                         tower_lsp::lsp_types::MessageType::WARNING,
                         format!(
                             "php-lsp: detected PHP {ver} is outside the supported range ({}); \
-                             analysis may be inaccurate",
+                             using PHP {clamped} for analysis",
                             crate::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
                         ),
                     )
                     .await;
-            }
+                clamped.to_string()
+            } else {
+                ver
+            };
             cfg.php_version = Some(ver.clone());
             if let Ok(pv) = ver.parse::<mir_analyzer::PhpVersion>() {
                 self.docs.set_php_version(pv);
@@ -821,20 +824,23 @@ impl LanguageServer for Backend {
                     format!("php-lsp: using PHP {ver} ({source})"),
                 )
                 .await;
-            // TODO: instead of storing and using the unsupported version, consider clamping
-            // it to the nearest supported version so analysis stays meaningful.
-            if source != "set by editor" && !crate::autoload::is_valid_php_version(&ver) {
+            // Clamp unsupported versions to the nearest supported one and warn.
+            let ver = if source != "set by editor" && !crate::autoload::is_valid_php_version(&ver) {
+                let clamped = crate::autoload::clamp_php_version(&ver);
                 self.client
                     .show_message(
                         tower_lsp::lsp_types::MessageType::WARNING,
                         format!(
                             "php-lsp: detected PHP {ver} is outside the supported range ({}); \
-                             analysis may be inaccurate",
+                             using PHP {clamped} for analysis",
                             crate::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
                         ),
                     )
                     .await;
-            }
+                clamped.to_string()
+            } else {
+                ver
+            };
             cfg.php_version = Some(ver.clone());
             if let Ok(pv) = ver.parse::<mir_analyzer::PhpVersion>() {
                 self.docs.set_php_version(pv);
