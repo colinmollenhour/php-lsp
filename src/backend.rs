@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+use arc_swap::ArcSwap;
+
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::notification::Progress as ProgressNotification;
 
@@ -86,10 +88,10 @@ pub struct Backend {
     /// Files that are only background-indexed (never opened in the editor)
     /// do not appear here; they live only in `DocumentStore`'s salsa layer.
     open_files: OpenFiles,
-    root_paths: Arc<RwLock<Vec<PathBuf>>>,
+    root_paths: Arc<ArcSwap<Vec<PathBuf>>>,
     psr4: Arc<RwLock<Psr4Map>>,
-    meta: Arc<RwLock<PhpStormMeta>>,
-    config: Arc<RwLock<LspConfig>>,
+    meta: Arc<ArcSwap<PhpStormMeta>>,
+    config: Arc<ArcSwap<LspConfig>>,
 }
 
 impl Backend {
@@ -104,10 +106,10 @@ impl Backend {
             client,
             docs,
             open_files: OpenFiles::new(),
-            root_paths: Arc::new(RwLock::new(Vec::new())),
+            root_paths: Arc::new(ArcSwap::from_pointee(Vec::new())),
             psr4,
-            meta: Arc::new(RwLock::new(PhpStormMeta::default())),
-            config: Arc::new(RwLock::new(LspConfig::default())),
+            meta: Arc::new(ArcSwap::from_pointee(PhpStormMeta::default())),
+            config: Arc::new(ArcSwap::from_pointee(LspConfig::default())),
         }
     }
 
@@ -180,7 +182,7 @@ impl Backend {
     /// Resolve the PHP version to use. See `autoload::resolve_php_version_from_roots`
     /// for the full priority order.
     fn resolve_php_version(&self, explicit: Option<&str>) -> (String, &'static str) {
-        let roots = self.root_paths.read().unwrap().clone();
+        let roots = self.root_paths.load();
         crate::autoload::resolve_php_version_from_roots(&roots, explicit)
     }
 
@@ -388,7 +390,7 @@ impl LanguageServer for Backend {
             {
                 roots.push(path);
             }
-            *self.root_paths.write().unwrap() = roots;
+            self.root_paths.store(Arc::new(roots));
         }
 
         // Pre-load PSR-4 map synchronously during initialize so it is available
@@ -397,10 +399,10 @@ impl LanguageServer for Backend {
         // the race where didOpen runs before the initialized handler finishes its
         // register_capability round-trip.
         {
-            let roots = self.root_paths.read().unwrap().clone();
+            let roots = self.root_paths.load_full();
             if !roots.is_empty() {
                 let mut merged = Psr4Map::empty();
-                for root in &roots {
+                for root in roots.iter() {
                     merged.extend(Psr4Map::load(root));
                 }
                 *self.psr4.write().unwrap() = merged;
@@ -409,7 +411,7 @@ impl LanguageServer for Backend {
 
         {
             let opts = params.initialization_options.as_ref();
-            let roots = self.root_paths.read().unwrap().clone();
+            let roots = self.root_paths.load_full();
             let file_cfg = crate::autoload::load_project_config_json(&roots);
 
             if matches!(file_cfg, Some(serde_json::Value::Null)) {
@@ -492,10 +494,10 @@ impl LanguageServer for Backend {
             if let Ok(pv) = ver.parse::<mir_analyzer::PhpVersion>() {
                 self.docs.set_php_version(pv);
             }
-            *self.config.write().unwrap() = cfg;
+            self.config.store(Arc::new(cfg));
         }
 
-        let feat = self.config.read().unwrap().features.clone();
+        let feat = self.config.load().features.clone();
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -663,7 +665,7 @@ impl LanguageServer for Backend {
         self.client.register_capability(registrations).await.ok();
 
         // Extract roots first so RwLockReadGuard is dropped before any .await.
-        let roots = self.root_paths.read().unwrap().clone();
+        let roots: Vec<PathBuf> = (**self.root_paths.load()).clone();
         if !roots.is_empty() {
             {
                 let mut merged = Psr4Map::empty();
@@ -672,7 +674,7 @@ impl LanguageServer for Backend {
                 }
                 *self.psr4.write().unwrap() = merged;
             }
-            *self.meta.write().unwrap() = PhpStormMeta::load(&roots[0]);
+            self.meta.store(Arc::new(PhpStormMeta::load(&roots[0])));
 
             let token = NumberOrString::String("php-lsp/indexing".to_string());
             self.client
@@ -686,7 +688,7 @@ impl LanguageServer for Backend {
             let open_files = self.open_files.clone();
             let client = self.client.clone();
             let (exclude_paths, include_paths, max_indexed_files) = {
-                let cfg = self.config.read().unwrap();
+                let cfg = self.config.load();
                 (
                     cfg.exclude_paths.clone(),
                     cfg.include_paths.clone(),
@@ -792,7 +794,7 @@ impl LanguageServer for Backend {
         if let Ok(values) = self.client.configuration(items).await
             && let Some(value) = values.into_iter().next()
         {
-            let roots = self.root_paths.read().unwrap().clone();
+            let roots = self.root_paths.load_full();
 
             // Re-read .php-lsp.json so a user who edits the file and then
             // triggers a configuration reload picks up the latest values.
@@ -845,7 +847,7 @@ impl LanguageServer for Backend {
             if let Ok(pv) = ver.parse::<mir_analyzer::PhpVersion>() {
                 self.docs.set_php_version(pv);
             }
-            *self.config.write().unwrap() = cfg;
+            self.config.store(Arc::new(cfg));
             send_refresh_requests(&self.client).await;
         }
     }
@@ -853,17 +855,18 @@ impl LanguageServer for Backend {
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
         // Remove folders from our tracked roots.
         {
-            let mut roots = self.root_paths.write().unwrap();
+            let mut roots = (**self.root_paths.load()).clone();
             for removed in &params.event.removed {
                 if let Ok(path) = removed.uri.to_file_path() {
                     roots.retain(|r| r != &path);
                 }
             }
+            self.root_paths.store(Arc::new(roots));
         }
 
         // Add new folders and kick off background scans for each.
         let (exclude_paths, include_paths, max_indexed_files) = {
-            let cfg = self.config.read().unwrap();
+            let cfg = self.config.load();
             (
                 cfg.exclude_paths.clone(),
                 cfg.include_paths.clone(),
@@ -873,9 +876,10 @@ impl LanguageServer for Backend {
         for added in &params.event.added {
             if let Ok(path) = added.uri.to_file_path() {
                 let is_new = {
-                    let mut roots = self.root_paths.write().unwrap();
+                    let mut roots = (**self.root_paths.load()).clone();
                     if !roots.contains(&path) {
                         roots.push(path.clone());
+                        self.root_paths.store(Arc::new(roots));
                         true
                     } else {
                         false
@@ -923,7 +927,7 @@ impl LanguageServer for Backend {
             self.set_open_text(uri.clone(), text.clone());
 
             let docs_for_spawn = Arc::clone(&self.docs);
-            let diag_cfg = self.config.read().unwrap().diagnostics.clone();
+            let diag_cfg = self.config.load().diagnostics.clone();
 
             // Phase I: parse + semantic analysis both run on the blocking pool.
             // The semantic pass is memoized by salsa, but the *first* call per
@@ -989,7 +993,7 @@ impl LanguageServer for Backend {
             let docs = Arc::clone(&self.docs);
             let open_files = self.open_files.clone();
             let client = self.client.clone();
-            let diag_cfg = self.config.read().unwrap().diagnostics.clone();
+            let diag_cfg = self.config.load().diagnostics.clone();
             tokio::spawn(async move {
                 // 100 ms debounce: if another edit arrives before we parse,
                 // the version gate in Backend below will discard this result.
@@ -1097,7 +1101,7 @@ impl LanguageServer for Backend {
         // Must include semantic diagnostics — publishDiagnostics replaces the
         // prior set entirely, so omitting them would clear errors the editor
         // showed after the last did_change.
-        let diag_cfg = self.config.read().unwrap().diagnostics.clone();
+        let diag_cfg = self.config.load().diagnostics.clone();
         let all = compute_open_file_diagnostics(&self.docs, &self.open_files, &uri, &diag_cfg);
         self.client.publish_diagnostics(uri, all, None).await;
     }
@@ -1151,11 +1155,11 @@ impl LanguageServer for Backend {
                 .context
                 .as_ref()
                 .and_then(|c| c.trigger_character.as_deref());
-            let meta_guard = self.meta.read().unwrap();
-            let meta_opt = if meta_guard.is_empty() {
+            let meta_loaded = self.meta.load();
+            let meta_opt = if meta_loaded.is_empty() {
                 None
             } else {
-                Some(&*meta_guard)
+                Some(&**meta_loaded)
             };
             let imports = self.file_imports(uri);
             let ctx = CompletionCtx {
@@ -2241,7 +2245,7 @@ impl LanguageServer for Backend {
                     .unwrap_or("")
                     .to_string();
 
-                let root = self.root_paths.read().unwrap().first().cloned();
+                let root = self.root_paths.load().first().cloned();
                 let client = self.client.clone();
 
                 tokio::spawn(async move {
@@ -2497,7 +2501,7 @@ impl LanguageServer for Backend {
             }
         };
         let (diag_cfg, php_version) = {
-            let cfg = self.config.read().unwrap();
+            let cfg = self.config.load();
             (cfg.diagnostics.clone(), cfg.php_version.clone())
         };
         // Note: php_version could be used for version-specific diagnostics in the future
@@ -2559,7 +2563,7 @@ impl LanguageServer for Backend {
     ) -> Result<WorkspaceDiagnosticReportResult> {
         let all_parse_diags = self.all_open_files_with_diagnostics();
         let (diag_cfg, php_version) = {
-            let cfg = self.config.read().unwrap();
+            let cfg = self.config.load();
             (cfg.diagnostics.clone(), cfg.php_version.clone())
         };
 
@@ -2669,7 +2673,7 @@ impl LanguageServer for Backend {
         // On a memo miss (e.g. code-action fires before did_open finishes),
         // the analyzer runs — park that on the blocking pool so the async
         // runtime doesn't stall.
-        let diag_cfg = self.config.read().unwrap().diagnostics.clone();
+        let diag_cfg = self.config.load().diagnostics.clone();
         let docs_sem = Arc::clone(&self.docs);
         let uri_sem = uri.clone();
         let diag_cfg_sem = diag_cfg.clone();
