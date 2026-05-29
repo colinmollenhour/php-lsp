@@ -923,3 +923,24 @@ $p = new Parser();
     )
     .await;
 }
+
+// ── clone-with (PHP 8.5) ────────────────────────────────────────────────────
+
+/// Property access inside a clone-with override array must be visible to rename.
+#[tokio::test]
+async fn rename_property_inside_clone_with_override_array() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_rename_annotated(
+        r#"<?php
+class Point { public int $x; public int $y; }
+//                        ^ rename
+$p = new Point();
+$q = clone($p, ['x' => 1]);
+echo $q->x$0;
+//       ^ rename
+"#,
+        "coordX",
+    )
+    .await;
+}

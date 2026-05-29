@@ -767,6 +767,10 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
             let len: u32 = utf16_code_units(segment);
             push_at(out, sv, expr.span.start, len, TT_VARIABLE, 0);
         }
+        ExprKind::CloneWith(target, withs) => {
+            collect_expr(sv, target, out);
+            collect_expr(sv, withs, out);
+        }
         _ => {}
     }
 }

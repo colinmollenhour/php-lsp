@@ -201,6 +201,8 @@ pub(crate) fn resolve_expr_type(
             lookup_static_method_return(method_returns, class_name, method_name)
                 .map(|s| s.to_string())
         }
+        // clone($obj, [...]) preserves the object's type
+        ExprKind::CloneWith(obj, _) => resolve_expr_type(obj, map, method_returns),
         _ => None,
     }
 }
@@ -1035,6 +1037,12 @@ fn collect_types_expr(
                 // $copy = $original — propagate type from source variable
                 if let ExprKind::Variable(src_var) = &assign.value.kind
                     && let Some(src_type) = map.get(&format!("${}", src_var.as_str())).cloned()
+                {
+                    map.insert(format!("${}", var_name.as_str()), src_type);
+                }
+                // $new = clone($obj, ['prop' => $val]) — CloneWith preserves the cloned object's type
+                if let ExprKind::CloneWith(obj, _overrides) = &assign.value.kind
+                    && let Some(src_type) = resolve_var_type_str(obj, map)
                 {
                     map.insert(format!("${}", var_name.as_str()), src_type);
                 }

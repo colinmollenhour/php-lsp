@@ -305,6 +305,38 @@ match ($x) {
 
 // ── instanceof narrowing integration tests ──────────────────────────────────
 
+// ── clone-with (PHP 8.5) ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn hover_clone_with_result_inherits_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php
+class Point { public int $x; public int $y; }
+$p = new Point();
+$q = clone($p, ['x' => 1]);
+echo $q$0->x;
+"#,
+        expect!["`$q` `Point`"],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_no_result_without_known_source_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php
+$q = clone($unknown, ['x' => 1]);
+echo $q$0->x;
+"#,
+        expect!["<no hover>"],
+    )
+    .await;
+}
+
 /// After `if ($x instanceof Foo)`, hovering on `$x->method()` inside the block
 /// should resolve to Foo::method().
 #[tokio::test]
