@@ -116,15 +116,6 @@ pub(super) fn all_instance_members(
                     }
                 }
             }
-            for name in &stub.constants {
-                if seen_names.insert(name.clone()) {
-                    items.push(CompletionItem {
-                        label: name.clone(),
-                        kind: Some(CompletionItemKind::CONSTANT),
-                        ..Default::default()
-                    });
-                }
-            }
         }
         if let Some(p) = parent {
             queue.push(p);
