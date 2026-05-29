@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use rayon::prelude::*;
 use tower_lsp::lsp_types::{Position, Url};
 
 use php_lsp::ast::{MethodReturnsMap, ParsedDoc};
@@ -541,6 +544,64 @@ fn bench_call_hierarchy(c: &mut Criterion) {
     group.finish();
 }
 
+/// Load raw PHP source strings from the Laravel fixture without pre-parsing them.
+/// Used by `bench_workspace_parse` to measure parse + index cost in isolation.
+fn laravel_sources() -> Option<Vec<(Url, String)>> {
+    let fixture_dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("benches/fixtures/laravel/src");
+    if !fixture_dir.exists() {
+        return None;
+    }
+    let sources: Vec<(Url, String)> = walkdir::WalkDir::new(&fixture_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map_or(false, |x| x == "php"))
+        .filter_map(|e| {
+            let url = Url::from_file_path(e.path()).ok()?;
+            let src = std::fs::read_to_string(e.path()).ok()?;
+            Some((url, src))
+        })
+        .collect();
+    Some(sources)
+}
+
+fn bench_workspace_parse(c: &mut Criterion) {
+    let Some(sources) = laravel_sources() else {
+        eprintln!(
+            "Laravel fixture not found — run `scripts/setup_laravel_fixture.sh` to enable workspace_parse benchmarks"
+        );
+        return;
+    };
+
+    eprintln!(
+        "Laravel fixture: {} PHP files (workspace_parse)",
+        sources.len()
+    );
+
+    let mut group = c.benchmark_group("workspace_parse");
+    group.sample_size(10);
+
+    group.bench_function("sequential", |b| {
+        b.iter(|| {
+            sources.iter().for_each(|(_, src)| {
+                let doc = ParsedDoc::parse(src.clone());
+                std::hint::black_box(php_lsp::file_index::FileIndex::extract(&doc));
+            });
+        });
+    });
+
+    group.bench_function("rayon", |b| {
+        b.iter(|| {
+            sources.par_iter().for_each(|(_, src)| {
+                let doc = ParsedDoc::parse(src.clone());
+                std::hint::black_box(php_lsp::file_index::FileIndex::extract(&doc));
+            });
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_hover,
@@ -553,6 +614,7 @@ criterion_group!(
     bench_workspace_symbol,
     bench_implementation,
     bench_document_symbol,
-    bench_call_hierarchy
+    bench_call_hierarchy,
+    bench_workspace_parse
 );
 criterion_main!(benches);
