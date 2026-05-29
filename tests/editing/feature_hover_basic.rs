@@ -344,8 +344,10 @@ $o = new ArrayOb$0ject();
         out.contains("built-in class"),
         "expected built-in class hover, got: {out}"
     );
+    // Require at least one concrete member name — the generic "Methods:" header
+    // alone must not satisfy this assertion.
     assert!(
-        out.contains("append") || out.contains("getArrayCopy") || out.contains("Methods:"),
-        "expected ArrayObject members in hover, got: {out}"
+        out.contains("append") || out.contains("getArrayCopy"),
+        "expected concrete ArrayObject members in hover, got: {out}"
     );
 }

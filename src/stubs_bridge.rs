@@ -265,16 +265,31 @@ mod tests {
     fn enum_does_not_emit_name_value_properties() {
         let s = session();
         let r = SessionStubResolver::new(&s);
-        // If a backed enum exists in stubs it must not surface name/value as
-        // properties. We assert the invariant on any resolvable enum; skip if
-        // none is present in this stub set.
-        if let Some(members) = r.class_members("DateTimeZone") {
+        // Exercise the actual enum path: these are native PHP enums in the
+        // bundled stubs (`Random\IntervalBoundary` is backed; `RoundingMode` is
+        // pure). A backed enum has the language-level pseudo-properties
+        // `->name` / `->value`, which the bridge must NOT surface as `$`-prefixed
+        // properties. Iterate a candidate list and assert the invariant for any
+        // that resolve; require at least one to resolve so the test keeps real
+        // coverage instead of silently passing if the stub set changes.
+        let enum_candidates = ["Random\\IntervalBoundary", "RoundingMode"];
+        let mut resolved_any = false;
+        for fqcn in enum_candidates {
+            let Some(members) = r.class_members(fqcn) else {
+                continue;
+            };
+            resolved_any = true;
             for (n, _) in &members.properties {
                 assert!(
                     !n.eq_ignore_ascii_case("name") && !n.eq_ignore_ascii_case("value"),
-                    "bridge must not emit name/value as properties"
+                    "{fqcn}: bridge must not emit enum name/value as properties, got {n}"
                 );
             }
         }
+        assert!(
+            resolved_any,
+            "no native enum candidate resolved from the bundled stubs ({enum_candidates:?}); \
+             update the candidate list so this test exercises a real enum"
+        );
     }
 }

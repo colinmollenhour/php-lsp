@@ -140,15 +140,11 @@ pub(super) fn all_instance_members(
                     }
                 }
             }
-            for name in &stub.constants {
-                if seen_names.insert(name.clone()) {
-                    items.push(CompletionItem {
-                        label: name.clone(),
-                        kind: Some(CompletionItemKind::CONSTANT),
-                        ..Default::default()
-                    });
-                }
-            }
+            // Class constants are intentionally NOT added here: they are
+            // accessed via `::`, not `->`, so they belong only in
+            // `all_static_members`. (The hand-written fallback used to add them
+            // to instance completion too; the bundled stubs make that
+            // wrong-for-`->` behavior prominent, e.g. `PDO::ATTR_*`.)
             // Recurse into ancestors/traits surfaced by the bridge so inherited
             // built-in members (e.g. Countable::count on ArrayObject) appear.
             for trait_name in &stub.trait_uses {
