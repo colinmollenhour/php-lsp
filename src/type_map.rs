@@ -600,6 +600,7 @@ fn type_hint_to_class_string(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_types_stmts(
     source: &str,
     stmts: &[Stmt<'_, '_>],
@@ -995,6 +996,7 @@ fn collect_types_stmts(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_types_expr(
     source: &str,
     expr: &php_ast::Expr<'_, '_>,
