@@ -2,6 +2,22 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.7.0] — 2026-05-30
+
+### Features
+
+- **PHP 8.5 `CloneWith` expression**: Type inference and AST traversal now handle the `CloneWith` expression introduced in PHP 8.5.
+
+### Performance
+
+- **ArcSwap migrations**: `Backend` PSR-4 map and several `RwLock` fields migrated to `ArcSwap`, reducing lock contention under concurrent requests.
+- **Parallel workspace Phase 2**: `scan_workspace` Phase 2 now runs with rayon, cutting indexing time on large projects.
+
+### Bug Fixes
+
+- **Completion**: Class constants are no longer offered in arrow (instance) member completions.
+- **PHP version clamping**: Unsupported PHP versions passed via configuration are now clamped to the latest known version instead of triggering binary detection.
+
 ## [0.5.0] — 2026-05-15
 
 ### Features

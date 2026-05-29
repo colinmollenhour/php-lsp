@@ -329,7 +329,6 @@ function create(UserAccount $acc$0): void {}
 /// to verify that without explicit type information, generic parameters aren't synthesized.
 /// TODO: Parse and handle generic-like type syntax.
 #[tokio::test]
-#[ignore]
 async fn type_definition_limitation_generic_types_not_supported() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
