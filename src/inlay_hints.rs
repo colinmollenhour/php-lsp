@@ -468,6 +468,10 @@ fn hints_in_expr(
             hints_in_expr(sv, b.left, defs, type_map, range, out);
             hints_in_expr(sv, b.right, defs, type_map, range, out);
         }
+        ExprKind::CloneWith(target, withs) => {
+            hints_in_expr(sv, target, defs, type_map, range, out);
+            hints_in_expr(sv, withs, defs, type_map, range, out);
+        }
         _ => {}
     }
 }
