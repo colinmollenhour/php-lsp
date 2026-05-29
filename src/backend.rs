@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 
@@ -89,7 +89,7 @@ pub struct Backend {
     /// do not appear here; they live only in `DocumentStore`'s salsa layer.
     open_files: OpenFiles,
     root_paths: Arc<ArcSwap<Vec<PathBuf>>>,
-    psr4: Arc<RwLock<Psr4Map>>,
+    psr4: Arc<ArcSwap<Psr4Map>>,
     meta: Arc<ArcSwap<PhpStormMeta>>,
     config: Arc<ArcSwap<LspConfig>>,
 }
@@ -405,7 +405,7 @@ impl LanguageServer for Backend {
                 for root in roots.iter() {
                     merged.extend(Psr4Map::load(root));
                 }
-                *self.psr4.write().unwrap() = merged;
+                self.psr4.store(Arc::new(merged));
             }
         }
 
@@ -664,7 +664,6 @@ impl LanguageServer for Backend {
         ];
         self.client.register_capability(registrations).await.ok();
 
-        // Extract roots first so RwLockReadGuard is dropped before any .await.
         let roots: Vec<PathBuf> = (**self.root_paths.load()).clone();
         if !roots.is_empty() {
             {
@@ -672,7 +671,7 @@ impl LanguageServer for Backend {
                 for root in &roots {
                     merged.extend(Psr4Map::load(root));
                 }
-                *self.psr4.write().unwrap() = merged;
+                self.psr4.store(Arc::new(merged));
             }
             self.meta.store(Arc::new(PhpStormMeta::load(&roots[0])));
 
@@ -2259,7 +2258,7 @@ impl LanguageServer for Backend {
     }
 
     async fn will_rename_files(&self, params: RenameFilesParams) -> Result<Option<WorkspaceEdit>> {
-        let psr4 = self.psr4.read().unwrap();
+        let psr4 = self.psr4.load();
         let all_docs = self.docs.all_docs_for_scan();
         let mut merged_changes: std::collections::HashMap<
             tower_lsp::lsp_types::Url,
@@ -2322,7 +2321,7 @@ impl LanguageServer for Backend {
     // ── File-create notifications ────────────────────────────────────────────
 
     async fn will_create_files(&self, params: CreateFilesParams) -> Result<Option<WorkspaceEdit>> {
-        let psr4 = self.psr4.read().unwrap();
+        let psr4 = self.psr4.load();
         let mut changes: std::collections::HashMap<Url, Vec<TextEdit>> =
             std::collections::HashMap::new();
 
@@ -2399,7 +2398,7 @@ impl LanguageServer for Backend {
     /// Before a file is deleted, return workspace edits that remove every
     /// `use` import referencing its PSR-4 class name.
     async fn will_delete_files(&self, params: DeleteFilesParams) -> Result<Option<WorkspaceEdit>> {
-        let psr4 = self.psr4.read().unwrap();
+        let psr4 = self.psr4.load();
         let all_docs = self.docs.all_docs_for_scan();
         let mut merged_changes: std::collections::HashMap<Url, Vec<TextEdit>> =
             std::collections::HashMap::new();
@@ -3457,10 +3456,7 @@ impl Backend {
     /// Try to resolve a fully-qualified name via the PSR-4 map.
     /// Indexes the file on-demand if it is not already in the document store.
     async fn psr4_goto(&self, fqn: &str) -> Option<Location> {
-        let path = {
-            let psr4 = self.psr4.read().unwrap();
-            psr4.resolve(fqn)?
-        };
+        let path = self.psr4.load().resolve(fqn)?;
 
         let file_uri = Url::from_file_path(&path).ok()?;
 
