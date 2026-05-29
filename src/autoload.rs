@@ -61,14 +61,13 @@ pub fn clamp_php_version(v: &str) -> &'static str {
         // Between min and max but not in the list — pick the highest version ≤ input.
         SUPPORTED_PHP_VERSIONS
             .iter()
-            .filter(|&&s| {
+            .rfind(|&&s| {
                 let (a, b) = s
                     .split_once('.')
                     .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
                     .unwrap_or((0, 0));
                 (a, b) <= (major, minor)
             })
-            .next_back()
             .copied()
             .unwrap_or(PHP_7_4)
     }
