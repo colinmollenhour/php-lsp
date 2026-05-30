@@ -3,8 +3,11 @@ use serde_json::json;
 
 // ── PHP 8.0 functions (str_contains, str_starts_with, str_ends_with) ────────────
 
-// mir 0.30 dropped PHP-version filtering in the pull (salsa) path — tracked
-// as "Phase-5 follow-up" in mir's source. Re-enable once mir restores it.
+// Root cause: published mir-analyzer 0.30.0 does not call set_php_version() on
+// the salsa db in AnalysisSession::new(), so collect_file_definitions_uncached
+// always reads the default "8.2" version and skips @since/@removed filtering.
+// Fixed in local mir by commit "wire php_version into salsa db". Re-enable once
+// a new mir version with this fix is published and this crate is updated.
 #[ignore]
 #[tokio::test]
 async fn str_contains_undefined_on_php74() {

@@ -422,7 +422,8 @@ class StringHelper {
     .await;
 }
 
-// mir 0.30 dropped PHP-version filtering in the pull (salsa) path — Phase-5 follow-up.
+// Same root cause as the php_versions tests: published mir-analyzer 0.30.0 omits
+// set_php_version() on the salsa db. Re-enable with a new mir release.
 #[ignore]
 #[tokio::test]
 async fn monorepo_php74_str_contains_error() {

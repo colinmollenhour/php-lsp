@@ -422,7 +422,6 @@ async fn workspace_diagnostic_wrong_result_id_returns_full() {
 }
 
 #[tokio::test]
-#[ignore = "O(N²) cross-file re-analysis per did_open — fix performance before re-enabling"]
 async fn edge_case_workspace_diagnostic_many_files() {
     let mut server = TestServer::new().await;
 
