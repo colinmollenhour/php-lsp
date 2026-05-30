@@ -574,6 +574,28 @@ $a->$0
 }
 
 #[tokio::test]
+async fn completion_user_class_shadows_builtin() {
+    // A user-defined class whose name collides with a built-in (`ArrayObject`)
+    // must win: only its own members are offered. The hand-written built-in
+    // stub members (`append`, `getArrayCopy`, `count`, …) must NOT leak — the
+    // exact snapshot below would grow if they did.
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+class ArrayObject {
+    public function customMethod(): void {}
+}
+$x = new ArrayObject();
+$x->$0
+"#,
+        )
+        .await;
+    expect!["Method      customMethod"].assert_eq(&out);
+}
+
+#[tokio::test]
 async fn completion_enum_case_access() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
