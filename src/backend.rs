@@ -933,18 +933,25 @@ impl LanguageServer for Backend {
             let docs_for_spawn = Arc::clone(&self.docs);
             let diag_cfg = self.config.load().diagnostics.clone();
 
-            // Phase I: parse + semantic analysis both run on the blocking pool.
-            // The semantic pass is memoized by salsa, but the *first* call per
-            // file walks `StatementsAnalyzer` over the AST (hundreds of ms on
-            // cold files) — we must not block the async executor on it.
+            // Phase I: semantic analysis on the blocking pool (CPU-bound, hundreds
+            // of ms on cold files).  We skip the redundant standalone parse_document
+            // call that used to precede this — get_semantic_issues_salsa already
+            // parses via salsa internally and caches the ParsedDoc.  Parse errors
+            // are read from that cached doc after the blocking task completes.
             let uri_sem = uri.clone();
-            let (parse_diags, sem_issues) = tokio::task::spawn_blocking(move || {
-                let (_doc, parse_diags) = parse_document(&text);
-                let sem_issues = docs_for_spawn.get_semantic_issues_salsa(&uri_sem);
-                (parse_diags, sem_issues)
+            let sem_issues = tokio::task::spawn_blocking(move || {
+                docs_for_spawn.get_semantic_issues_salsa(&uri_sem)
             })
             .await
-            .unwrap_or_else(|_| (vec![], None));
+            .unwrap_or(None);
+
+            // Extract parse errors from the salsa-cached ParsedDoc.  On the fast
+            // path this is a lock-free DashMap lookup — no re-parse.
+            let parse_diags = self
+                .docs
+                .get_doc_salsa(&uri)
+                .map(|doc| crate::diagnostics::diagnostics_from_doc(&doc))
+                .unwrap_or_default();
 
             self.set_parse_diagnostics(&uri, parse_diags.clone());
             let stored_source = self.get_open_text(&uri).unwrap_or_default();

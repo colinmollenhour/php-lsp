@@ -42,7 +42,7 @@ fn all_enabled() -> DiagnosticsConfig {
 
 fn new_session() -> mir_analyzer::AnalysisSession {
     let s = mir_analyzer::AnalysisSession::new(mir_analyzer::PhpVersion::LATEST);
-    s.ensure_essential_stubs_loaded();
+    s.ensure_all_stubs();
     s
 }
 
