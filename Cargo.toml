@@ -77,3 +77,23 @@ harness = false
 [[bench]]
 name = "edit_latency"
 harness = false
+
+# Optimize CPU-heavy dependencies in debug/test builds so the test suite
+# stays fast without requiring a full release build.  These crates do the
+# bulk of the parser and type-inference work; opt-level=1 gives most of the
+# runtime speedup (typically 5-10×) at a fraction of the compile time cost
+# of opt-level=3.
+[profile.dev.package.mir-analyzer]
+opt-level = 2
+[profile.dev.package.mir-codebase]
+opt-level = 2
+[profile.dev.package.php-rs-parser]
+opt-level = 2
+[profile.dev.package.php-ast]
+opt-level = 2
+[profile.dev.package.php-lexer]
+opt-level = 2
+[profile.dev.package.salsa]
+opt-level = 2
+[profile.dev.package.salsa-macro-rules]
+opt-level = 2

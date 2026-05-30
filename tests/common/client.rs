@@ -142,6 +142,7 @@ impl TestClient {
     /// Since `did_open` publishes diagnostics synchronously after parse +
     /// semantic analysis finish, this is a deterministic replacement for
     /// `sleep(150ms)` debounce waits.
+    ///
     pub async fn wait_for_diagnostics(&mut self, uri: &str) -> Value {
         let uri_val = json!(uri);
         tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
