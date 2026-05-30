@@ -198,47 +198,45 @@ mod navigation {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "broken needle: 'User $author' occurrence=5 doesn't exist in src/Entity/Post.php — pre-existing test bug"]
     async fn goto_definition_parameter_type_in_vendor() {
         let mut server = TestServer::with_fixture("symfony-demo").await;
         server.wait_for_index_ready().await;
 
         let path = "src/Entity/Post.php";
-        let (text, line, ch) = server.locate(path, "User $author", 5);
+        let (text, line, ch) = server.locate(path, "User $author", 1);
         server.open(path, &text).await;
 
         let resp = server.definition(path, line, ch).await;
-        assert!(resp["error"].is_null());
-        assert!(!resp["result"].is_null());
+        let out = render_locations(&resp, &server.uri(""));
+        expect!["src/Entity/User.php:32:6-32:10"].assert_eq(&out);
     }
 
     #[tokio::test]
-    #[ignore = "broken needle: 'use App\\\\Entity\\\\Post;' occurrence=9 doesn't exist (file has 1 occurrence) — pre-existing test bug"]
     async fn goto_definition_app_class_from_use_import() {
         let mut server = TestServer::with_fixture("symfony-demo").await;
         server.wait_for_index_ready().await;
 
         let path = "src/Repository/PostRepository.php";
-        let (text, line, ch) = server.locate(path, "use App\\Entity\\Post;", 9);
+        let (text, line, ch) = server.locate(path, "Post;", 0);
         server.open(path, &text).await;
 
         let resp = server.definition(path, line, ch).await;
-        assert!(resp["error"].is_null());
-        assert!(!resp["result"].is_null());
+        let out = render_locations(&resp, &server.uri(""));
+        expect!["src/Entity/Post.php:36:6-36:10"].assert_eq(&out);
     }
 
     #[tokio::test]
-    #[ignore = "broken needle: '$this->render' occurrence=8 doesn't exist in src/Controller/BlogController.php — pre-existing test bug"]
     async fn goto_definition_inherited_method_this_render() {
         let mut server = TestServer::with_fixture("symfony-demo").await;
         server.wait_for_index_ready().await;
 
         let path = "src/Controller/BlogController.php";
-        let (text, line, ch) = server.locate(path, "$this->render", 8);
+        let (text, line, ch) = server.locate(path, "render('", 0);
         server.open(path, &text).await;
 
         let resp = server.definition(path, line, ch).await;
-        assert!(resp["error"].is_null());
+        let out = render_locations(&resp, &server.uri(""));
+        expect!["<none>"].assert_eq(&out);
     }
 
     #[serial_test::serial]
@@ -279,17 +277,21 @@ mod hover {
     }
 
     #[tokio::test]
-    #[ignore = "broken needle: 'Post $post' doesn't exist in src/Repository/PostRepository.php — pre-existing test bug"]
     async fn hover_on_app_entity_type_in_signature() {
         let mut server = TestServer::with_fixture("symfony-demo").await;
         server.wait_for_index_ready().await;
 
         let path = "src/Repository/PostRepository.php";
-        let (text, line, ch) = server.locate(path, "Post $post", 1);
+        let (text, line, ch) = server.locate(path, "Tag $tag", 0);
         server.open(path, &text).await;
 
         let resp = server.hover(path, line, ch).await;
-        assert!(resp["error"].is_null());
+        let out = render_hover(&resp);
+        expect![[r#"
+            ```php
+            class Tag implements \JsonSerializable
+            ```"#]]
+        .assert_eq(&out);
     }
 }
 
