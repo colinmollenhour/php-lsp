@@ -193,6 +193,17 @@ pub struct LspConfig {
     /// Defaults to [`MAX_INDEXED_FILES`]. Set lower via `initializationOptions`
     /// to reduce memory on projects with very large vendor trees.
     pub max_indexed_files: usize,
+    /// Whether to eagerly index `vendor/` during the workspace scan.
+    ///
+    /// Default `false`: `vendor/` is skipped on scan; vendor files load on
+    /// demand via PSR-4 resolution (composer autoload + per-file parse). This
+    /// keeps `$/php-lsp/indexReady` fast on real-world projects where vendor
+    /// dwarfs the workspace.
+    ///
+    /// Set `true` for full workspace-symbol coverage of vendor and find-
+    /// implementations / type-hierarchy against vendor types — at the cost of
+    /// a slower initial scan.
+    pub index_vendor: bool,
 }
 
 impl Default for LspConfig {
@@ -204,6 +215,7 @@ impl Default for LspConfig {
             diagnostics: DiagnosticsConfig::default(),
             features: FeaturesConfig::default(),
             max_indexed_files: MAX_INDEXED_FILES,
+            index_vendor: false,
         }
     }
 }
@@ -279,6 +291,9 @@ impl LspConfig {
         }
         if let Some(n) = v.get("maxIndexedFiles").and_then(|x| x.as_u64()) {
             cfg.max_indexed_files = n as usize;
+        }
+        if let Some(b) = v.get("indexVendor").and_then(|x| x.as_bool()) {
+            cfg.index_vendor = b;
         }
         cfg
     }
