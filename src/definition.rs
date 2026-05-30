@@ -80,13 +80,13 @@ fn scan_statements(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], word: &str) -> Op
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) if f.name == word => {
-                return Some(sv.name_range(&f.name.to_string()));
+                return Some(sv.name_range_in_span(&f.name.to_string(), stmt.span));
             }
             StmtKind::Class(c)
                 if c.name.as_ref().map(|n| n.to_string()) == Some(word.to_string()) =>
             {
                 let name = c.name.expect("match guard ensures Some");
-                return Some(sv.name_range(&name.to_string()));
+                return Some(sv.name_range_in_span(&name.to_string(), stmt.span));
             }
             StmtKind::Class(c) => {
                 for member in c.body.members.iter() {
@@ -116,7 +116,7 @@ fn scan_statements(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], word: &str) -> Op
             }
             StmtKind::Interface(i) => {
                 if i.name == word {
-                    return Some(sv.name_range(&i.name.to_string()));
+                    return Some(sv.name_range_in_span(&i.name.to_string(), stmt.span));
                 }
                 for member in i.body.members.iter() {
                     match &member.kind {
@@ -132,7 +132,7 @@ fn scan_statements(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], word: &str) -> Op
             }
             StmtKind::Trait(t) => {
                 if t.name == word {
-                    return Some(sv.name_range(&t.name.to_string()));
+                    return Some(sv.name_range_in_span(&t.name.to_string(), stmt.span));
                 }
                 for member in t.body.members.iter() {
                     match &member.kind {
@@ -150,7 +150,7 @@ fn scan_statements(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], word: &str) -> Op
                 }
             }
             StmtKind::Enum(e) if e.name == word => {
-                return Some(sv.name_range(&e.name.to_string()));
+                return Some(sv.name_range_in_span(&e.name.to_string(), stmt.span));
             }
             StmtKind::Enum(e) => {
                 for member in e.body.members.iter() {
