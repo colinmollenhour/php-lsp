@@ -30,6 +30,7 @@ pub(super) fn all_instance_members(
             continue;
         }
         let mut parent: Option<String> = None;
+        let mut found_in_docs = false;
         // PHP defines a class in exactly one file, so stop scanning once the
         // defining doc is hit. Without the early break, member completion
         // walks every workspace doc for every class in the inheritance chain.
@@ -38,6 +39,7 @@ pub(super) fn all_instance_members(
             if !members.found {
                 continue;
             }
+            found_in_docs = true;
             parent = members.parent.clone();
             for (name, is_static) in members.methods {
                 if !is_static && seen_names.insert(name.clone()) {
@@ -94,8 +96,9 @@ pub(super) fn all_instance_members(
             }
             break;
         }
-        // Fall back to built-in stubs if the class wasn't found in any user doc
-        if let Some(stub) = builtin_class_members(&current) {
+        // Built-in stubs only apply when the class is not defined in any user
+        // document — a user class shadowing a built-in name wins.
+        if !found_in_docs && let Some(stub) = builtin_class_members(&current) {
             if parent.is_none() {
                 parent = stub.parent.clone();
             }
@@ -141,11 +144,13 @@ pub(super) fn all_static_members(
             continue;
         }
         let mut parent: Option<String> = None;
+        let mut found_in_docs = false;
         for d in &all {
             let members = members_of_class(d, &current);
             if !members.found {
                 continue;
             }
+            found_in_docs = true;
             parent = members.parent.clone();
             for (name, is_static) in members.methods {
                 if is_static && seen_names.insert(name.clone()) {
@@ -179,8 +184,9 @@ pub(super) fn all_static_members(
             }
             break;
         }
-        // Fall back to built-in stubs for static members
-        if let Some(stub) = builtin_class_members(&current) {
+        // Built-in stubs only apply when the class is not defined in any user
+        // document — a user class shadowing a built-in name wins.
+        if !found_in_docs && let Some(stub) = builtin_class_members(&current) {
             if parent.is_none() {
                 parent = stub.parent.clone();
             }
