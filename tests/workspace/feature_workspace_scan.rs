@@ -274,27 +274,12 @@ async fn hidden_directories_are_excluded_from_scan() {
 
 #[serial_test::serial]
 #[tokio::test]
-async fn vendor_directory_included_by_default() {
-    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = manifest_dir.join("tests/fixtures/psr4-mini");
+async fn vendor_directory_skipped_by_default() {
+    // Lazy vendor: `vendor/` is excluded from the eager workspace scan by
+    // default so `$/php-lsp/indexReady` fires quickly. Vendor files load on
+    // demand via PSR-4 resolution when go-to-definition jumps into them.
     let tmp = tempfile::tempdir().expect("create TempDir");
-    fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(dst)?;
-        for e in std::fs::read_dir(src)? {
-            let e = e?;
-            let to = dst.join(e.file_name());
-            if e.file_type()?.is_dir() {
-                copy_dir(&e.path(), &to)?;
-            } else {
-                std::fs::copy(e.path(), to)?;
-            }
-        }
-        Ok(())
-    }
-    copy_dir(&source, tmp.path()).unwrap();
-
     let mut server = TestServer::with_root(tmp.path()).await;
-    // Add a class in vendor/ without explicitly excluding vendor
     server.write_file(
         "vendor/symfony/http-kernel/HttpKernel.php",
         "<?php\nnamespace Symfony\\Component\\HttpKernel;\n\nclass HttpKernel {}\n",
@@ -302,17 +287,34 @@ async fn vendor_directory_included_by_default() {
 
     server.wait_for_index_ready().await;
 
-    let resp = server.workspace_symbols("HttpKernel").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        symbols.iter().any(|s| {
-            s["location"]["uri"]
-                .as_str()
-                .map(|u| u.contains("vendor/"))
-                .unwrap_or(false)
+    let out = server.snapshot_workspace_symbols("HttpKernel").await;
+    expect![[r#"<no symbols>"#]].assert_eq(&out);
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn vendor_directory_indexed_when_index_vendor_true() {
+    // Opt-in: `indexVendor: true` restores eager-vendor behavior for users
+    // who want full workspace-symbol coverage in vendor.
+    let tmp = tempfile::tempdir().expect("create TempDir");
+    let mut server = TestServer::with_root_and_options(
+        tmp.path(),
+        json!({
+            "diagnostics": { "enabled": true },
+            "indexVendor": true,
         }),
-        "vendor/HttpKernel.php should be indexed by default, got: {symbols:?}"
+    )
+    .await;
+    server.write_file(
+        "vendor/symfony/http-kernel/HttpKernel.php",
+        "<?php\nnamespace Symfony\\Component\\HttpKernel;\n\nclass HttpKernel {}\n",
     );
+
+    server.wait_for_index_ready().await;
+
+    let out = server.snapshot_workspace_symbols("HttpKernel").await;
+    expect![[r#"Class       HttpKernel @ vendor/symfony/http-kernel/HttpKernel.php:3"#]]
+        .assert_eq(&out);
 }
 
 #[serial_test::serial]
@@ -496,7 +498,17 @@ async fn deeply_nested_directory_structure_is_indexed() {
 #[tokio::test]
 async fn multiple_top_level_directories_with_different_patterns() {
     let tmp = tempfile::tempdir().expect("create TempDir");
-    let mut server = TestServer::with_root(tmp.path()).await;
+    // Opt into eager vendor indexing so the nested `packages/api/vendor` is
+    // walked. Without this, lazy-vendor default skips any `vendor/` component
+    // regardless of depth.
+    let mut server = TestServer::with_root_and_options(
+        tmp.path(),
+        json!({
+            "diagnostics": { "enabled": true },
+            "indexVendor": true,
+        }),
+    )
+    .await;
 
     // Create a multi-directory structure typical of a monorepo
     server.write_file(

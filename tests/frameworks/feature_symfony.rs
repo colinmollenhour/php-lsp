@@ -124,6 +124,44 @@ mod semantic_tokens {
     }
 }
 
+mod perf_measure {
+    use super::*;
+
+    /// Manual benchmark to verify lazy-vendor `indexReady` latency on symfony-demo.
+    /// Run with `cargo test --test frameworks measure_indexready -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "manual benchmark; run with --nocapture to see timings"]
+    async fn measure_indexready_symfony_demo_lazy() {
+        let t0 = std::time::Instant::now();
+        let mut server = TestServer::with_fixture("symfony-demo").await;
+        let t_init = t0.elapsed();
+        server.wait_for_index_ready().await;
+        let t_ready = t0.elapsed();
+        println!(
+            "MEASURE lazy-vendor symfony-demo: init={:?}, indexReady={:?}",
+            t_init, t_ready
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "manual benchmark; run with --nocapture to see timings"]
+    async fn measure_indexready_symfony_demo_eager() {
+        let t0 = std::time::Instant::now();
+        let mut server = TestServer::with_fixture_and_options(
+            "symfony-demo",
+            serde_json::json!({ "diagnostics": { "enabled": true }, "indexVendor": true }),
+        )
+        .await;
+        let t_init = t0.elapsed();
+        server.wait_for_index_ready().await;
+        let t_ready = t0.elapsed();
+        println!(
+            "MEASURE eager-vendor symfony-demo: init={:?}, indexReady={:?}",
+            t_init, t_ready
+        );
+    }
+}
+
 mod call_hierarchy {
     use super::*;
 
@@ -154,13 +192,13 @@ mod call_hierarchy {
     }
 }
 
-// ── Slow tests (#[ignore], full fixture) ─────────────────────────────
+// ── Full-fixture tests (vendor present, indexed lazily by default) ───
 
 mod navigation {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    #[ignore = "broken needle: 'User $author' occurrence=5 doesn't exist in src/Entity/Post.php — pre-existing test bug"]
     async fn goto_definition_parameter_type_in_vendor() {
         let mut server = TestServer::with_fixture("symfony-demo").await;
         server.wait_for_index_ready().await;
@@ -175,7 +213,7 @@ mod navigation {
     }
 
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    #[ignore = "broken needle: 'use App\\\\Entity\\\\Post;' occurrence=9 doesn't exist (file has 1 occurrence) — pre-existing test bug"]
     async fn goto_definition_app_class_from_use_import() {
         let mut server = TestServer::with_fixture("symfony-demo").await;
         server.wait_for_index_ready().await;
@@ -190,7 +228,7 @@ mod navigation {
     }
 
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    #[ignore = "broken needle: '$this->render' occurrence=8 doesn't exist in src/Controller/BlogController.php — pre-existing test bug"]
     async fn goto_definition_inherited_method_this_render() {
         let mut server = TestServer::with_fixture("symfony-demo").await;
         server.wait_for_index_ready().await;
@@ -203,10 +241,12 @@ mod navigation {
         assert!(resp["error"].is_null());
     }
 
+    #[serial_test::serial]
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
     async fn goto_definition_attribute_class_route() {
-        let mut server = TestServer::with_fixture("symfony-demo").await;
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/symfony-demo");
+        let mut server = TestServer::with_root(&fixture).await;
         server.wait_for_index_ready().await;
 
         let path = "src/Controller/BlogController.php";
@@ -221,10 +261,12 @@ mod navigation {
 mod hover {
     use super::*;
 
+    #[serial_test::serial]
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
     async fn hover_on_class_in_extends_clause() {
-        let mut server = TestServer::with_fixture("symfony-demo").await;
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/symfony-demo");
+        let mut server = TestServer::with_root(&fixture).await;
         server.wait_for_index_ready().await;
 
         let path = "src/Controller/BlogController.php";
@@ -237,7 +279,7 @@ mod hover {
     }
 
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    #[ignore = "broken needle: 'Post $post' doesn't exist in src/Repository/PostRepository.php — pre-existing test bug"]
     async fn hover_on_app_entity_type_in_signature() {
         let mut server = TestServer::with_fixture("symfony-demo").await;
         server.wait_for_index_ready().await;
@@ -255,7 +297,7 @@ mod implementation {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
+    #[ignore = "returns empty impls even with indexVendor=true (verified); needs investigation — either the cursor position (occurrence=0 of 'UserInterface' lands in the use statement) is wrong, or find-implementations doesn't traverse `implements` clauses for vendor interfaces"]
     async fn implementations_of_user_interface_include_app_user() {
         let mut server = TestServer::with_fixture("symfony-demo").await;
         server.wait_for_index_ready().await;
@@ -274,10 +316,12 @@ mod implementation {
 mod references {
     use super::*;
 
+    #[serial_test::serial]
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
     async fn references_to_post_entity_span_multiple_files() {
-        let mut server = TestServer::with_fixture("symfony-demo").await;
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/symfony-demo");
+        let mut server = TestServer::with_root(&fixture).await;
         server.wait_for_index_ready().await;
 
         let path = "src/Entity/Post.php";
@@ -312,10 +356,12 @@ mod references {
 mod type_hierarchy {
     use super::*;
 
+    #[serial_test::serial]
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
     async fn supertypes_of_blog_controller_include_abstract_controller() {
-        let mut server = TestServer::with_fixture("symfony-demo").await;
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/symfony-demo");
+        let mut server = TestServer::with_root(&fixture).await;
         server.wait_for_index_ready().await;
 
         let path = "src/Controller/BlogController.php";
@@ -326,10 +372,12 @@ mod type_hierarchy {
         assert!(resp["error"].is_null());
     }
 
+    #[serial_test::serial]
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
     async fn subtypes_of_abstract_controller_include_app_controller() {
-        let mut server = TestServer::with_fixture("symfony-demo").await;
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/symfony-demo");
+        let mut server = TestServer::with_root(&fixture).await;
         server.wait_for_index_ready().await;
 
         let path = "src/Controller/BlogController.php";
@@ -344,10 +392,12 @@ mod type_hierarchy {
 mod smoke {
     use super::*;
 
+    #[serial_test::serial]
     #[tokio::test]
-    #[ignore = "slow: workspace-scale test, run with --ignored"]
     async fn smoke_goto_definition_abstract_controller() {
-        let mut server = TestServer::with_fixture("symfony-demo").await;
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/symfony-demo");
+        let mut server = TestServer::with_root(&fixture).await;
         server.wait_for_index_ready().await;
 
         let path = "src/Controller/BlogController.php";

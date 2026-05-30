@@ -688,11 +688,16 @@ impl LanguageServer for Backend {
             let client = self.client.clone();
             let (exclude_paths, include_paths, max_indexed_files) = {
                 let cfg = self.config.load();
-                (
-                    cfg.exclude_paths.clone(),
-                    cfg.include_paths.clone(),
-                    cfg.max_indexed_files,
-                )
+                let mut exclude = cfg.exclude_paths.clone();
+                // Lazy vendor: by default we skip `vendor/` during the eager
+                // scan and rely on PSR-4 resolution (`psr4_goto`) to index
+                // vendor files on demand. Users with workspaces small enough
+                // to want full-vendor symbol search can opt in via
+                // `indexVendor: true`.
+                if !cfg.index_vendor && !exclude.iter().any(|p| p == "vendor" || p == "vendor/") {
+                    exclude.push("vendor/".to_string());
+                }
+                (exclude, cfg.include_paths.clone(), cfg.max_indexed_files)
             };
             tokio::spawn(async move {
                 client
