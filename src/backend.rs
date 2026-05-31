@@ -44,11 +44,11 @@ use crate::folding::folding_ranges;
 use crate::formatting::{format_document, format_range};
 use crate::generate_action::{generate_constructor_actions, generate_getters_setters_actions};
 use crate::hover::{
-    class_hover_from_index, docs_for_symbol_from_index, hover_info, signature_for_symbol_from_index,
+    class_hover_from_index, docs_for_symbol_from_index, hover_info_resolved,
+    signature_for_symbol_from_index,
 };
 use crate::implement_action::implement_missing_actions;
 use crate::implementation::{find_implementations, find_implementations_from_workspace};
-use crate::inlay_hints::inlay_hints;
 use crate::inline_action::inline_variable_actions;
 use crate::inline_value::inline_values_in_range;
 use crate::moniker::moniker_at;
@@ -1173,6 +1173,16 @@ impl LanguageServer for Backend {
                 Some(&**meta_loaded)
             };
             let imports = self.file_imports(uri);
+            // WP3 (PHP generics): a read-only resolver over the WP2 resolved-
+            // symbol cache (validated against the current text Arc; never
+            // analyses) plus a mir db snapshot for the substitution queries.
+            // When the cache is cold or returns `None`, completion runs on the
+            // unchanged legacy short-name path (byte-identical to today).
+            let text_arc = doc.source_arc();
+            let resolver = |byte_off: u32| {
+                crate::generics::resolved_type_at(&self.docs, uri, &text_arc, byte_off)
+            };
+            let codebase = self.codebase();
             let ctx = CompletionCtx {
                 source: Some(&source),
                 position: Some(position),
@@ -1181,6 +1191,8 @@ impl LanguageServer for Backend {
                 file_imports: Some(&imports),
                 doc_returns: doc_returns.as_deref(),
                 other_returns: Some(&other_returns),
+                resolved_type_at: Some(&resolver),
+                codebase: Some(&codebase),
             };
             Ok(Some(CompletionResponse::Array(filtered_completions_at(
                 &doc,
@@ -1694,7 +1706,29 @@ impl LanguageServer for Backend {
                 .get_method_returns_salsa(uri)
                 .unwrap_or_else(|| std::sync::Arc::new(Default::default()));
             let other_docs = self.docs.other_docs_with_returns(uri, &self.open_urls());
-            let result = hover_info(&source, &doc, &doc_returns, position, &other_docs);
+            // WP2: consult mir's generic-aware resolved type at the cursor (read
+            // only — never analyses). `None` keeps hover on the legacy path.
+            // mir spans are end-exclusive, so a cursor resting just past a token
+            // (the common `word_at_position` case, e.g. `$c|`) would miss the
+            // symbol; retry one byte back so trailing-boundary hovers resolve.
+            let text_arc = doc.source_arc();
+            let byte_off = doc.view().byte_of_position(position);
+            let resolved_ty = crate::generics::resolved_type_at(
+                &self.docs, uri, &text_arc, byte_off,
+            )
+            .or_else(|| {
+                byte_off
+                    .checked_sub(1)
+                    .and_then(|b| crate::generics::resolved_type_at(&self.docs, uri, &text_arc, b))
+            });
+            let result = hover_info_resolved(
+                &source,
+                &doc,
+                &doc_returns,
+                position,
+                &other_docs,
+                resolved_ty.as_ref(),
+            );
             if result.is_some() {
                 return Ok(result);
             }
@@ -1757,12 +1791,18 @@ impl LanguageServer for Backend {
         };
         let doc_returns = self.docs.get_method_returns_salsa(uri);
         let wi = self.docs.get_workspace_index_salsa();
-        Ok(Some(inlay_hints(
+        // WP2: a read-only generic-type resolver backed by the resolved-symbol
+        // cache (validated against the current text Arc; never analyses).
+        let text_arc = doc.source_arc();
+        let resolver =
+            |byte_off: u32| crate::generics::resolved_type_at(&self.docs, uri, &text_arc, byte_off);
+        Ok(Some(crate::inlay_hints::inlay_hints_resolved(
             doc.source(),
             &doc,
             doc_returns.as_deref(),
             params.range,
             &wi.files,
+            Some(&resolver),
         )))
     }
 

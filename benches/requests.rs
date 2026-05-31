@@ -226,14 +226,13 @@ fn bench_completion(c: &mut Criterion) {
     // Derive parsed-only docs from cross_file_docs to avoid double-parsing.
     let other_parsed: Vec<Arc<ParsedDoc>> = cross_file_docs().into_iter().map(|(_, p)| p).collect();
 
+    // Populate only the fields this bench exercises; additive context fields
+    // (e.g. the WP3 `codebase` / `resolved_type_at` generic handles) default to
+    // `None` via `Default`, so new fields never break this call site again.
     let ctx = CompletionCtx {
         source: Some(CONTROLLER),
         position: Some(POS_ARROW),
-        meta: None,
-        doc_uri: None,
-        file_imports: None,
-        doc_returns: None,
-        other_returns: None,
+        ..Default::default()
     };
 
     c.bench_function("completion/cross_file_arrow", |b| {
@@ -384,11 +383,7 @@ fn bench_completion_laravel(c: &mut Criterion) {
     let ctx = CompletionCtx {
         source: Some(CONTROLLER),
         position: Some(POS_ARROW),
-        meta: None,
-        doc_uri: None,
-        file_imports: None,
-        doc_returns: None,
-        other_returns: None,
+        ..Default::default()
     };
 
     let mut group = c.benchmark_group("completion");

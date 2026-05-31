@@ -16,6 +16,8 @@ pub use common::{
 mod feature_code_lens;
 #[path = "analysis/feature_diagnostics_edge_cases.rs"]
 mod feature_diagnostics_edge_cases;
+#[path = "analysis/feature_diagnostics_generics.rs"]
+mod feature_diagnostics_generics;
 #[path = "analysis/feature_diagnostics_inheritance.rs"]
 mod feature_diagnostics_inheritance;
 #[path = "analysis/feature_diagnostics_type_errors.rs"]

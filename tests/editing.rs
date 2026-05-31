@@ -36,6 +36,8 @@ mod feature_code_action_return_type;
 mod feature_code_actions;
 #[path = "editing/feature_completion.rs"]
 mod feature_completion;
+#[path = "editing/feature_completion_generics.rs"]
+mod feature_completion_generics;
 #[path = "editing/feature_cursor_helpers.rs"]
 mod feature_cursor_helpers;
 #[path = "editing/feature_document_link.rs"]
@@ -44,6 +46,8 @@ mod feature_document_link;
 mod feature_folding;
 #[path = "editing/feature_formatting.rs"]
 mod feature_formatting;
+#[path = "editing/feature_generics.rs"]
+mod feature_generics;
 #[path = "editing/feature_hover_advanced.rs"]
 mod feature_hover_advanced;
 #[path = "editing/feature_hover_basic.rs"]

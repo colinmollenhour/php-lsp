@@ -13,6 +13,7 @@ pub mod db;
 pub mod definition;
 pub mod docblock;
 pub mod document_store;
+pub mod generics;
 pub mod hover;
 pub mod references;
 pub mod type_map;

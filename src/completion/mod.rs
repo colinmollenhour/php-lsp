@@ -8,8 +8,8 @@ pub use symbols::{
 
 mod member;
 use member::{
-    all_instance_members, all_static_members, magic_method_completions, resolve_receiver_class,
-    resolve_static_receiver,
+    GenericReceiverCtx, all_static_members, magic_method_completions, merge_union_members,
+    resolve_generic_member_completion, resolve_receiver_class, resolve_static_receiver,
 };
 
 mod namespace;
@@ -204,6 +204,15 @@ pub struct CompletionCtx<'a> {
     /// Salsa-memoized method-return maps aligned with `other_docs`. Must be
     /// the same length as `other_docs` when set, or `None` to build inline.
     pub other_returns: Option<&'a [Arc<MethodReturnsMap>]>,
+    /// WP3 (PHP generics): a read-only resolver over the WP2 resolved-symbol
+    /// cache (`Fn(byte_off) -> Option<mir_types::Type>`), backing generic-aware
+    /// `->` member completion. The byte offset is document-space. `None` keeps
+    /// completion on the legacy short-name path (byte-identical to today).
+    pub resolved_type_at: Option<&'a crate::inlay_hints::TypeResolver<'a>>,
+    /// WP3: mir database snapshot used for generic substitution (template-param
+    /// declarations, inherited `@extends<...>` bindings, member return types).
+    /// `None` ⇒ no generic substitution.
+    pub codebase: Option<&'a mir_analyzer::db::MirDbStorage>,
 }
 
 /// Completions filtered by trigger character, with optional context
@@ -245,6 +254,13 @@ pub fn filtered_completions_at(
         .map(|d| d.as_ref())
         .zip(other_returns_refs.iter().copied())
         .collect();
+    // WP3: generic-aware receiver context. Both handles come from the
+    // completion handler; when either is `None` the generic path is skipped
+    // entirely and the legacy short-name path runs unchanged.
+    let gctx = GenericReceiverCtx {
+        resolver: ctx.resolved_type_at,
+        codebase: ctx.codebase,
+    };
     match trigger_character {
         Some("$") => {
             let mut items = superglobal_completions();
@@ -258,6 +274,25 @@ pub fn filtered_completions_at(
         Some(">") => {
             // Arrow: $obj->  or  $this->
             if let (Some(src), Some(pos)) = (source, position) {
+                // WP3: prefer mir's generic-aware resolved receiver type. The
+                // receiver expression ends at the `->`/`?->` on this line.
+                let line = src.lines().nth(pos.line as usize).unwrap_or("");
+                let col = utf16_offset_to_byte(line, pos.character as usize);
+                // `>` is also a registered completion trigger for comparisons
+                // (`$a >`). Only engage the arrow path when the text up to the
+                // cursor actually ends in `->`/`?->`; otherwise a generic-typed
+                // `$a` would surface members after a comparison. This mirrors the
+                // legacy `resolve_receiver_class` guard (which trims the arrow and
+                // returns `None` for a non-receiver `head`).
+                let before_arrow = line[..col]
+                    .strip_suffix("?->")
+                    .or_else(|| line[..col].strip_suffix("->"));
+                if let Some(before_arrow) = before_arrow
+                    && let Some(items) =
+                        resolve_generic_member_completion(doc, other_docs, pos, before_arrow, &gctx)
+                {
+                    return items;
+                }
                 let type_map = TypeMap::from_docs_with_meta(
                     doc,
                     doc_returns_ref,
@@ -266,16 +301,7 @@ pub fn filtered_completions_at(
                 );
                 if let Some(class_names) = resolve_receiver_class(src, doc, pos, &type_map) {
                     // Feature 5: support union types (Foo|Bar)
-                    let mut items = Vec::new();
-                    let mut seen = std::collections::HashSet::new();
-                    for class_name in class_names.split('|') {
-                        let class_name = class_name.trim();
-                        for item in all_instance_members(class_name, doc, other_docs) {
-                            if seen.insert(item.label.clone()) {
-                                items.push(item);
-                            }
-                        }
-                    }
+                    let items = merge_union_members(&class_names, doc, other_docs);
                     if !items.is_empty() {
                         return items;
                     }
@@ -389,6 +415,16 @@ pub fn filtered_completions_at(
                     } else {
                         String::new()
                     };
+                    // WP3: prefer mir's generic-aware resolved receiver type.
+                    // `arrow_stripped` is the receiver text up to (not incl.) the
+                    // arrow. `None` falls through to the legacy short-name path.
+                    let generic_items = resolve_generic_member_completion(
+                        doc,
+                        other_docs,
+                        pos,
+                        arrow_stripped,
+                        &gctx,
+                    );
                     let class_name = if receiver == "$this" {
                         enclosing_class_at(src, doc, pos)
                             .or_else(|| type_map.get("$this").map(|s| s.to_string()))
@@ -397,44 +433,38 @@ pub fn filtered_completions_at(
                     } else {
                         None
                     };
-                    if let Some(cls) = class_name {
-                        let mut items = Vec::new();
-                        let mut seen = std::collections::HashSet::new();
-                        for class_name in cls.split('|') {
-                            for item in all_instance_members(class_name.trim(), doc, other_docs) {
-                                if seen.insert(item.label.clone()) {
-                                    items.push(item);
-                                }
+                    let items_opt: Option<Vec<CompletionItem>> = generic_items.or_else(|| {
+                        class_name.map(|cls| merge_union_members(&cls, doc, other_docs))
+                    });
+                    if let Some(mut items) = items_opt
+                        && !items.is_empty()
+                    {
+                        // Apply fuzzy filtering based on the typed prefix
+                        let prefix = before.strip_prefix(pre_arrow).unwrap_or("").to_string();
+                        if !prefix.is_empty() {
+                            items.retain(|i| {
+                                // For properties (label starts with $), match against the
+                                // name without the $. For methods/other items, match the
+                                // label directly.
+                                let match_against = if i.label.starts_with('$') {
+                                    i.label.strip_prefix('$').unwrap_or(&i.label)
+                                } else {
+                                    &i.label
+                                };
+                                crate::util::fuzzy_camel_match(&prefix, match_against)
+                            });
+                            for item in &mut items {
+                                let match_against = if item.label.starts_with('$') {
+                                    item.label.strip_prefix('$').unwrap_or(&item.label)
+                                } else {
+                                    &item.label
+                                };
+                                item.sort_text =
+                                    Some(crate::util::camel_sort_key(&prefix, match_against));
+                                item.filter_text = Some(item.label.clone());
                             }
                         }
-                        if !items.is_empty() {
-                            // Apply fuzzy filtering based on the typed prefix
-                            let prefix = before.strip_prefix(pre_arrow).unwrap_or("").to_string();
-                            if !prefix.is_empty() {
-                                items.retain(|i| {
-                                    // For properties (label starts with $), match against the
-                                    // name without the $. For methods/other items, match the
-                                    // label directly.
-                                    let match_against = if i.label.starts_with('$') {
-                                        i.label.strip_prefix('$').unwrap_or(&i.label)
-                                    } else {
-                                        &i.label
-                                    };
-                                    crate::util::fuzzy_camel_match(&prefix, match_against)
-                                });
-                                for item in &mut items {
-                                    let match_against = if item.label.starts_with('$') {
-                                        item.label.strip_prefix('$').unwrap_or(&item.label)
-                                    } else {
-                                        &item.label
-                                    };
-                                    item.sort_text =
-                                        Some(crate::util::camel_sort_key(&prefix, match_against));
-                                    item.filter_text = Some(item.label.clone());
-                                }
-                            }
-                            return items;
-                        }
+                        return items;
                     }
                 }
             }

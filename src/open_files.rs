@@ -46,6 +46,11 @@ impl OpenFiles {
     pub(crate) fn close(&self, docs: &DocumentStore, uri: &Url) {
         self.0.remove(uri);
         docs.evict_token_cache(uri);
+        // Drop the resolved-symbol cache entry for the closed file so a closed
+        // tab no longer pins its source text + per-expression types. The cache is
+        // also size-bounded (`RESOLVED_SYMBOLS_CAP`); this is the cheap, eager
+        // complement to that backstop.
+        docs.resolved_symbol_cache().remove(uri);
     }
 
     pub(crate) fn current_version(&self, uri: &Url) -> Option<u64> {

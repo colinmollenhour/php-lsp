@@ -5,7 +5,10 @@
 use std::collections::HashMap;
 
 use mir_analyzer::DocblockParser;
+use mir_types::{Type, Variance};
 use php_rs_parser::phpdoc;
+
+use crate::generics::{ImportCtx, render_type};
 
 /// Flatten a `phpdoc::PhpDocText` (sequence of text segments + inline tags)
 /// into a single string. Inline tags are rendered as `{@name body}`.
@@ -53,6 +56,16 @@ fn body_after_type_hint(s: &str) -> Option<String> {
     Some(split.next().unwrap_or("").trim().to_string())
 }
 
+/// Recover a `@template` parameter name from a (possibly over-read) string.
+///
+/// mir 0.30 over-reads single-line docblocks where tags share one line
+/// (`@template T @param T $x @return T` → name = `"T @param T $x @return T"`).
+/// The template name is always the first whitespace-separated token (mir routes
+/// any real bound into its own field), so take just that token.
+fn sanitize_template_name(raw: &str) -> String {
+    raw.split_whitespace().next().unwrap_or("").to_string()
+}
+
 /// For `@var Type [$name] description`: skip the type hint and an optional
 /// `$name`, then take the rest as description.
 fn body_after_type_and_var(s: &str) -> Option<String> {
@@ -93,6 +106,12 @@ pub struct Docblock {
     pub see: Vec<String>,
     /// `@template T` or `@template T of BaseClass`
     pub templates: Vec<DocTemplate>,
+    /// `@extends Base<T>` — generic parent (structured mir type), if present.
+    /// Carried for later hover declaration rendering.
+    pub extends: Option<Type>,
+    /// `@implements Iface<T>` — generic interfaces (structured mir types).
+    /// Carried for later hover declaration rendering.
+    pub implements: Vec<Type>,
     /// `@mixin ClassName`
     pub mixins: Vec<String>,
     /// `true` when the doc is `{@inheritDoc}` / `@inheritDoc` with no other content.
@@ -131,8 +150,14 @@ pub struct DocTypeAlias {
 pub struct DocTemplate {
     /// Template parameter name, e.g. `T`.
     pub name: String,
-    /// Optional upper bound, e.g. `Base` from `@template T of Base`.
+    /// Optional upper bound rendered as a short display string, e.g. `Base`
+    /// from `@template T of Base`. Kept for back-compat display.
     pub bound: Option<String>,
+    /// Structured upper-bound type from mir, if present (additive).
+    pub bound_ty: Option<Type>,
+    /// Declaration-site variance: `Invariant` for `@template`, `Covariant` for
+    /// `@template-covariant`, `Contravariant` for `@template-contravariant`.
+    pub variance: Variance,
 }
 
 #[derive(Debug, PartialEq)]
@@ -140,12 +165,18 @@ pub struct DocParam {
     pub type_hint: String,
     pub name: String,
     pub description: String,
+    /// Structured mir type for the param, carried additively so generic args
+    /// (`Collection<User>`, `array<K, V>`) survive instead of being flattened.
+    /// `None` when the docblock had no `@param` type (e.g. constructed by hand).
+    pub ty: Option<Type>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct DocReturn {
     pub type_hint: String,
     pub description: String,
+    /// Structured mir type for the return, carried additively (see [`DocParam::ty`]).
+    pub ty: Option<Type>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -306,6 +337,9 @@ pub fn parse_docblock(raw: &str) -> Docblock {
         }
     }
 
+    // Carry the structured mir `Type` additively (so generic args survive),
+    // while keeping the back-compat `type_hint` String. The String must stay
+    // byte-identical to today's output, which used mir's `Display`.
     let params: Vec<DocParam> = mir
         .params
         .iter()
@@ -315,6 +349,7 @@ pub fn parse_docblock(raw: &str) -> Docblock {
                 type_hint: union.to_string(),
                 name: format!("${}", name),
                 description,
+                ty: Some(union.clone()),
             }
         })
         .collect();
@@ -322,6 +357,7 @@ pub fn parse_docblock(raw: &str) -> Docblock {
     let return_type = mir.return_type.as_ref().map(|union| DocReturn {
         type_hint: union.to_string(),
         description: return_desc,
+        ty: Some(union.clone()),
     });
 
     let throws: Vec<DocThrows> = mir
@@ -340,44 +376,58 @@ pub fn parse_docblock(raw: &str) -> Docblock {
         None
     };
 
-    // mir 0.22's template-bound parsing over-reads (it captures every tag
-    // line after `@template T` as the bound). Parse the @template body
-    // ourselves: "T" → name=T, bound=None; "T of Bound" → name=T,
-    // bound=Some("Bound"); "T as Bound" likewise.
-    let templates: Vec<DocTemplate> = raw_doc
-        .tags
+    // Use mir 0.30's structured `templates` (name, bound `Type`, `Variance`).
+    // The mir-0.22 *multi-line* over-read bug (the template bound swallowing
+    // subsequent tag lines) is fixed on 0.30 — see the `template_bound_no_over_read`
+    // guard test. However, mir 0.30 still over-reads when several tags share a
+    // SINGLE line (`@template T @param T $x @return T`): the whole tail lands in
+    // the template *name* (`"T @param T $x @return T"`). Recover the real name by
+    // truncating at the first `@`-prefixed token. The structured `bound` Type and
+    // `Variance` from mir are kept as-is. mir does not capture the
+    // `@psalm-template` / `@phpstan-template` aliases, so those are parsed from
+    // the raw doc and appended.
+    let render_ctx = ImportCtx::short();
+    let mut templates: Vec<DocTemplate> = mir
+        .templates
         .iter()
-        .filter(|t| {
-            t.name == "template"
-                || t.name == "template-covariant"
-                || t.name == "template-contravariant"
-                || t.name == "psalm-template"
-                || t.name == "phpstan-template"
-        })
-        .filter_map(|t| {
-            // phpdoc-parser 0.11 sometimes leaks subsequent `@tag` lines into
-            // the body of an earlier tag (`@template T` followed by `@param`
-            // shows up as `"T @param T $x @return T"`). Truncate at the
-            // first `@`-prefixed token to recover the real `@template` body.
-            let body_full = t.body.as_ref().map(flatten_phpdoc_text).unwrap_or_default();
-            let body: String = body_full
-                .split_whitespace()
-                .take_while(|tok| !tok.starts_with('@'))
-                .collect::<Vec<_>>()
-                .join(" ");
-            let mut iter = body.split_whitespace();
-            let name = iter.next()?.to_string();
-            // `@template T` → bound=None (unconstrained).
-            // `@template T of Bound` / `@template T as Bound` → bound=Some(Bound).
-            // `@template T Bound` (no keyword) — defensive: still accept Bound.
-            let bound = match iter.next() {
-                Some("of" | "as") => iter.next().map(|s| s.to_string()),
-                Some(other) => Some(other.to_string()),
-                None => None,
-            };
-            Some(DocTemplate { name, bound })
+        .map(|(name, bound, variance)| DocTemplate {
+            name: sanitize_template_name(name),
+            bound: bound.as_ref().map(|b| render_type(b, &render_ctx)),
+            bound_ty: bound.clone(),
+            variance: *variance,
         })
         .collect();
+
+    // Supplement with psalm/phpstan template aliases that mir 0.30 does not
+    // recognise. Preserve the prior LSP coverage for these tags.
+    for t in &raw_doc.tags {
+        if t.name != "psalm-template" && t.name != "phpstan-template" {
+            continue;
+        }
+        // php-rs-parser sometimes leaks subsequent `@tag` lines into the body of
+        // an earlier tag; truncate at the first `@`-prefixed token.
+        let body_full = t.body.as_ref().map(flatten_phpdoc_text).unwrap_or_default();
+        let body: String = body_full
+            .split_whitespace()
+            .take_while(|tok| !tok.starts_with('@'))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut iter = body.split_whitespace();
+        let Some(name) = iter.next().map(|s| s.to_string()) else {
+            continue;
+        };
+        let bound = match iter.next() {
+            Some("of" | "as") => iter.next().map(|s| s.to_string()),
+            Some(other) => Some(other.to_string()),
+            None => None,
+        };
+        templates.push(DocTemplate {
+            name,
+            bound,
+            bound_ty: None,
+            variance: Variance::Invariant,
+        });
+    }
 
     let properties: Vec<DocProperty> = mir
         .properties
@@ -447,6 +497,8 @@ pub fn parse_docblock(raw: &str) -> Docblock {
         throws,
         see: mir.see.clone(),
         templates,
+        extends: mir.extends.clone(),
+        implements: mir.implements.clone(),
         mixins: mir.mixins.clone(),
         type_aliases,
         properties,
@@ -680,6 +732,7 @@ mod tests {
             return_type: Some(DocReturn {
                 type_hint: "string".to_string(),
                 description: "The greeting".to_string(),
+                ty: None,
             }),
             var_type: None,
             ..Default::default()
@@ -855,6 +908,113 @@ mod tests {
     }
 
     #[test]
+    fn template_bound_no_over_read() {
+        // Guard: mir 0.22 over-read the @template bound, swallowing subsequent
+        // tag lines (`@template T of Base` followed by `@param int $x` parsed the
+        // bound as `Base @param int $x`). On mir 0.30 the bound is exactly `Base`.
+        let raw = "/**\n * @template T of Base\n * @param int $x\n */";
+        let db = parse_docblock(raw);
+        assert_eq!(db.templates.len(), 1, "expected exactly one @template");
+        assert_eq!(db.templates[0].name, "T");
+        assert_eq!(
+            db.templates[0].bound.as_deref(),
+            Some("Base"),
+            "bound over-read subsequent tags: {:?}",
+            db.templates[0].bound
+        );
+        // The bound must be a single named type, not a multi-atomic over-read.
+        let bound_ty = db.templates[0].bound_ty.as_ref().expect("structured bound");
+        assert_eq!(
+            bound_ty.types.len(),
+            1,
+            "bound should be a single atomic, got: {:?}",
+            bound_ty
+        );
+        // The following @param must still parse cleanly and independently.
+        assert_eq!(db.params.len(), 1);
+        assert_eq!(db.params[0].name, "$x");
+        assert_eq!(db.params[0].type_hint, "int");
+    }
+
+    #[test]
+    fn template_name_no_single_line_over_read() {
+        // mir 0.30 over-reads when tags share a SINGLE line: the template name
+        // string becomes `"T @param T $x @return T"`. We must recover `T`.
+        let raw = "/** @template T @param T $x @return T */";
+        let db = parse_docblock(raw);
+        assert_eq!(db.templates.len(), 1);
+        assert_eq!(
+            db.templates[0].name, "T",
+            "template name over-read: {:?}",
+            db.templates[0].name
+        );
+        assert!(db.templates[0].bound.is_none());
+    }
+
+    #[test]
+    fn template_records_variance() {
+        let raw = "/**\n * @template-covariant TOut\n * @template-contravariant TIn of Base\n */";
+        let db = parse_docblock(raw);
+        assert_eq!(db.templates.len(), 2);
+        assert_eq!(db.templates[0].name, "TOut");
+        assert_eq!(db.templates[0].variance, Variance::Covariant);
+        assert!(db.templates[0].bound.is_none());
+        assert_eq!(db.templates[1].name, "TIn");
+        assert_eq!(db.templates[1].variance, Variance::Contravariant);
+        assert_eq!(db.templates[1].bound.as_deref(), Some("Base"));
+    }
+
+    #[test]
+    fn param_carries_structured_generic_type() {
+        let raw = "/**\n * @param Collection<User> $items\n */";
+        let db = parse_docblock(raw);
+        assert_eq!(db.params.len(), 1);
+        // Back-compat String hint preserved.
+        assert_eq!(db.params[0].type_hint, "Collection<User>");
+        // Structured type carried additively, with the generic arg intact.
+        let ty = db.params[0].ty.as_ref().expect("structured param type");
+        assert!(
+            matches!(
+                &ty.types[0],
+                mir_types::Atomic::TNamedObject { type_params, .. } if !type_params.is_empty()
+            ),
+            "expected generic TNamedObject, got: {:?}",
+            ty
+        );
+    }
+
+    #[test]
+    fn return_carries_structured_type() {
+        let raw = "/**\n * @return list<int>\n */";
+        let db = parse_docblock(raw);
+        let ret = db.return_type.as_ref().expect("return");
+        assert_eq!(ret.type_hint, "list<int>");
+        let ty = ret.ty.as_ref().expect("structured return type");
+        assert!(
+            matches!(&ty.types[0], mir_types::Atomic::TList { .. }),
+            "expected TList, got: {:?}",
+            ty
+        );
+    }
+
+    #[test]
+    fn docblock_captures_extends_and_implements() {
+        let raw = "/**\n * @extends BaseRepo<User>\n * @implements IteratorAggregate<User>\n */";
+        let db = parse_docblock(raw);
+        let extends = db.extends.as_ref().expect("extends");
+        assert!(
+            matches!(
+                &extends.types[0],
+                mir_types::Atomic::TNamedObject { fqcn, type_params }
+                    if fqcn.as_str() == "BaseRepo" && !type_params.is_empty()
+            ),
+            "expected BaseRepo<User>, got: {:?}",
+            extends
+        );
+        assert_eq!(db.implements.len(), 1);
+    }
+
+    #[test]
     fn parses_mixin_tag() {
         let raw = "/**\n * @mixin SomeTrait\n */";
         let db = parse_docblock(raw);
@@ -878,6 +1038,8 @@ mod tests {
             templates: vec![DocTemplate {
                 name: "T".to_string(),
                 bound: Some("Base".to_string()),
+                bound_ty: None,
+                variance: Variance::Invariant,
             }],
             ..Default::default()
         };

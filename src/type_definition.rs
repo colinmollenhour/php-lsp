@@ -73,7 +73,7 @@ pub fn goto_type_definition(
             .trim_start_matches('\\')
             .rsplit('\\')
             .next()
-            .unwrap_or(candidate);
+            .unwrap_or(&candidate);
         let cand_fqn = candidate.trim_start_matches('\\');
 
         for (uri, other_doc) in all_docs {
@@ -119,7 +119,7 @@ pub fn goto_type_definition(
                 .trim_start_matches('\\')
                 .rsplit('\\')
                 .next()
-                .unwrap_or(candidate);
+                .unwrap_or(&candidate);
             for (uri, other_doc) in all_docs {
                 let other_sv = other_doc.view();
                 if let Some(range) =
@@ -158,12 +158,39 @@ fn file_namespace(doc: &ParsedDoc) -> Option<String> {
 
 /// Decompose a formatted type hint into searchable class-name candidates.
 /// `"?Foo"` → `["Foo"]`, `"Foo|Bar"` → `["Foo", "Bar"]`, `"Foo&Bar"` → `["Foo", "Bar"]`.
-fn type_candidates(type_hint: &str) -> Vec<&str> {
-    let hint = type_hint.strip_prefix('?').unwrap_or(type_hint);
+///
+/// WP2: generic arguments are stripped down to the base FQCN before splitting so
+/// that `"Collection<User>"` → `["Collection"]` and
+/// `"Collection<User|Order>"` → `["Collection"]` (the go-to-type target is the
+/// container declaration, not the type arguments). The full type is still
+/// available to callers for display. Nested unions inside `<...>` are removed
+/// first so the top-level `|`/`&` split is not confused by inner separators.
+fn type_candidates(type_hint: &str) -> Vec<String> {
+    let stripped = strip_generic_args(type_hint);
+    let hint = stripped.strip_prefix('?').unwrap_or(&stripped);
     hint.split(['|', '&'])
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .map(str::to_string)
         .collect()
+}
+
+/// Remove balanced `<...>` generic-argument groups from a type string, keeping
+/// only the base type(s). Depth-tracked so nested generics and inner `|`/`,`
+/// separators are dropped wholesale: `"array<string, Map<int, User>>"` →
+/// `"array"`, `"A<T>|B<U>"` → `"A|B"`.
+fn strip_generic_args(type_hint: &str) -> String {
+    let mut out = String::with_capacity(type_hint.len());
+    let mut depth: u32 = 0;
+    for ch in type_hint.chars() {
+        match ch {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(ch),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Look up the declared type hint for a parameter named `word` in any function/method.
@@ -402,7 +429,7 @@ pub fn goto_type_definition_from_index(
     let is_from_import = imports.values().any(|v| v == &class_name);
     if !is_from_import {
         for candidate in type_candidates(&class_name) {
-            let cn_short = candidate.rsplit('\\').next().unwrap_or(candidate);
+            let cn_short = candidate.rsplit('\\').next().unwrap_or(&candidate);
             for (uri, idx) in indexes {
                 for cls in &idx.classes {
                     let short = cls
@@ -432,4 +459,52 @@ pub fn goto_type_definition_from_index(
     }
 
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{strip_generic_args, type_candidates};
+
+    #[test]
+    fn strip_generic_args_removes_simple_generic() {
+        assert_eq!(strip_generic_args("Collection<User>"), "Collection");
+        assert_eq!(strip_generic_args("array<string, User>"), "array");
+        assert_eq!(strip_generic_args("list<int>"), "list");
+    }
+
+    #[test]
+    fn strip_generic_args_handles_nested_and_unions() {
+        assert_eq!(strip_generic_args("array<string, Map<int, User>>"), "array");
+        assert_eq!(strip_generic_args("A<T>|B<U>"), "A|B");
+        assert_eq!(strip_generic_args("Collection<User|Order>"), "Collection");
+    }
+
+    #[test]
+    fn strip_generic_args_is_identity_for_plain_types() {
+        assert_eq!(strip_generic_args("User"), "User");
+        assert_eq!(strip_generic_args("App\\Models\\User"), "App\\Models\\User");
+        assert_eq!(strip_generic_args("Foo|Bar"), "Foo|Bar");
+    }
+
+    #[test]
+    fn type_candidates_strips_generics_to_base() {
+        assert_eq!(type_candidates("Collection<User>"), vec!["Collection"]);
+        assert_eq!(
+            type_candidates("Collection<User>|Order"),
+            vec!["Collection", "Order"]
+        );
+        // Inner union inside <...> must not leak into the top-level split.
+        assert_eq!(
+            type_candidates("Collection<User|Order>"),
+            vec!["Collection"]
+        );
+    }
+
+    #[test]
+    fn type_candidates_preserves_legacy_behavior() {
+        assert_eq!(type_candidates("?Foo"), vec!["Foo"]);
+        assert_eq!(type_candidates("Foo|Bar"), vec!["Foo", "Bar"]);
+        assert_eq!(type_candidates("Foo&Bar"), vec!["Foo", "Bar"]);
+        assert_eq!(type_candidates("User"), vec!["User"]);
+    }
 }

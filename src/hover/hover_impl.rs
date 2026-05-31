@@ -22,6 +22,216 @@ use super::parsing::{
     extract_receiver_var_before_cursor, extract_static_class_before_cursor, resolve_use_alias,
 };
 
+/// Render a resolved variable type for hover.
+///
+/// Unlike the original implementation this does **not** gate on the rendered text
+/// containing `<`. That gate silently dropped the core generic feature for plain
+/// template substitutions: `@return T` with `T = User` renders as the bracket-less
+/// `User`, which the old gate discarded. The caller decides whether to use this
+/// value by comparing it against the legacy `TypeMap` string and only overriding
+/// when they differ, so non-generic hover stays byte-identical while a genuine
+/// substitution (plain `User` or bracketed `Collection<User>`) surfaces.
+///
+/// Returns `None` only when the type renders empty or to a bare `mixed`, which
+/// carries no more information than the legacy path.
+fn render_resolved_var_type(ty: &mir_types::Type) -> Option<String> {
+    let rendered = crate::generics::render_type(ty, &crate::generics::ImportCtx::short());
+    if rendered.is_empty() || rendered == "mixed" {
+        None
+    } else {
+        Some(rendered)
+    }
+}
+
+/// PHPDoc declaration-site hover (WP2): when the cursor is on a `@template`,
+/// `@extends`, or `@implements` line inside a docblock, render the structured
+/// declaration (bound + variance for templates; the generic parent/interface
+/// for extends/implements) from [`crate::docblock::parse_docblock`].
+///
+/// Returns `None` for any other position so the normal hover path runs.
+fn phpdoc_decl_hover(
+    source: &str,
+    _doc: &ParsedDoc,
+    position: Position,
+    hover_range: Option<tower_lsp::lsp_types::Range>,
+) -> Option<Hover> {
+    let lines: Vec<&str> = source.lines().collect();
+    let line_idx = position.line as usize;
+    let line = lines.get(line_idx)?;
+    let trimmed = line.trim_start().trim_start_matches('*').trim_start();
+    // Quick reject: only docblock tag lines are handled here.
+    //
+    // VF10: `@template-extends`/`@template-implements` start with `@template` but
+    // are inheritance tags, not template declarations. Classify them as
+    // extends/implements first, then exclude the hyphenated forms from
+    // `is_template` so the `if is_template { … } else if is_extends { … }` chain
+    // routes them correctly (extends/implements wins over template).
+    let is_extends = trimmed.starts_with("@extends")
+        || trimmed.starts_with("@template-extends")
+        || trimmed.starts_with("@phpstan-extends");
+    let is_implements = trimmed.starts_with("@implements")
+        || trimmed.starts_with("@template-implements")
+        || trimmed.starts_with("@phpstan-implements");
+    let is_template = !is_extends
+        && !is_implements
+        && (trimmed.starts_with("@template")
+            || trimmed.starts_with("@phpstan-template")
+            || trimmed.starts_with("@psalm-template"));
+    if !(is_template || is_extends || is_implements) {
+        return None;
+    }
+
+    // Reconstruct the enclosing `/** ... */` block so the structured parser sees
+    // the same content mir would.
+    //
+    // VF10: mir 0.30's docblock parser only recognises the bare `@extends` /
+    // `@implements` tag names — it does NOT map the `@template-extends` /
+    // `@template-implements` (or `@phpstan-extends`/`@phpstan-implements`)
+    // aliases onto `extends`/`implements`, so `db.extends`/`db.implements` would
+    // be empty for those forms. Normalise the alias tags to their canonical names
+    // in the reconstructed block before parsing so the structured generic parent /
+    // interface still surfaces in hover.
+    let raw = normalize_inheritance_tags(&enclosing_docblock(&lines, line_idx)?);
+    let db = crate::docblock::parse_docblock(&raw);
+    let ctx = crate::generics::ImportCtx::short();
+
+    let value = if is_template {
+        // Identify which template the cursor's line declares (by its name).
+        // `trimmed_template_rest` strips every `@template*` prefix variant
+        // (longest-first, including `-covariant`/`-contravariant`), so the name
+        // is the first whitespace-delimited token of the remainder — one
+        // canonical prefix-stripping path (VF10).
+        let name = trimmed_template_rest(trimmed)
+            .unwrap_or("")
+            .split_whitespace()
+            .next()
+            .unwrap_or("");
+        let tpl = db
+            .templates
+            .iter()
+            .find(|t| t.name == name)
+            .or_else(|| db.templates.first())?;
+        // VF12: render the idiomatic hyphenated tag (`@template-covariant`)
+        // rather than `@template covariant`, matching PHPStan/Psalm source syntax.
+        let tag = match tpl.variance {
+            mir_types::Variance::Invariant => "@template",
+            mir_types::Variance::Covariant => "@template-covariant",
+            mir_types::Variance::Contravariant => "@template-contravariant",
+        };
+        // Bound rendering: prefer mir's structured `bound_ty`; fall back to the
+        // recovered string bound (VF16) for `@psalm-template`/`@phpstan-template`
+        // aliases that mir 0.30 does not parse into a `Type` (so `bound_ty` is
+        // `None` but `bound` carries `of Base`).
+        let bound = match tpl.bound_ty.as_ref() {
+            Some(b) => Some(crate::generics::render_type(b, &ctx)),
+            None => tpl.bound.clone(),
+        };
+        let body = match &bound {
+            Some(b) => format!("{} of {}", tpl.name, b),
+            None => tpl.name.clone(),
+        };
+        format!("`{tag} {body}`")
+    } else if is_extends {
+        let ext = db.extends.as_ref()?;
+        format!("`@extends {}`", crate::generics::render_type(ext, &ctx))
+    } else {
+        // implements: render the first generic interface (best-effort).
+        let imp = db.implements.first()?;
+        format!("`@implements {}`", crate::generics::render_type(imp, &ctx))
+    };
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value,
+        }),
+        range: hover_range,
+    })
+}
+
+/// Rewrite inheritance-tag aliases mir 0.30 does not recognise
+/// (`@template-extends`/`@phpstan-extends` → `@extends`,
+/// `@template-implements`/`@phpstan-implements` → `@implements`) to their
+/// canonical names so `parse_docblock` populates `extends`/`implements` (VF10).
+///
+/// Operates per line on the tag token only (the first non-`*` token), so it
+/// never touches body text such as a `Base<@implements>`-style identifier.
+fn normalize_inheritance_tags(raw: &str) -> String {
+    raw.lines()
+        .map(|line| {
+            let stripped = line.trim_start().trim_start_matches('*').trim_start();
+            if stripped.starts_with("@template-extends") || stripped.starts_with("@phpstan-extends")
+            {
+                line.replacen("@template-extends", "@extends", 1).replacen(
+                    "@phpstan-extends",
+                    "@extends",
+                    1,
+                )
+            } else if stripped.starts_with("@template-implements")
+                || stripped.starts_with("@phpstan-implements")
+            {
+                line.replacen("@template-implements", "@implements", 1)
+                    .replacen("@phpstan-implements", "@implements", 1)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Strip the `@template`/`@phpstan-template`/`@psalm-template` /
+/// `@template-contravariant` prefix to get the `T [of Bound]` remainder.
+fn trimmed_template_rest(trimmed: &str) -> Option<&str> {
+    for pfx in [
+        "@template-contravariant",
+        "@template-covariant",
+        "@phpstan-template",
+        "@psalm-template",
+        "@template",
+    ] {
+        if let Some(rest) = trimmed.strip_prefix(pfx) {
+            return Some(rest.trim_start());
+        }
+    }
+    None
+}
+
+/// Reconstruct the `/** ... */` docblock comment that line `line_idx` sits
+/// within, returning the raw text (including delimiters). Returns `None` when
+/// the line is not inside a docblock.
+fn enclosing_docblock(lines: &[&str], line_idx: usize) -> Option<String> {
+    // Walk upward to the opening `/**` (or `/*`).
+    let mut start = line_idx;
+    loop {
+        let l = lines.get(start)?.trim_start();
+        if l.starts_with("/*") {
+            break;
+        }
+        if start == 0 {
+            return None;
+        }
+        // A non-comment line above the cursor without an opener means we're not
+        // inside a docblock.
+        if !l.starts_with('*') && !l.is_empty() {
+            return None;
+        }
+        start -= 1;
+    }
+    // Walk downward to the closing `*/`.
+    let mut end = line_idx;
+    while end < lines.len() {
+        if lines[end].contains("*/") {
+            break;
+        }
+        end += 1;
+    }
+    if end >= lines.len() {
+        return None;
+    }
+    Some(lines[start..=end].join("\n"))
+}
+
 fn scan_statements(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
     for stmt in stmts {
         match &stmt.kind {
@@ -227,7 +437,30 @@ pub fn hover_info(
         Arc<MethodReturnsMap>,
     )],
 ) -> Option<Hover> {
-    hover_at(source, doc, doc_returns, other_docs, position)
+    hover_at(source, doc, doc_returns, other_docs, position, None)
+}
+
+/// Generic-aware hover entry point (WP2).
+///
+/// Identical to [`hover_info`] except that `resolved_ty` carries the
+/// generic-aware [`mir_types::Type`] mir resolved at the cursor's byte offset
+/// (via [`crate::generics::resolved_type_at`]). When `Some`, expression hovers
+/// render the full generic type (`Collection<User>`) via
+/// [`crate::generics::render_type`]; when `None`, behaviour is byte-identical to
+/// [`hover_info`] (the legacy `TypeMap` path).
+pub fn hover_info_resolved(
+    source: &str,
+    doc: &ParsedDoc,
+    doc_returns: &MethodReturnsMap,
+    position: Position,
+    other_docs: &[(
+        tower_lsp::lsp_types::Url,
+        Arc<ParsedDoc>,
+        Arc<MethodReturnsMap>,
+    )],
+    resolved_ty: Option<&mir_types::Type>,
+) -> Option<Hover> {
+    hover_at(source, doc, doc_returns, other_docs, position, resolved_ty)
 }
 
 /// Full hover implementation.
@@ -241,8 +474,16 @@ pub fn hover_at(
         Arc<MethodReturnsMap>,
     )],
     position: Position,
+    resolved_ty: Option<&mir_types::Type>,
 ) -> Option<Hover> {
     let hover_range = word_range_at(source, position);
+
+    // WP2: PHPDoc declaration-site hover (`@template`/`@extends`/`@implements`)
+    // renders the bound + variance / generic parents from the docblock. Checked
+    // before the word path because the cursor often sits on the bound class name.
+    if let Some(h) = phpdoc_decl_hover(source, doc, position, hover_range) {
+        return Some(h);
+    }
 
     // Hover on a `use` line shows the full FQN — check before word_at since the
     // cursor may be past the last word boundary.
@@ -361,7 +602,47 @@ pub fn hover_at(
         })
     };
 
+    // VF17: detect a static-property access (`ClassName::$prop`) up front so the
+    // generic resolved-var override below does not shadow the richer
+    // `(property) Foo::$prop: Type` hover. The override is for *local-variable*
+    // generics, never for `Class::$prop`.
+    let static_prop_access = word.starts_with('$')
+        && source
+            .lines()
+            .nth(position.line as usize)
+            .and_then(|l| extract_static_class_before_cursor(l, position.character as usize))
+            .is_some();
+
     // Hover on $variable shows its inferred type.
+    //
+    // WP2: prefer mir's generic-aware resolved type (`Collection<User>`, or a
+    // plain substituted `User`) when it *differs* from the legacy `TypeMap`
+    // value. Gating on a difference (rather than the literal presence of `<`)
+    // is what surfaces plain template substitutions (`@return T` with `T = User`
+    // renders as `User`), while keeping non-generic hover byte-identical when the
+    // two strings agree. Skipped for static-property access (VF17).
+    //
+    // Carryover-1: the resolved type must also be GENERIC-RELEVANT (an
+    // object/named/template type, or a container carrying one). Without this an
+    // mir-resolvable but non-generic variable the legacy `type_map` doesn't track
+    // (`$x = 1; $x;` ⇒ `1`) would always satisfy `None != Some(..)` and override
+    // the legacy path — broadening behaviour beyond generics. A bare
+    // scalar/literal/`mixed` never overrides.
+    if word.starts_with('$')
+        && !static_prop_access
+        && let Some(ty) = resolved_ty
+        && crate::generics::is_generic_relevant(ty)
+        && let Some(rendered) = render_resolved_var_type(ty)
+        && type_map().get(&word) != Some(rendered.as_str())
+    {
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!("`{}` `{}`", word, rendered),
+            }),
+            range: hover_range,
+        });
+    }
     if word.starts_with('$')
         && let Some(class_name) = type_map().get(&word)
     {
@@ -1000,7 +1281,7 @@ mod tests {
     fn hover_on_variable_shows_type() {
         let src = "<?php\n$obj = new Mailer();\n$obj";
         let doc = ParsedDoc::parse(src.to_string());
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(2, 2));
+        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(2, 2), None);
         assert!(h.is_some());
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1013,7 +1294,14 @@ mod tests {
     fn hover_on_builtin_class_shows_stub_info() {
         let src = "<?php\n$pdo = new PDO('sqlite::memory:');\n$pdo->query('SELECT 1');";
         let doc = ParsedDoc::parse(src.to_string());
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(1, 12));
+        let h = hover_at(
+            src,
+            &doc,
+            &build_method_returns(&doc),
+            &[],
+            pos(1, 12),
+            None,
+        );
         assert!(h.is_some(), "should hover on PDO");
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1027,7 +1315,7 @@ mod tests {
         let src = "<?php\nclass User { public string $name; public int $age; }\n$u = new User();\n$u->name";
         let doc = ParsedDoc::parse(src.to_string());
         // "name" in "$u->name" — col 4 in "$u->name"
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(3, 5));
+        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(3, 5), None);
         assert!(h.is_some(), "expected hover on property");
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1043,7 +1331,7 @@ mod tests {
         let src = "<?php\nclass Point {\n    public function __construct(\n        public float $x,\n        public float $y,\n    ) {}\n}\n$p = new Point(1.0, 2.0);\n$p->x";
         let doc = ParsedDoc::parse(src.to_string());
         // "x" at the end of "$p->x"
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(8, 4));
+        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(8, 4), None);
         assert!(h.is_some(), "expected hover on promoted property");
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1065,7 +1353,14 @@ mod tests {
         let src = "<?php\nclass User {\n    /**\n     * Create a user.\n     * @param string $name The user's display name\n     * @param int $age The user's age\n     * @return void\n     * @throws \\InvalidArgumentException\n     */\n    public function __construct(\n        public string $name,\n        public int $age,\n    ) {}\n}\n$u = new User('Alice', 30);\n$u->name";
         let doc = ParsedDoc::parse(src.to_string());
         // hover on "$u->name" — cursor on 'name' (line 15, char 4 after "$u->")
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(15, 4));
+        let h = hover_at(
+            src,
+            &doc,
+            &build_method_returns(&doc),
+            &[],
+            pos(15, 4),
+            None,
+        );
         assert!(h.is_some(), "expected hover on promoted property");
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1099,7 +1394,14 @@ mod tests {
         // hover should still work (showing type) without appending any docblock section.
         let src = "<?php\nclass User {\n    /**\n     * Create a user.\n     * @return void\n     */\n    public function __construct(\n        public string $name,\n    ) {}\n}\n$u = new User('Alice');\n$u->name";
         let doc = ParsedDoc::parse(src.to_string());
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(11, 4));
+        let h = hover_at(
+            src,
+            &doc,
+            &build_method_returns(&doc),
+            &[],
+            pos(11, 4),
+            None,
+        );
         assert!(h.is_some(), "expected hover on promoted property");
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1125,6 +1427,7 @@ mod tests {
                 line: 1,
                 character: 20,
             },
+            None,
         );
         assert!(h.is_some());
         let text = match h.unwrap().contents {
@@ -1173,7 +1476,7 @@ mod tests {
         let src = "<?php\nclass User {\n    /** The user's display name. */\n    public string $name;\n}\n$u = new User();\n$u->name";
         let doc = ParsedDoc::parse(src.to_string());
         // "name" in "$u->name" at the last line
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(6, 5));
+        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(6, 5), None);
         assert!(h.is_some(), "expected hover on property with docblock");
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1196,7 +1499,7 @@ mod tests {
         // to_markdown() never rendered var_type.
         let src = "<?php\nclass User {\n    /** @var string */\n    public $name;\n}\n$u = new User();\n$u->name";
         let doc = ParsedDoc::parse(src.to_string());
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(6, 5));
+        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(6, 5), None);
         assert!(h.is_some(), "expected hover on @var-only property");
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1218,7 +1521,7 @@ mod tests {
     fn hover_on_property_with_var_tag_and_description() {
         let src = "<?php\nclass User {\n    /** @var string The display name. */\n    public $name;\n}\n$u = new User();\n$u->name";
         let doc = ParsedDoc::parse(src.to_string());
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(6, 5));
+        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(6, 5), None);
         assert!(
             h.is_some(),
             "expected hover on property with @var description"
@@ -1244,7 +1547,14 @@ mod tests {
         let src = "<?php\nclass Counter {\n    public int $count = 0;\n    public function increment(): void {\n        $this->count;\n    }\n}";
         let doc = ParsedDoc::parse(src.to_string());
         // "$this->count" — "count" starts at col 15 in "        $this->count;"
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(4, 16));
+        let h = hover_at(
+            src,
+            &doc,
+            &build_method_returns(&doc),
+            &[],
+            pos(4, 16),
+            None,
+        );
         assert!(h.is_some(), "expected hover on $this->property");
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1260,7 +1570,7 @@ mod tests {
         let src = "<?php\nclass Profile { public string $bio; }\n$p = new Profile();\n$p?->bio";
         let doc = ParsedDoc::parse(src.to_string());
         // "bio" in "$p?->bio" at line 3, col 5
-        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(3, 5));
+        let h = hover_at(src, &doc, &build_method_returns(&doc), &[], pos(3, 5), None);
         assert!(h.is_some(), "expected hover on nullsafe property access");
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,

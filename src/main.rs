@@ -26,6 +26,7 @@ mod file_rename;
 mod folding;
 mod formatting;
 mod generate_action;
+mod generics;
 mod hover;
 mod implement_action;
 mod implementation;

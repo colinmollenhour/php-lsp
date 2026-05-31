@@ -82,6 +82,13 @@ pub struct DocumentStore {
     /// Pass-2 analysis, and lazy-loads dependencies via PSR-4. Built lazily
     /// on first use; rebuilt when PHP version changes.
     analysis_session: Mutex<Option<(mir_analyzer::PhpVersion, Arc<mir_analyzer::AnalysisSession>)>>,
+    /// Generic-aware resolved-symbol cache (WP2). Populated as a side effect of
+    /// the diagnostics pass (`get_semantic_issues_salsa`) using the same
+    /// `Arc<str>` analysed, validated on read via `Arc::ptr_eq`. Lets hover /
+    /// inlay / type-def / completion consult mir's resolved generic types
+    /// without ever running analysis on a request path. See
+    /// [`crate::generics::ResolvedSymbolCache`].
+    resolved_symbols: crate::generics::ResolvedSymbolCache,
 }
 
 impl Default for DocumentStore {
@@ -108,7 +115,17 @@ impl DocumentStore {
             workspace,
             psr4: Arc::new(ArcSwap::from_pointee(Psr4Map::empty())),
             analysis_session: Mutex::new(None),
+            resolved_symbols: crate::generics::ResolvedSymbolCache::new(),
         }
+    }
+
+    /// Borrow the generic-aware resolved-symbol cache (WP2).
+    ///
+    /// Read-only accessor used by [`crate::generics::resolved_type_at`]; the
+    /// cache is populated as a side effect of the diagnostics pass and validated
+    /// against the caller's current text `Arc` on read.
+    pub fn resolved_symbol_cache(&self) -> &crate::generics::ResolvedSymbolCache {
+        &self.resolved_symbols
     }
 
     /// Get or build the `AnalysisSession` for the given PHP version. Rebuilds
@@ -338,6 +355,8 @@ impl DocumentStore {
         self.sync_workspace_files();
         self.text_cache.remove(uri);
         self.parsed_cache.remove(uri);
+        // WP2: drop any cached resolved symbols for this file.
+        self.resolved_symbols.remove(uri);
         // Also evict the file from the `AnalysisSession`'s internal state so
         // workspace symbol queries don't keep returning the deleted file's
         // declarations. Cheap when the session hasn't ingested this file.
@@ -612,10 +631,12 @@ impl DocumentStore {
         let session = self.analysis_session(php_version);
 
         let file: Arc<str> = Arc::from(uri.as_str());
+        // The exact source `Arc<str>` analysed; reused both for ingest and as the
+        // resolved-symbol cache key so reads can validate via `Arc::ptr_eq`.
         let source = doc.source_arc();
         {
             let _s = tracing::debug_span!("session.ingest_file").entered();
-            session.ingest_file(file.clone(), source);
+            session.ingest_file(file.clone(), source.clone());
         }
         // Pre-load every imported class via PSR-4 so Pass-2 doesn't emit
         // spurious `UndefinedClass` for classes that ARE on disk but haven't
@@ -641,6 +662,13 @@ impl DocumentStore {
             let analyzer = mir_analyzer::FileAnalyzer::new(&session);
             analyzer.analyze(file.clone(), doc.source(), &owned_program, &source_map)
         };
+        // WP2: capture mir's generic-aware resolved symbols as a side effect of
+        // this (the only) analyze pass, keyed by the same `Arc<str>` we analysed.
+        // This is the cache that hover/inlay/type-def/completion read via
+        // `resolved_type_at`; consuming `.issues` below would move `analysis`, so
+        // we move `.symbols` out first.
+        self.resolved_symbols
+            .insert(uri.clone(), source, Arc::from(analysis.symbols));
         // Workspace-level class issues for this file (circular inheritance,
         // override violations, abstract-method gaps).
         let class_issues = {
@@ -1172,5 +1200,100 @@ mod tests {
                 "{u} should not have re-parsed because of an unrelated edit"
             );
         }
+    }
+
+    // ── WP2: resolved-symbol cache lifecycle ───────────────────────────────
+
+    /// The diagnostics pass must populate the resolved-symbol cache as a side
+    /// effect, and `resolved_type_at` must return the generic-aware type for an
+    /// expression — without ever running analysis on the read path.
+    #[test]
+    fn diagnostics_pass_populates_resolved_symbol_cache() {
+        let store = DocumentStore::new();
+        let u = uri("/cache/coll.php");
+        let src =
+            "<?php\nclass Box { public function get(): int { return 1; } }\n$b = new Box();\n$b;\n";
+        store.mirror_text(&u, src);
+
+        // Before any diagnostics pass the cache is empty.
+        assert!(!store.resolved_symbol_cache().contains(&u));
+
+        // Running diagnostics (the only analyze pass) populates the cache.
+        let _ = store.get_semantic_issues_salsa(&u);
+        assert!(
+            store.resolved_symbol_cache().contains(&u),
+            "diagnostics pass must populate the resolved-symbol cache"
+        );
+
+        // A read with the current text Arc resolves a type at the `$b;` use.
+        let doc = store.get_doc_salsa(&u).unwrap();
+        let text_arc = doc.source_arc();
+        let off = src.rfind("$b").unwrap() as u32 + 1; // inside the `$b` token
+        let ty = crate::generics::resolved_type_at(&store, &u, &text_arc, off);
+        assert!(
+            ty.is_some(),
+            "resolved_type_at should find a symbol for `$b` after a diagnostics pass"
+        );
+    }
+
+    /// After an edit produces a fresh source `Arc<str>`, a read against the new
+    /// text degrades to `None` (stale cache, `Arc::ptr_eq` mismatch) — no panic,
+    /// and crucially no analyze is run on the read path.
+    #[test]
+    fn resolved_type_at_degrades_to_none_after_edit() {
+        let store = DocumentStore::new();
+        let u = uri("/cache/edit.php");
+        let src = "<?php\n$x = 1;\n$x;\n";
+        store.mirror_text(&u, src);
+        let _ = store.get_semantic_issues_salsa(&u);
+
+        // Edit the document: this allocates a NEW source Arc for the same URL.
+        let new_src = "<?php\n$x = 2;\n$x;\n";
+        store.mirror_text(&u, new_src);
+
+        let doc = store.get_doc_salsa(&u).unwrap();
+        let new_text_arc = doc.source_arc();
+        let off = new_src.rfind("$x").unwrap() as u32 + 1;
+
+        // The cache entry still exists (it self-evicts only on the NEXT analyze
+        // or on remove), but the stored Arc no longer matches the current text,
+        // so the read must degrade to None rather than return stale symbols.
+        assert!(store.resolved_symbol_cache().contains(&u));
+        let ty = crate::generics::resolved_type_at(&store, &u, &new_text_arc, off);
+        assert!(
+            ty.is_none(),
+            "stale cache (post-edit Arc mismatch) must degrade to None"
+        );
+    }
+
+    /// `resolved_type_at` returns mir's generic-aware type for an annotated
+    /// variable (`@var Collection<User>`), rendered as `Collection<User>`.
+    #[test]
+    fn resolved_type_at_returns_generic_type() {
+        let store = DocumentStore::new();
+        let u = uri("/cache/generic.php");
+        let src = "<?php\n/** @template T */\nclass Collection {}\nclass User {}\n/** @var Collection<User> $c */\n$c = new Collection();\n$c;\n";
+        store.mirror_text(&u, src);
+        let _ = store.get_semantic_issues_salsa(&u);
+        let doc = store.get_doc_salsa(&u).unwrap();
+        let text_arc = doc.source_arc();
+        // Offset inside the `$c` of the final `$c;` statement.
+        let off = src.rfind("$c").unwrap() as u32 + 1;
+        let ty = crate::generics::resolved_type_at(&store, &u, &text_arc, off)
+            .expect("expected a resolved type for the annotated variable");
+        let rendered = crate::generics::render_type(&ty, &crate::generics::ImportCtx::short());
+        assert_eq!(rendered, "Collection<User>");
+    }
+
+    /// `remove` must drop the resolved-symbol cache entry.
+    #[test]
+    fn remove_evicts_resolved_symbol_cache() {
+        let store = DocumentStore::new();
+        let u = uri("/cache/rm.php");
+        store.mirror_text(&u, "<?php\n$x = 1;\n$x;\n");
+        let _ = store.get_semantic_issues_salsa(&u);
+        assert!(store.resolved_symbol_cache().contains(&u));
+        store.remove(&u);
+        assert!(!store.resolved_symbol_cache().contains(&u));
     }
 }

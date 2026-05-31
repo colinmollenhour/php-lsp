@@ -19,6 +19,52 @@ struct FuncDef {
     return_type: Option<String>,
 }
 
+/// Read-only resolver of a generic-aware type at a byte offset (WP2).
+///
+/// Backed by [`crate::generics::resolved_type_at`]; returns the mir-resolved
+/// [`mir_types::Type`] at the offset, or `None` (stale/absent cache, or no
+/// symbol there). Never analyses.
+pub type TypeResolver<'a> = dyn Fn(u32) -> Option<mir_types::Type> + 'a;
+
+/// Context threaded through the inlay walker: the legacy `TypeMap` plus an
+/// optional generic-aware resolver. When the resolver yields a type carrying
+/// generic args, type hints render it via `render_type`; otherwise the existing
+/// string path is preserved byte-for-byte.
+struct HintCtx<'a> {
+    type_map: &'a TypeMap,
+    resolver: Option<&'a TypeResolver<'a>>,
+}
+
+impl<'a> HintCtx<'a> {
+    /// Render the generic-aware type mir resolved at `byte_off` for a `: Type`
+    /// hint. Returns `None` when there is no resolver, no resolved symbol at the
+    /// offset, or the type renders empty/`mixed` (no useful hint).
+    ///
+    /// Unlike the original implementation this does **not** gate on the rendered
+    /// text containing `<`: that dropped the core feature for plain template
+    /// substitutions (`@return T` with `T = User` renders as `User`, no
+    /// brackets). Callers instead prefer this value only when it *differs* from
+    /// the legacy string, so a non-generic hint stays byte-identical while a
+    /// genuine substitution (plain or bracketed) surfaces.
+    fn generic_hint_at(&self, byte_off: u32) -> Option<String> {
+        let ty = (self.resolver?)(byte_off)?;
+        // Carryover-1: only a GENERIC-RELEVANT resolved type (an object/named/
+        // template type, or a container carrying one) may override the legacy
+        // string. A bare scalar/literal/`mixed` resolved type is dropped here so
+        // `prefer_resolved` falls back to the legacy path — otherwise any
+        // mir-resolvable non-generic variable (`$x = 1; $x;`) would get a resolved
+        // inlay even for non-generic code, broadening behaviour beyond generics.
+        if !crate::generics::is_generic_relevant(&ty) {
+            return None;
+        }
+        let rendered = crate::generics::render_type(&ty, &crate::generics::ImportCtx::short());
+        if rendered.is_empty() || rendered == "mixed" {
+            return None;
+        }
+        Some(rendered)
+    }
+}
+
 /// Returns parameter-name inlay hints AND return-type hints for all
 /// function/method declarations and calls in `doc`.
 ///
@@ -26,25 +72,37 @@ struct FuncDef {
 /// in the current document fall back to this workspace index so that calls to
 /// cross-file functions/methods still get parameter-name hints.
 pub fn inlay_hints(
-    _source: &str,
+    source: &str,
     doc: &ParsedDoc,
     doc_returns: Option<&MethodReturnsMap>,
     range: Range,
     workspace_files: &[(Url, Arc<FileIndex>)],
 ) -> Vec<InlayHint> {
+    inlay_hints_resolved(source, doc, doc_returns, range, workspace_files, None)
+}
+
+/// Generic-aware inlay hints (WP2). Identical to [`inlay_hints`] except that
+/// `resolver` lets type hints prefer mir's resolved generic type
+/// (`Collection<User>`) when available; on `None`/non-generic it preserves the
+/// existing string path exactly.
+pub fn inlay_hints_resolved(
+    _source: &str,
+    doc: &ParsedDoc,
+    doc_returns: Option<&MethodReturnsMap>,
+    range: Range,
+    workspace_files: &[(Url, Arc<FileIndex>)],
+    resolver: Option<&TypeResolver<'_>>,
+) -> Vec<InlayHint> {
     let sv = doc.view();
     let mut defs = collect_defs(&doc.program().stmts);
     collect_defs_from_workspace(workspace_files, &mut defs);
     let type_map = TypeMap::from_doc_with_meta(doc, None, doc_returns);
+    let ctx = HintCtx {
+        type_map: &type_map,
+        resolver,
+    };
     let mut hints = Vec::new();
-    hints_in_stmts(
-        sv,
-        &doc.program().stmts,
-        &defs,
-        &type_map,
-        range,
-        &mut hints,
-    );
+    hints_in_stmts(sv, &doc.program().stmts, &defs, &ctx, range, &mut hints);
     hints
 }
 
@@ -249,12 +307,12 @@ fn hints_in_stmts(
     sv: SourceView<'_>,
     stmts: &[Stmt<'_, '_>],
     defs: &HashMap<String, FuncDef>,
-    type_map: &TypeMap,
+    ctx: &HintCtx,
     range: Range,
     out: &mut Vec<InlayHint>,
 ) {
     for stmt in stmts {
-        hints_in_stmt(sv, stmt, defs, type_map, range, out);
+        hints_in_stmt(sv, stmt, defs, ctx, range, out);
     }
 }
 
@@ -262,27 +320,27 @@ fn hints_in_stmt(
     sv: SourceView<'_>,
     stmt: &Stmt<'_, '_>,
     defs: &HashMap<String, FuncDef>,
-    type_map: &TypeMap,
+    ctx: &HintCtx,
     range: Range,
     out: &mut Vec<InlayHint>,
 ) {
     match &stmt.kind {
-        StmtKind::Expression(e) => hints_in_expr(sv, e, defs, type_map, range, out),
-        StmtKind::Return(Some(v)) => hints_in_expr(sv, v, defs, type_map, range, out),
+        StmtKind::Expression(e) => hints_in_expr(sv, e, defs, ctx, range, out),
+        StmtKind::Return(Some(v)) => hints_in_expr(sv, v, defs, ctx, range, out),
         StmtKind::Echo(exprs) => {
             for expr in exprs.iter() {
-                hints_in_expr(sv, expr, defs, type_map, range, out);
+                hints_in_expr(sv, expr, defs, ctx, range, out);
             }
         }
         StmtKind::Function(f) => {
-            hints_in_stmts(sv, &f.body.stmts, defs, type_map, range, out);
+            hints_in_stmts(sv, &f.body.stmts, defs, ctx, range, out);
         }
         StmtKind::Class(c) => {
             for member in c.body.members.iter() {
                 if let ClassMemberKind::Method(m) = &member.kind
                     && let Some(body) = &m.body
                 {
-                    hints_in_stmts(sv, &body.stmts, defs, type_map, range, out);
+                    hints_in_stmts(sv, &body.stmts, defs, ctx, range, out);
                 }
             }
         }
@@ -291,7 +349,7 @@ fn hints_in_stmt(
                 if let ClassMemberKind::Method(m) = &member.kind
                     && let Some(body) = &m.body
                 {
-                    hints_in_stmts(sv, &body.stmts, defs, type_map, range, out);
+                    hints_in_stmts(sv, &body.stmts, defs, ctx, range, out);
                 }
             }
         }
@@ -300,50 +358,59 @@ fn hints_in_stmt(
                 if let EnumMemberKind::Method(m) = &member.kind
                     && let Some(body) = &m.body
                 {
-                    hints_in_stmts(sv, &body.stmts, defs, type_map, range, out);
+                    hints_in_stmts(sv, &body.stmts, defs, ctx, range, out);
                 }
             }
         }
         StmtKind::Namespace(ns) => {
             if let NamespaceBody::Braced(inner) = &ns.body {
-                hints_in_stmts(sv, &inner.stmts, defs, type_map, range, out);
+                hints_in_stmts(sv, &inner.stmts, defs, ctx, range, out);
             }
         }
         StmtKind::If(i) => {
-            hints_in_expr(sv, &i.condition, defs, type_map, range, out);
-            hints_in_stmt(sv, i.then_branch, defs, type_map, range, out);
+            hints_in_expr(sv, &i.condition, defs, ctx, range, out);
+            hints_in_stmt(sv, i.then_branch, defs, ctx, range, out);
             for ei in i.elseif_branches.iter() {
-                hints_in_expr(sv, &ei.condition, defs, type_map, range, out);
-                hints_in_stmt(sv, &ei.body, defs, type_map, range, out);
+                hints_in_expr(sv, &ei.condition, defs, ctx, range, out);
+                hints_in_stmt(sv, &ei.body, defs, ctx, range, out);
             }
             if let Some(e) = &i.else_branch {
-                hints_in_stmt(sv, e, defs, type_map, range, out);
+                hints_in_stmt(sv, e, defs, ctx, range, out);
             }
         }
         StmtKind::While(w) => {
-            hints_in_expr(sv, &w.condition, defs, type_map, range, out);
-            hints_in_stmt(sv, w.body, defs, type_map, range, out);
+            hints_in_expr(sv, &w.condition, defs, ctx, range, out);
+            hints_in_stmt(sv, w.body, defs, ctx, range, out);
         }
         StmtKind::For(f) => {
             for e in f.init.iter() {
-                hints_in_expr(sv, e, defs, type_map, range, out);
+                hints_in_expr(sv, e, defs, ctx, range, out);
             }
             for cond in f.condition.iter() {
-                hints_in_expr(sv, cond, defs, type_map, range, out);
+                hints_in_expr(sv, cond, defs, ctx, range, out);
             }
             for e in f.update.iter() {
-                hints_in_expr(sv, e, defs, type_map, range, out);
+                hints_in_expr(sv, e, defs, ctx, range, out);
             }
-            hints_in_stmt(sv, f.body, defs, type_map, range, out);
+            hints_in_stmt(sv, f.body, defs, ctx, range, out);
         }
         StmtKind::Foreach(f) => {
-            hints_in_expr(sv, &f.expr, defs, type_map, range, out);
+            hints_in_expr(sv, &f.expr, defs, ctx, range, out);
             // Emit type hint after the value variable, e.g. `foreach ($arr as $item /* : Foo */)`.
             if let ExprKind::Variable(val_name) = &f.value.kind {
-                let key = format!("${}", val_name.as_str());
-                if let Some(ty) = type_map.get(&key) {
-                    let pos = sv.position_of(f.value.span.end);
-                    if pos_in_range(pos, range) {
+                let pos = sv.position_of(f.value.span.end);
+                // VF8: range-check before resolving — `generic_hint_at` scans the
+                // resolved-symbol slice, so skipping out-of-range hints first
+                // avoids that work for hints we'd discard.
+                if pos_in_range(pos, range) {
+                    let key = format!("${}", val_name.as_str());
+                    let legacy = ctx.type_map.get(&key);
+                    // WP2: prefer mir's generic-aware element type when it
+                    // *differs* from the legacy string (a genuine substitution),
+                    // not merely when it carries `<...>`.
+                    let generic = ctx.generic_hint_at(f.value.span.start);
+                    let ty = prefer_resolved(generic.as_deref(), legacy);
+                    if let Some(ty) = ty {
                         out.push(make_foreach_type_hint(pos, ty));
                     }
                 }
@@ -352,26 +419,29 @@ fn hints_in_stmt(
             if let Some(key_expr) = &f.key
                 && let ExprKind::Variable(key_name) = &key_expr.kind
             {
-                let key = format!("${}", key_name.as_str());
-                if let Some(ty) = type_map.get(&key) {
-                    let pos = sv.position_of(key_expr.span.end);
-                    if pos_in_range(pos, range) {
+                let pos = sv.position_of(key_expr.span.end);
+                if pos_in_range(pos, range) {
+                    let key = format!("${}", key_name.as_str());
+                    let legacy = ctx.type_map.get(&key);
+                    let generic = ctx.generic_hint_at(key_expr.span.start);
+                    let ty = prefer_resolved(generic.as_deref(), legacy);
+                    if let Some(ty) = ty {
                         out.push(make_foreach_type_hint(pos, ty));
                     }
                 }
             }
-            hints_in_stmt(sv, f.body, defs, type_map, range, out);
+            hints_in_stmt(sv, f.body, defs, ctx, range, out);
         }
         StmtKind::TryCatch(t) => {
-            hints_in_stmts(sv, &t.body.stmts, defs, type_map, range, out);
+            hints_in_stmts(sv, &t.body.stmts, defs, ctx, range, out);
             for catch in t.catches.iter() {
-                hints_in_stmts(sv, &catch.body.stmts, defs, type_map, range, out);
+                hints_in_stmts(sv, &catch.body.stmts, defs, ctx, range, out);
             }
             if let Some(finally) = &t.finally {
-                hints_in_stmts(sv, &finally.stmts, defs, type_map, range, out);
+                hints_in_stmts(sv, &finally.stmts, defs, ctx, range, out);
             }
         }
-        StmtKind::Block(stmts) => hints_in_stmts(sv, &stmts.stmts, defs, type_map, range, out),
+        StmtKind::Block(stmts) => hints_in_stmts(sv, &stmts.stmts, defs, ctx, range, out),
         _ => {}
     }
 }
@@ -380,7 +450,7 @@ fn hints_in_expr(
     sv: SourceView<'_>,
     expr: &Expr<'_, '_>,
     defs: &HashMap<String, FuncDef>,
-    type_map: &TypeMap,
+    ctx: &HintCtx,
     range: Range,
     out: &mut Vec<InlayHint>,
 ) {
@@ -399,9 +469,9 @@ fn hints_in_expr(
             {
                 emit_param_hints(sv, &f.args, def, &k, range, out);
             }
-            hints_in_expr(sv, f.name, defs, type_map, range, out);
+            hints_in_expr(sv, f.name, defs, ctx, range, out);
             for arg in f.args.iter() {
-                hints_in_expr(sv, &arg.value, defs, type_map, range, out);
+                hints_in_expr(sv, &arg.value, defs, ctx, range, out);
             }
         }
         ExprKind::MethodCall(m) | ExprKind::NullsafeMethodCall(m) => {
@@ -410,9 +480,9 @@ fn hints_in_expr(
             {
                 emit_param_hints(sv, &m.args, def, name, range, out);
             }
-            hints_in_expr(sv, m.object, defs, type_map, range, out);
+            hints_in_expr(sv, m.object, defs, ctx, range, out);
             for arg in m.args.iter() {
-                hints_in_expr(sv, &arg.value, defs, type_map, range, out);
+                hints_in_expr(sv, &arg.value, defs, ctx, range, out);
             }
         }
         ExprKind::StaticMethodCall(m) => {
@@ -421,9 +491,9 @@ fn hints_in_expr(
             {
                 emit_param_hints(sv, &m.args, def, name, range, out);
             }
-            hints_in_expr(sv, m.class, defs, type_map, range, out);
+            hints_in_expr(sv, m.class, defs, ctx, range, out);
             for arg in m.args.iter() {
-                hints_in_expr(sv, &arg.value, defs, type_map, range, out);
+                hints_in_expr(sv, &arg.value, defs, ctx, range, out);
             }
         }
         ExprKind::New(n) => {
@@ -433,44 +503,44 @@ fn hints_in_expr(
                 emit_param_hints(sv, &n.args, def, class_name, range, out);
             }
             for arg in n.args.iter() {
-                hints_in_expr(sv, &arg.value, defs, type_map, range, out);
+                hints_in_expr(sv, &arg.value, defs, ctx, range, out);
             }
         }
         ExprKind::Assign(a) => {
             // Emit return-type hint after a function call on the RHS
-            emit_return_type_hint(sv, a.value, defs, range, out);
-            hints_in_expr(sv, a.target, defs, type_map, range, out);
-            hints_in_expr(sv, a.value, defs, type_map, range, out);
+            emit_return_type_hint(sv, a.value, defs, ctx, range, out);
+            hints_in_expr(sv, a.target, defs, ctx, range, out);
+            hints_in_expr(sv, a.value, defs, ctx, range, out);
         }
         // Walk into closure bodies so nested function calls get hints.
         ExprKind::Closure(c) => {
-            hints_in_stmts(sv, &c.body.stmts, defs, type_map, range, out);
+            hints_in_stmts(sv, &c.body.stmts, defs, ctx, range, out);
         }
         // Walk into arrow function bodies so nested calls get hints.
         // No return-type hint: the annotation is already visible in the source,
         // and php-lsp has no type inference to supply hints for unannotated fns.
         ExprKind::ArrowFunction(a) => {
-            hints_in_expr(sv, a.body, defs, type_map, range, out);
+            hints_in_expr(sv, a.body, defs, ctx, range, out);
         }
-        ExprKind::Parenthesized(e) => hints_in_expr(sv, e, defs, type_map, range, out),
+        ExprKind::Parenthesized(e) => hints_in_expr(sv, e, defs, ctx, range, out),
         ExprKind::Ternary(t) => {
-            hints_in_expr(sv, t.condition, defs, type_map, range, out);
+            hints_in_expr(sv, t.condition, defs, ctx, range, out);
             if let Some(then_expr) = t.then_expr {
-                hints_in_expr(sv, then_expr, defs, type_map, range, out);
+                hints_in_expr(sv, then_expr, defs, ctx, range, out);
             }
-            hints_in_expr(sv, t.else_expr, defs, type_map, range, out);
+            hints_in_expr(sv, t.else_expr, defs, ctx, range, out);
         }
         ExprKind::NullCoalesce(n) => {
-            hints_in_expr(sv, n.left, defs, type_map, range, out);
-            hints_in_expr(sv, n.right, defs, type_map, range, out);
+            hints_in_expr(sv, n.left, defs, ctx, range, out);
+            hints_in_expr(sv, n.right, defs, ctx, range, out);
         }
         ExprKind::Binary(b) => {
-            hints_in_expr(sv, b.left, defs, type_map, range, out);
-            hints_in_expr(sv, b.right, defs, type_map, range, out);
+            hints_in_expr(sv, b.left, defs, ctx, range, out);
+            hints_in_expr(sv, b.right, defs, ctx, range, out);
         }
         ExprKind::CloneWith(target, withs) => {
-            hints_in_expr(sv, target, defs, type_map, range, out);
-            hints_in_expr(sv, withs, defs, type_map, range, out);
+            hints_in_expr(sv, target, defs, ctx, range, out);
+            hints_in_expr(sv, withs, defs, ctx, range, out);
         }
         _ => {}
     }
@@ -511,13 +581,22 @@ fn emit_return_type_hint(
     sv: SourceView<'_>,
     expr: &Expr<'_, '_>,
     defs: &HashMap<String, FuncDef>,
+    ctx: &HintCtx,
     range: Range,
     out: &mut Vec<InlayHint>,
 ) {
-    let name = match &expr.kind {
-        ExprKind::FunctionCall(f) => ident_name(f.name),
-        ExprKind::MethodCall(m) | ExprKind::NullsafeMethodCall(m) => ident_name(m.method),
-        ExprKind::StaticMethodCall(m) => ident_name(m.method),
+    // Resolve the type at the CALLABLE-NAME span — the function name, the
+    // method name after `->`/`?->`, or the static method name after `::` — not
+    // `expr.span.start` (which lands inside the receiver, e.g. `$c` in
+    // `$c->first()`, whose innermost recorded symbol is the receiver type
+    // `Collection<User>` rather than the call result `User`). mir records the
+    // call result at the method-name span.
+    let (name, name_off) = match &expr.kind {
+        ExprKind::FunctionCall(f) => (ident_name(f.name), f.name.span.start),
+        ExprKind::MethodCall(m) | ExprKind::NullsafeMethodCall(m) => {
+            (ident_name(m.method), m.method.span.start)
+        }
+        ExprKind::StaticMethodCall(m) => (ident_name(m.method), m.method.span.start),
         _ => return,
     };
     if let Some(name) = name
@@ -528,8 +607,16 @@ fn emit_return_type_hint(
             return;
         }
         let pos = sv.position_of(expr.span.end);
+        // VF8: range-check before the resolved-symbol scan in `generic_hint_at`.
         if pos_in_range(pos, range) {
-            out.push(make_return_hint(pos, ret_type, name));
+            // WP2: prefer mir's generic-aware return type (`Collection<User>` /
+            // substituted `User`) resolved at the call-name span, but only when
+            // it *differs* from the declared string (a genuine substitution).
+            let generic = ctx.generic_hint_at(name_off);
+            let ret_type: &str = prefer_resolved(generic.as_deref(), Some(ret_type)).unwrap_or("");
+            if !ret_type.is_empty() {
+                out.push(make_return_hint(pos, ret_type, name));
+            }
         }
     }
 }
@@ -579,6 +666,19 @@ fn make_foreach_type_hint(position: Position, ty: &str) -> InlayHint {
         padding_right: None,
         data: None,
     }
+}
+
+/// Choose between mir's resolved-type string and the legacy declared/inferred
+/// string for an inlay `: Type` hint.
+///
+/// Prefers the resolved value whenever it is present — that is the more precise
+/// generic-aware type (`Collection<User>`, or a plain substituted `User`). Falls
+/// back to the legacy string when no symbol was resolved. When the resolved value
+/// equals the legacy one the output is identical either way, so non-generic hints
+/// stay byte-for-byte unchanged; a genuine substitution (whether or not it carries
+/// `<...>`) surfaces.
+fn prefer_resolved<'a>(resolved: Option<&'a str>, legacy: Option<&'a str>) -> Option<&'a str> {
+    resolved.or(legacy)
 }
 
 fn pos_in_range(pos: Position, range: Range) -> bool {
