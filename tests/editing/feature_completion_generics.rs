@@ -416,3 +416,112 @@ class Box {
         "mixed receiver must not produce generic-substituted detail, got:\n{out}"
     );
 }
+
+/// E3 (the headline engine enhancement) — CROSS-FILE UNANNOTATED generic
+/// member completion. A generic `Box<T>` with a promoted
+/// `__construct(public T $value)` and an *unannotated* `get()` (body
+/// `return $this->value;`, NO `@return`) is defined in `box.php`; the element
+/// type `User` lives in `user.php`; the usage is in `main.php`. mir 0.31
+/// infers `new Box(new User())` as `Box<User>` (constructor-arg class-template
+/// inference) and resolves the unannotated cross-file `get()` to the element
+/// type `User`. Member completion on the stored result therefore lists
+/// `User`'s members (`$email`, `name()`).
+#[tokio::test]
+async fn cross_file_unannotated_generic_member_completion_lists_element_members() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion(
+            r#"//- /box.php
+<?php
+/** @template T */
+class Box {
+    public function __construct(public T $value) {}
+    public function get() { return $this->value; }
+}
+//- /user.php
+<?php
+class User {
+    public function name(): string {}
+    public string $email;
+}
+//- /main.php
+<?php
+$u = (new Box(new User()))->get();
+$u->$0
+"#,
+        )
+        .await;
+    assert!(
+        out.contains("Property    $email"),
+        "expected element type `User`'s property `$email` in member completion, got:\n{out}"
+    );
+    assert!(
+        out.contains("Method      name"),
+        "expected element type `User`'s method `name` in member completion, got:\n{out}"
+    );
+}
+
+/// E3 (cross-file, hover): the stored result of the unannotated cross-file
+/// `get()` hovers as the element type. With an object element type (`User`)
+/// the resolved type is generic-relevant, so the resolved-type override fires
+/// and hover renders `User` (the legacy path could never resolve a
+/// `(new Box(new User()))->get()` chain across files).
+#[tokio::test]
+async fn cross_file_unannotated_generic_return_hover_shows_element_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_hover(
+            r#"//- /box.php
+<?php
+/** @template T */
+class Box {
+    public function __construct(public T $value) {}
+    public function get() { return $this->value; }
+}
+//- /user.php
+<?php
+class User {
+    public function name(): string {}
+    public string $email;
+}
+//- /main.php
+<?php
+$u = (new Box(new User()))->get();
+$u$0;
+"#,
+        )
+        .await;
+    expect![[r#"`$u` `User`"#]].assert_eq(&out);
+}
+
+/// E3 (constructor-arg class-template inference + scalar-literal widening):
+/// `new Box(5)` infers `Box<int>` (NOT `Box<5>`). The element type surfaces in
+/// hover on the `new` result. This is the cross-file companion to the
+/// resolved-type-layer `int` assertion in
+/// `document_store::tests::cross_file_unannotated_generic_return_resolves_int`
+/// (where a bare scalar element type is intentionally gated out of the hover
+/// override by `is_generic_relevant`, but `Box<int>` itself is relevant).
+#[tokio::test]
+async fn cross_file_new_infers_generic_type_param_from_constructor_arg() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_hover(
+            r#"//- /box.php
+<?php
+/** @template T */
+class Box {
+    public function __construct(public T $value) {}
+    public function get() { return $this->value; }
+}
+//- /main.php
+<?php
+$box = new Box(5);
+$box$0;
+"#,
+        )
+        .await;
+    expect![[r#"`$box` `Box<int>`"#]].assert_eq(&out);
+}

@@ -1285,6 +1285,41 @@ mod tests {
         assert_eq!(rendered, "Collection<User>");
     }
 
+    /// E3 (engine enhancement): a CROSS-FILE UNANNOTATED generic method-return
+    /// resolves to the element type at the resolved-type layer. `Box<T>` has a
+    /// promoted `__construct(public T $value)` and an *unannotated* `get()` whose
+    /// body is `return $this->value;`, defined in one file; `(new Box(5))->get()`
+    /// is used in another. mir 0.31 infers `new Box(5)` as `Box<int>` (literal
+    /// widened) and resolves the unannotated `get()` to the bound element type
+    /// `int`. (The LSP hover/inlay *override* is gated off for a bare scalar by
+    /// `is_generic_relevant`, so this asserts the resolution at the
+    /// `resolved_type_at` layer, where the relevance gate does not apply.)
+    #[test]
+    fn cross_file_unannotated_generic_return_resolves_int() {
+        let store = DocumentStore::new();
+        let box_u = uri("/e3/box.php");
+        let box_src = "<?php\n/** @template T */\nclass Box {\n    public function __construct(public T $value) {}\n    public function get() { return $this->value; }\n}\n";
+        store.index(box_u.clone(), box_src);
+        let main_u = uri("/e3/main.php");
+        let main_src = "<?php\n$b = (new Box(5))->get();\n$b;\n";
+        store.index(main_u.clone(), main_src);
+        // Run the (only) analyze pass on both files so the cross-file codebase is
+        // populated and the resolved-symbol cache is filled.
+        let _ = store.get_semantic_issues_salsa(&box_u);
+        let _ = store.get_semantic_issues_salsa(&main_u);
+
+        let doc = store.get_doc_salsa(&main_u).unwrap();
+        let text_arc = doc.source_arc();
+        let off = main_src.rfind("$b").unwrap() as u32 + 1; // inside the `$b;` use
+        let ty = crate::generics::resolved_type_at(&store, &main_u, &text_arc, off)
+            .expect("expected a resolved type for `$b` (cross-file unannotated get())");
+        let rendered = crate::generics::render_type(&ty, &crate::generics::ImportCtx::short());
+        assert_eq!(
+            rendered, "int",
+            "cross-file unannotated `get()` should resolve to the element type `int`, got: {rendered}"
+        );
+    }
+
     /// `remove` must drop the resolved-symbol cache entry.
     #[test]
     fn remove_evicts_resolved_symbol_cache() {

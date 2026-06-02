@@ -40,10 +40,16 @@ dhat = { version = "0.3", optional = true }
 mimalloc = { version = "0.1", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-mir-analyzer = "=0.30.0"
-mir-issues = "=0.30.0"
-mir-codebase = "=0.30.0"
-mir-types = "=0.30.0"
+# TEMPORARY: point at the enhanced mir fork branch (E1 single-line @template
+# over-read fix, E2 @template-extends/-implements (+@phpstan-*) alias
+# recognition, E3 constructor-arg class-template inference + unannotated
+# generic method-return resolution). Pending mir PR jorgsowa/mir#291 merging +
+# a crates.io release, after which this reverts to a normal
+# `mir-* = "=0.31.x"` version bump.
+mir-analyzer = { git = "https://github.com/colinmollenhour/mir", branch = "feat/generics-engine-enhancements" }
+mir-issues = { git = "https://github.com/colinmollenhour/mir", branch = "feat/generics-engine-enhancements" }
+mir-codebase = { git = "https://github.com/colinmollenhour/mir", branch = "feat/generics-engine-enhancements" }
+mir-types = { git = "https://github.com/colinmollenhour/mir", branch = "feat/generics-engine-enhancements" }
 php-rs-parser = "0.15"
 php-ast = "0.15"
 bumpalo = { version = "3", features = ["collections"] }

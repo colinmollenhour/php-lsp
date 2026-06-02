@@ -56,16 +56,6 @@ fn body_after_type_hint(s: &str) -> Option<String> {
     Some(split.next().unwrap_or("").trim().to_string())
 }
 
-/// Recover a `@template` parameter name from a (possibly over-read) string.
-///
-/// mir 0.30 over-reads single-line docblocks where tags share one line
-/// (`@template T @param T $x @return T` → name = `"T @param T $x @return T"`).
-/// The template name is always the first whitespace-separated token (mir routes
-/// any real bound into its own field), so take just that token.
-fn sanitize_template_name(raw: &str) -> String {
-    raw.split_whitespace().next().unwrap_or("").to_string()
-}
-
 /// For `@var Type [$name] description`: skip the type hint and an optional
 /// `$name`, then take the rest as description.
 fn body_after_type_and_var(s: &str) -> Option<String> {
@@ -376,29 +366,27 @@ pub fn parse_docblock(raw: &str) -> Docblock {
         None
     };
 
-    // Use mir 0.30's structured `templates` (name, bound `Type`, `Variance`).
-    // The mir-0.22 *multi-line* over-read bug (the template bound swallowing
-    // subsequent tag lines) is fixed on 0.30 — see the `template_bound_no_over_read`
-    // guard test. However, mir 0.30 still over-reads when several tags share a
-    // SINGLE line (`@template T @param T $x @return T`): the whole tail lands in
-    // the template *name* (`"T @param T $x @return T"`). Recover the real name by
-    // truncating at the first `@`-prefixed token. The structured `bound` Type and
-    // `Variance` from mir are kept as-is. mir does not capture the
-    // `@psalm-template` / `@phpstan-template` aliases, so those are parsed from
-    // the raw doc and appended.
+    // Use mir's structured `templates` (name, bound `Type`, `Variance`).
+    // mir 0.31 (E1) parses single-line docblocks cleanly: `@template T @param T
+    // $x @return T` now yields a template `name` of exactly `T` (the bound, if
+    // any, lands in its own field), so no name sanitisation is needed — the
+    // mir-provided name is used directly. The multi-line over-read bug is also
+    // fixed (see the `template_bound_no_over_read` guard test). mir still does
+    // not capture the `@psalm-template` / `@phpstan-template` aliases, so those
+    // are parsed from the raw doc and appended below.
     let render_ctx = ImportCtx::short();
     let mut templates: Vec<DocTemplate> = mir
         .templates
         .iter()
         .map(|(name, bound, variance)| DocTemplate {
-            name: sanitize_template_name(name),
+            name: name.clone(),
             bound: bound.as_ref().map(|b| render_type(b, &render_ctx)),
             bound_ty: bound.clone(),
             variance: *variance,
         })
         .collect();
 
-    // Supplement with psalm/phpstan template aliases that mir 0.30 does not
+    // Supplement with psalm/phpstan template aliases that mir does not
     // recognise. Preserve the prior LSP coverage for these tags.
     for t in &raw_doc.tags {
         if t.name != "psalm-template" && t.name != "phpstan-template" {
@@ -938,8 +926,10 @@ mod tests {
 
     #[test]
     fn template_name_no_single_line_over_read() {
-        // mir 0.30 over-reads when tags share a SINGLE line: the template name
-        // string becomes `"T @param T $x @return T"`. We must recover `T`.
+        // E1: a single-line docblock where several tags share one line
+        // (`@template T @param T $x @return T`) parses cleanly. mir 0.31 yields a
+        // template `name` of exactly `T` (no over-read of the trailing tags into
+        // the name) and no bound — proven without any php-lsp-side sanitisation.
         let raw = "/** @template T @param T $x @return T */";
         let db = parse_docblock(raw);
         assert_eq!(db.templates.len(), 1);
@@ -949,6 +939,29 @@ mod tests {
             db.templates[0].name
         );
         assert!(db.templates[0].bound.is_none());
+    }
+
+    #[test]
+    fn template_single_line_with_param_parses_clean_name() {
+        // E1 (engine enhancement): the exact single-line shape
+        // `/** @template T @param T $x */` parses cleanly — mir 0.31 no longer
+        // over-reads the trailing `@param T $x` into the template name, so the
+        // template name is exactly `T` (with no bound). Verified WITHOUT any
+        // php-lsp-side `sanitize_template_name` workaround (removed when consuming
+        // the enhanced mir).
+        let raw = "/** @template T @param T $x */";
+        let db = parse_docblock(raw);
+        assert_eq!(db.templates.len(), 1, "expected exactly one @template");
+        assert_eq!(
+            db.templates[0].name, "T",
+            "single-line @template name over-read: {:?}",
+            db.templates[0].name
+        );
+        assert!(
+            db.templates[0].bound.is_none(),
+            "single-line @template must have no bound, got: {:?}",
+            db.templates[0].bound
+        );
     }
 
     #[test]

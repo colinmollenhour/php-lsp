@@ -82,16 +82,12 @@ fn phpdoc_decl_hover(
     }
 
     // Reconstruct the enclosing `/** ... */` block so the structured parser sees
-    // the same content mir would.
-    //
-    // VF10: mir 0.30's docblock parser only recognises the bare `@extends` /
-    // `@implements` tag names — it does NOT map the `@template-extends` /
-    // `@template-implements` (or `@phpstan-extends`/`@phpstan-implements`)
-    // aliases onto `extends`/`implements`, so `db.extends`/`db.implements` would
-    // be empty for those forms. Normalise the alias tags to their canonical names
-    // in the reconstructed block before parsing so the structured generic parent /
-    // interface still surfaces in hover.
-    let raw = normalize_inheritance_tags(&enclosing_docblock(&lines, line_idx)?);
+    // the same content mir would, then parse it directly. mir 0.31 (E2) maps the
+    // `@template-extends` / `@template-implements` (and `@phpstan-extends` /
+    // `@phpstan-implements`) aliases onto `extends` / `implements`, so the
+    // structured generic parent / interface surfaces in hover with no php-lsp-side
+    // tag normalisation.
+    let raw = enclosing_docblock(&lines, line_idx)?;
     let db = crate::docblock::parse_docblock(&raw);
     let ctx = crate::generics::ImportCtx::short();
 
@@ -147,37 +143,6 @@ fn phpdoc_decl_hover(
         }),
         range: hover_range,
     })
-}
-
-/// Rewrite inheritance-tag aliases mir 0.30 does not recognise
-/// (`@template-extends`/`@phpstan-extends` → `@extends`,
-/// `@template-implements`/`@phpstan-implements` → `@implements`) to their
-/// canonical names so `parse_docblock` populates `extends`/`implements` (VF10).
-///
-/// Operates per line on the tag token only (the first non-`*` token), so it
-/// never touches body text such as a `Base<@implements>`-style identifier.
-fn normalize_inheritance_tags(raw: &str) -> String {
-    raw.lines()
-        .map(|line| {
-            let stripped = line.trim_start().trim_start_matches('*').trim_start();
-            if stripped.starts_with("@template-extends") || stripped.starts_with("@phpstan-extends")
-            {
-                line.replacen("@template-extends", "@extends", 1).replacen(
-                    "@phpstan-extends",
-                    "@extends",
-                    1,
-                )
-            } else if stripped.starts_with("@template-implements")
-                || stripped.starts_with("@phpstan-implements")
-            {
-                line.replacen("@template-implements", "@implements", 1)
-                    .replacen("@phpstan-implements", "@implements", 1)
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// Strip the `@template`/`@phpstan-template`/`@psalm-template` /
