@@ -40,16 +40,17 @@ dhat = { version = "0.3", optional = true }
 mimalloc = { version = "0.1", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-# TEMPORARY: point at the enhanced mir fork branch (E1 single-line @template
-# over-read fix, E2 @template-extends/-implements (+@phpstan-*) alias
-# recognition, E3 constructor-arg class-template inference + unannotated
-# generic method-return resolution). Pending mir PR jorgsowa/mir#291 merging +
-# a crates.io release, after which this reverts to a normal
-# `mir-* = "=0.31.x"` version bump.
-mir-analyzer = { git = "https://github.com/colinmollenhour/mir", branch = "feat/generics-engine-enhancements" }
-mir-issues = { git = "https://github.com/colinmollenhour/mir", branch = "feat/generics-engine-enhancements" }
-mir-codebase = { git = "https://github.com/colinmollenhour/mir", branch = "feat/generics-engine-enhancements" }
-mir-types = { git = "https://github.com/colinmollenhour/mir", branch = "feat/generics-engine-enhancements" }
+# TEMPORARY: point at upstream mir main, pinned to the merge commit of
+# jorgsowa/mir#291 (E1 single-line @template over-read fix, E2
+# @template-extends/-implements (+@phpstan-*) alias recognition, E3
+# constructor-arg class-template inference + unannotated generic method-return
+# resolution). The PR is merged to upstream main but not yet in a crates.io
+# release (latest published is 0.31.0). Revert to `mir-* = "=0.3x.0"` once a
+# release containing #291 is published.
+mir-analyzer = { git = "https://github.com/jorgsowa/mir", rev = "ebf6191e0745defb09571a1d529e91ba0cc7916c" }
+mir-issues = { git = "https://github.com/jorgsowa/mir", rev = "ebf6191e0745defb09571a1d529e91ba0cc7916c" }
+mir-codebase = { git = "https://github.com/jorgsowa/mir", rev = "ebf6191e0745defb09571a1d529e91ba0cc7916c" }
+mir-types = { git = "https://github.com/jorgsowa/mir", rev = "ebf6191e0745defb09571a1d529e91ba0cc7916c" }
 php-rs-parser = "0.15"
 php-ast = "0.15"
 bumpalo = { version = "3", features = ["collections"] }
