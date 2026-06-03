@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use mir_analyzer::DocblockParser;
+use mir_analyzer::parser::docblock::parse_type_string;
 use mir_types::{Type, Variance};
 use php_rs_parser::phpdoc;
 
@@ -404,15 +405,32 @@ pub fn parse_docblock(raw: &str) -> Docblock {
         let Some(name) = iter.next().map(|s| s.to_string()) else {
             continue;
         };
-        let bound = match iter.next() {
+        let bound_raw = match iter.next() {
             Some("of" | "as") => iter.next().map(|s| s.to_string()),
             Some(other) => Some(other.to_string()),
             None => None,
         };
+        // Parse the bound into a structured `Type` the same way mir does for
+        // `@template`, so FQCN bounds (`@phpstan-template T of \App\Base`) get
+        // shortened and rendered consistently with mir-parsed `@template` bounds
+        // and `bound_ty` is populated for structured consumers. Fall back to the
+        // raw token when rendering yields nothing.
+        let bound_ty = bound_raw.as_deref().map(parse_type_string);
+        let bound = match (bound_ty.as_ref(), bound_raw) {
+            (Some(ty), raw) => {
+                let rendered = render_type(ty, &render_ctx);
+                if rendered.is_empty() {
+                    raw
+                } else {
+                    Some(rendered)
+                }
+            }
+            (None, raw) => raw,
+        };
         templates.push(DocTemplate {
             name,
             bound,
-            bound_ty: None,
+            bound_ty,
             variance: Variance::Invariant,
         });
     }

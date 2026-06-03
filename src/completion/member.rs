@@ -743,12 +743,23 @@ pub(super) fn resolve_generic_member_completion(
                     if let Some(new_detail) = &item.detail {
                         let existing = &mut items[idx].detail;
                         match existing {
-                            Some(cur) if !cur.split('|').any(|p| p == new_detail) => {
-                                cur.push('|');
-                                cur.push_str(new_detail);
+                            Some(cur) => {
+                                // Union by individual `|` parts, not whole string:
+                                // a `new_detail` that itself carries `|` (e.g.
+                                // `User|null` from a nullable template) must not
+                                // duplicate constituents already present in `cur`
+                                // (which the previous whole-string check missed,
+                                // yielding `User|null|User|null`).
+                                let mut parts: Vec<String> =
+                                    cur.split('|').map(|p| p.to_string()).collect();
+                                for part in new_detail.split('|') {
+                                    if !parts.iter().any(|p| p == part) {
+                                        parts.push(part.to_string());
+                                    }
+                                }
+                                *cur = parts.join("|");
                             }
                             None => *existing = Some(new_detail.clone()),
-                            _ => {}
                         }
                     }
                 }

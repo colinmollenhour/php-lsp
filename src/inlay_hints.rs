@@ -43,9 +43,11 @@ impl<'a> HintCtx<'a> {
     /// Unlike the original implementation this does **not** gate on the rendered
     /// text containing `<`: that dropped the core feature for plain template
     /// substitutions (`@return T` with `T = User` renders as `User`, no
-    /// brackets). Callers instead prefer this value only when it *differs* from
-    /// the legacy string, so a non-generic hint stays byte-identical while a
-    /// genuine substitution (plain or bracketed) surfaces.
+    /// brackets). The gate here is generic-relevance (below), not a comparison
+    /// against the legacy string: callers ([`prefer_resolved`]) take this value
+    /// whenever it is `Some`. When the rendered type happens to equal the legacy
+    /// string the hint is byte-identical anyway, so a non-generic hint stays
+    /// unchanged while a genuine substitution (plain or bracketed) surfaces.
     fn generic_hint_at(&self, byte_off: u32) -> Option<String> {
         let ty = (self.resolver?)(byte_off)?;
         // Carryover-1: only a GENERIC-RELEVANT resolved type (an object/named/

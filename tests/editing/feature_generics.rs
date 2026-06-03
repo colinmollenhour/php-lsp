@@ -215,6 +215,29 @@ class Collection {}
     expect![[r#"`@template T of Base`"#]].assert_eq(&out);
 }
 
+/// VF16b: a `@phpstan-template`/`@psalm-template` alias with a fully-qualified
+/// bound is now parsed into a structured `bound_ty` and rendered through the
+/// import-aware short-name path, so `\App\Base` shortens to `Base` — consistent
+/// with mir-parsed `@template` bounds rather than leaking the raw FQCN.
+#[tokio::test]
+async fn hover_alias_template_decl_shortens_fq_bound() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_hover(
+            r#"<?php
+namespace App;
+class Base {}
+/**
+ * @phpstan-template T of \App\Ba$0se
+ */
+class Collection {}
+"#,
+        )
+        .await;
+    expect![[r#"`@template T of Base`"#]].assert_eq(&out);
+}
+
 /// Regression: hover on a plain (non-generic) variable is byte-identical to the
 /// legacy path — the resolved type equals the legacy `TypeMap` value, so the
 /// override does not fire and the existing rendering is used.

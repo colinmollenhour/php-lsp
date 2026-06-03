@@ -248,6 +248,42 @@ $c->$0
     );
 }
 
+/// VF6(b): when each union constituent already contributes a `|`-bearing detail
+/// (`@return T|null` → `User|null` / `Order|null`), the merge must union by
+/// individual parts so the shared `null` is not duplicated (regression: the
+/// previous whole-string check produced `User|null|Order|null`).
+#[tokio::test]
+async fn union_generic_receiver_dedups_shared_union_parts() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+/** @template T */
+class Collection {
+    /** @return T|null */
+    public function current() {}
+}
+class User {}
+class Order {}
+
+/** @var Collection<User>|Collection<Order> $c */
+$c = something();
+$c->$0
+"#,
+        )
+        .await;
+    let null_count = out.matches("null").count();
+    assert_eq!(
+        null_count, 1,
+        "shared `null` part must appear exactly once after the union merge, got:\n{out}"
+    );
+    assert!(
+        out.contains("User") && out.contains("Order"),
+        "both substituted element types must survive the merge, got:\n{out}"
+    );
+}
+
 /// VF4(b): a nullable generic receiver (`?Collection<User>`) drops the `null`
 /// constituent and resolves members against `Collection<User>`.
 #[tokio::test]
