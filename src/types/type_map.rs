@@ -464,31 +464,6 @@ fn collect_types_expr(
             collect_types_expr(source, assign.value, map, meta, cursor_byte, doc);
         }
 
-        // Closure::bind($fn, $obj) → $this maps to $obj's class
-        ExprKind::StaticMethodCall(s) => {
-            if let ExprKind::Identifier(class) = &s.class.kind
-                && class.as_str() == "Closure"
-                && s.method.name_str() == Some("bind")
-                && let Some(obj_arg) = s.args.get(1)
-                && let Some(cls) = resolve_var_type_str(&obj_arg.value, map)
-            {
-                map.insert("$this".to_string(), cls);
-            }
-        }
-
-        // $fn->bindTo($obj) or $fn->call($obj) → $this maps to $obj's class
-        ExprKind::MethodCall(m) => {
-            if let ExprKind::Identifier(method) = &m.method.kind {
-                let mname = method.as_str();
-                if (mname == "bindTo" || mname == "call")
-                    && let Some(obj_arg) = m.args.first()
-                    && let Some(cls) = resolve_var_type_str(&obj_arg.value, map)
-                {
-                    map.insert("$this".to_string(), cls);
-                }
-            }
-        }
-
         // Walk closure bodies so inner assignments are also captured
         ExprKind::Closure(c) => {
             for p in c.params.iter() {
@@ -529,18 +504,6 @@ fn collect_types_expr(
         }
 
         _ => {}
-    }
-}
-
-/// Look up the class of a `$variable` expression from the current map.
-fn resolve_var_type_str(
-    expr: &php_ast::Expr<'_, '_>,
-    map: &HashMap<String, String>,
-) -> Option<String> {
-    if let ExprKind::Variable(v) = &expr.kind {
-        map.get(&format!("${}", v.as_str())).cloned()
-    } else {
-        None
     }
 }
 
@@ -1373,30 +1336,6 @@ mod tests {
             tm.get("$svc"),
             Some("PaymentService"),
             "outer type should not be overwritten by inner assignment in closure"
-        );
-    }
-
-    #[test]
-    fn closure_bind_maps_this_to_obj_class() {
-        let src = "<?php\n$service = new Mailer();\n$fn = Closure::bind(function() {}, $service);";
-        let doc = ParsedDoc::parse(src.to_string());
-        let tm = TypeMap::from_doc(&doc);
-        assert_eq!(
-            tm.get("$this"),
-            Some("Mailer"),
-            "Closure::bind with typed object should map $this to that class"
-        );
-    }
-
-    #[test]
-    fn closure_bind_to_maps_this_to_obj_class() {
-        let src = "<?php\n$svc = new Logger();\n$fn = function() {};\n$bound = $fn->bindTo($svc);";
-        let doc = ParsedDoc::parse(src.to_string());
-        let tm = TypeMap::from_doc(&doc);
-        assert_eq!(
-            tm.get("$this"),
-            Some("Logger"),
-            "bindTo() should map $this to the bound object's class"
         );
     }
 
