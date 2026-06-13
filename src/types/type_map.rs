@@ -169,6 +169,43 @@ fn type_hint_to_class_string(
     }
 }
 
+/// Extract class names from a docblock type hint, in declaration order.
+///
+/// Splits a union (`Foo|Bar|null`), trims a leading `\` and nullable `?`, keeps
+/// only parts that begin with an uppercase letter (class-like, not `int` /
+/// `string` / `null`), and reduces each to its short name (`A\B\Foo` → `Foo`).
+fn docblock_class_parts(type_hint: &str) -> Vec<String> {
+    type_hint
+        .split('|')
+        .map(|p| p.trim().trim_start_matches('\\').trim_start_matches('?'))
+        .filter(|p| p.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
+        .filter_map(|p| p.rsplit('\\').next())
+        .map(|p| p.to_string())
+        .collect()
+}
+
+/// Apply `@param` class-type hints from the docblock preceding `span_start` to
+/// `map`, keyed by `$name`. Uses `or_insert` so real signature type hints
+/// (collected separately) take precedence.
+fn collect_param_docblock_types(source: &str, span_start: u32, map: &mut HashMap<String, String>) {
+    let Some(raw) = docblock_before(source, span_start) else {
+        return;
+    };
+    let db = parse_docblock(&raw);
+    for param in &db.params {
+        let classes = docblock_class_parts(&param.type_hint);
+        if classes.is_empty() {
+            continue;
+        }
+        let key = if param.name.starts_with('$') {
+            param.name.clone()
+        } else {
+            format!("${}", param.name)
+        };
+        map.entry(key).or_insert_with(|| classes.join("|"));
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn collect_types_stmts(
     source: &str,
@@ -185,12 +222,7 @@ fn collect_types_stmts(
             if let Some(type_str) = db.var_type {
                 // Only map object types (starts with uppercase or backslash).
                 // type_str may be a union like "Foo|null"; take the first class part.
-                let class_name = type_str
-                    .split('|')
-                    .map(|p| p.trim().trim_start_matches('\\').trim_start_matches('?'))
-                    .find(|p| p.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
-                    .and_then(|p| p.rsplit('\\').next())
-                    .map(|p| p.to_string());
+                let class_name = docblock_class_parts(&type_str).into_iter().next();
                 if let Some(class_name) = class_name {
                     if let Some(vname) = db.var_name {
                         // `@var Foo $obj` — explicit variable name.
@@ -217,27 +249,7 @@ fn collect_types_stmts(
                     continue;
                 }
                 // Read @param docblock hints — fills in types for untyped params
-                if let Some(raw) = docblock_before(source, stmt.span.start) {
-                    let db = parse_docblock(&raw);
-                    for param in &db.params {
-                        // For union types, collect all class parts joined by |
-                        let classes: Vec<&str> = param
-                            .type_hint
-                            .split('|')
-                            .map(|p| p.trim().trim_start_matches('\\').trim_start_matches('?'))
-                            .filter(|p| p.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
-                            .filter_map(|p| p.rsplit('\\').next())
-                            .collect();
-                        if !classes.is_empty() {
-                            let key = if param.name.starts_with('$') {
-                                param.name.clone()
-                            } else {
-                                format!("${}", param.name)
-                            };
-                            map.entry(key).or_insert_with(|| classes.join("|"));
-                        }
-                    }
-                }
+                collect_param_docblock_types(source, stmt.span.start, map);
                 for p in f.params.iter() {
                     if let Some(hint) = &p.type_hint
                         && let Some(class_str) = type_hint_to_class_string(hint, None, Some(doc))
@@ -258,31 +270,7 @@ fn collect_types_stmts(
                             continue;
                         }
                         // Read @param docblock hints — fills in types for untyped params
-                        if let Some(raw) = docblock_before(source, member.span.start) {
-                            let db = parse_docblock(&raw);
-                            for param in &db.params {
-                                // For union types, collect all class parts joined by |
-                                let classes: Vec<&str> = param
-                                    .type_hint
-                                    .split('|')
-                                    .map(|p| {
-                                        p.trim().trim_start_matches('\\').trim_start_matches('?')
-                                    })
-                                    .filter(|p| {
-                                        p.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
-                                    })
-                                    .filter_map(|p| p.rsplit('\\').next())
-                                    .collect();
-                                if !classes.is_empty() {
-                                    let key = if param.name.starts_with('$') {
-                                        param.name.clone()
-                                    } else {
-                                        format!("${}", param.name)
-                                    };
-                                    map.entry(key).or_insert_with(|| classes.join("|"));
-                                }
-                            }
-                        }
+                        collect_param_docblock_types(source, member.span.start, map);
                         for p in m.params.iter() {
                             if let Some(hint) = &p.type_hint
                                 && let Some(class_str) = type_hint_to_class_string(
