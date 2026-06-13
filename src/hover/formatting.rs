@@ -3,7 +3,7 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind};
 
 use crate::document::ast::format_type_hint;
 use crate::lang::php_names::{is_php_builtin, php_doc_url};
-use crate::resolve::Declaration;
+use crate::types::resolve::Declaration;
 
 /// Format an expression literal value.
 pub(crate) fn format_expr_literal(expr: &php_ast::Expr<'_, '_>) -> Option<String> {

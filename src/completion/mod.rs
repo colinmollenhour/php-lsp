@@ -32,7 +32,7 @@ use crate::hover::format_params_str;
 use crate::lang::docblock::find_docblock;
 use crate::lang::phpstorm_meta::PhpStormMeta;
 use crate::text::{camel_sort_key, utf16_offset_to_byte};
-use crate::type_map::{
+use crate::types::type_map::{
     TypeMap, enclosing_class_at, members_of_class, params_of_function, params_of_method,
 };
 use std::collections::HashMap;

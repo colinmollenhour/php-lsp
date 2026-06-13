@@ -17,7 +17,7 @@ use tower_lsp::lsp_types::{CodeLens, Command, Url};
 use crate::document::ast::{ParsedDoc, SourceView};
 use crate::navigation::implementation::find_implementations;
 use crate::navigation::references::{SymbolKind, find_references};
-use crate::type_map::parent_class_name;
+use crate::types::type_map::parent_class_name;
 
 /// Build all code lenses for `uri`/`doc`, using `all_docs` for reference counts.
 pub fn code_lenses(

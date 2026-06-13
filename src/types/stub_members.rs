@@ -1,7 +1,7 @@
 use mir_analyzer::AnalysisSession;
 use mir_analyzer::db::{Fqcn, find_class_like};
 
-use crate::type_map::ClassMembers;
+use crate::types::type_map::ClassMembers;
 
 /// Look up class members for a built-in PHP class by querying phpstorm-stubs
 /// through the mir-analyzer session. Returns `None` when `fqcn` is not a

@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::Position;
 
 use crate::document::ast::{ParsedDoc, format_type_hint};
 use crate::text::{fqn_short_name, utf16_offset_to_byte};
-use crate::type_map::TypeMap;
+use crate::types::type_map::TypeMap;
 
 /// Resolve the class(es) of a named-argument call's receiver variable, for
 /// looking up the method's parameter signature. mir-primary: locate the
@@ -22,9 +22,9 @@ fn resolve_method_receiver_class(
 ) -> Option<String> {
     if let Some(a) = analysis
         && let Some(offset) = receiver_var_offset(source, doc, position, receiver_var)
-        && let Some(ty) = crate::type_query::type_at_offset(a, offset)
+        && let Some(ty) = crate::types::type_query::type_at_offset(a, offset)
     {
-        let names: Vec<String> = crate::type_query::class_names(ty)
+        let names: Vec<String> = crate::types::type_query::class_names(ty)
             .iter()
             .map(|fqcn| fqn_short_name(fqcn).to_string())
             .collect();
@@ -35,7 +35,7 @@ fn resolve_method_receiver_class(
     // TypeMap fallback — reuse the caller's OnceCell to avoid a second build.
     let type_map = type_map_cell.get_or_init(|| TypeMap::from_doc_at_position(doc, None, position));
     if receiver_var == "$this" {
-        crate::type_map::enclosing_class_at(source, doc, position)
+        crate::types::type_map::enclosing_class_at(source, doc, position)
     } else {
         type_map.get(receiver_var).map(str::to_owned)
     }
@@ -281,10 +281,10 @@ pub(crate) fn named_arg_hover_value(
         }
         NamedArgCallee::StaticMethod(class_name, method_name) => {
             let effective_class = if class_name == "self" || class_name == "static" {
-                crate::type_map::enclosing_class_at(source, doc, position)
+                crate::types::type_map::enclosing_class_at(source, doc, position)
                     .unwrap_or_else(|| class_name.clone())
             } else if class_name == "parent" {
-                crate::type_map::enclosing_class_at(source, doc, position)
+                crate::types::type_map::enclosing_class_at(source, doc, position)
                     .and_then(|enc| find_parent_class_name(&doc.program().stmts, &enc))
                     .unwrap_or_else(|| class_name.clone())
             } else {

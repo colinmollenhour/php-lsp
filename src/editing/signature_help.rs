@@ -37,7 +37,7 @@ pub fn signature_help(
         let recv = receiver.as_deref().unwrap();
         let class_name = if recv == "parent" {
             // parent:: → find the enclosing class's parent in the workspace index
-            let enclosing = crate::type_map::enclosing_class_at(source, doc, position)?;
+            let enclosing = crate::types::type_map::enclosing_class_at(source, doc, position)?;
             let short = fqn_short_name(&enclosing);
             ws_indexes.iter().find_map(|(_, idx)| {
                 idx.classes
@@ -59,11 +59,12 @@ pub fn signature_help(
                     // Receiver-typed method call ($this / $var): resolve the
                     // receiver class then walk the inheritance chain.
                     let class_name = if recv == "$this" || recv == "self" || recv == "static" {
-                        crate::type_map::enclosing_class_at(source, doc, position)
+                        crate::types::type_map::enclosing_class_at(source, doc, position)
                     } else {
                         // $var: resolve via TypeMap
-                        let tm =
-                            crate::type_map::TypeMap::from_doc_at_position(doc, None, position);
+                        let tm = crate::types::type_map::TypeMap::from_doc_at_position(
+                            doc, None, position,
+                        );
                         tm.get(recv).map(|s| s.to_string())
                     }?;
                     find_method_params_in_hierarchy(&class_name, &func_name, ws_indexes)

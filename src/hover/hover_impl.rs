@@ -6,10 +6,10 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Posi
 use crate::document::ast::ParsedDoc;
 use crate::lang::docblock::find_docblock;
 use crate::lang::php_names::{is_php_builtin, php_doc_url};
-use crate::resolve::{Declaration, resolve_declaration};
-use crate::symbol_map::{SymbolMap, is_hoverable_kind};
 use crate::text::{fqn_short_name, word_at_position, word_range_at};
-use crate::type_map::TypeMap;
+use crate::types::resolve::{Declaration, resolve_declaration};
+use crate::types::symbol_map::{SymbolMap, is_hoverable_kind};
+use crate::types::type_map::TypeMap;
 
 use super::closures::closure_hover;
 use super::formatting::{declaration_signature, wrap_php};
@@ -187,8 +187,8 @@ pub fn hover_at(
         if let Some(ty) = analysis.and_then(|a| {
             let off =
                 word_range_at(source, position).map(|r| doc.view().byte_of_position(r.start))?;
-            crate::type_query::type_at_offset(a, off)
-        }) && !crate::type_query::class_names(ty).is_empty()
+            crate::types::type_query::type_at_offset(a, off)
+        }) && !crate::types::type_query::class_names(ty).is_empty()
         {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -217,7 +217,8 @@ pub fn hover_at(
     {
         let prop_name = word.trim_start_matches('$');
         let effective_class = if class_name == "self" || class_name == "static" {
-            crate::type_map::enclosing_class_at(source, doc, position).unwrap_or(class_name.clone())
+            crate::types::type_map::enclosing_class_at(source, doc, position)
+                .unwrap_or(class_name.clone())
         } else {
             class_name.clone()
         };
@@ -356,7 +357,7 @@ pub fn hover_at(
 
     // Hover on a built-in class name shows stub info.
     if let Some(stub) =
-        session.and_then(|s| crate::stub_members::stub_class_members(s, &resolved_word))
+        session.and_then(|s| crate::types::stub_members::stub_class_members(s, &resolved_word))
     {
         return Some(builtin_class_hover(stub, &resolved_word, hover_range));
     }
@@ -365,7 +366,7 @@ pub fn hover_at(
 }
 
 fn builtin_class_hover(
-    stub: crate::type_map::ClassMembers,
+    stub: crate::types::type_map::ClassMembers,
     name: &str,
     range: Option<tower_lsp::lsp_types::Range>,
 ) -> Hover {
@@ -534,8 +535,8 @@ fn hover_at_with_maps(
         if let Some(ty) = analysis.and_then(|a| {
             let off =
                 word_range_at(source, position).map(|r| doc.view().byte_of_position(r.start))?;
-            crate::type_query::type_at_offset(a, off)
-        }) && !crate::type_query::class_names(ty).is_empty()
+            crate::types::type_query::type_at_offset(a, off)
+        }) && !crate::types::type_query::class_names(ty).is_empty()
         {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -563,7 +564,8 @@ fn hover_at_with_maps(
     {
         let prop_name = word.trim_start_matches('$');
         let effective_class = if class_name == "self" || class_name == "static" {
-            crate::type_map::enclosing_class_at(source, doc, position).unwrap_or(class_name.clone())
+            crate::types::type_map::enclosing_class_at(source, doc, position)
+                .unwrap_or(class_name.clone())
         } else {
             class_name.clone()
         };
@@ -697,7 +699,7 @@ fn hover_at_with_maps(
     }
 
     if let Some(stub) =
-        session.and_then(|s| crate::stub_members::stub_class_members(s, &resolved_word))
+        session.and_then(|s| crate::types::stub_members::stub_class_members(s, &resolved_word))
     {
         return Some(builtin_class_hover(stub, &resolved_word, hover_range));
     }

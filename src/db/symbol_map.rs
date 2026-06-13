@@ -9,7 +9,7 @@ use salsa::Database;
 
 use crate::db::input::SourceFile;
 use crate::db::parse::parsed_doc;
-use crate::symbol_map::SymbolMap;
+use crate::types::symbol_map::SymbolMap;
 
 /// Arc wrapper for [`SymbolMap`]. Pointer equality drives salsa invalidation:
 /// every `build` call produces a new `Arc`, so a changed parse always propagates.

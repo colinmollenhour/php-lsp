@@ -975,9 +975,10 @@ impl LanguageServer for Backend {
                 )
             {
                 let class_name = if receiver == "$this" {
-                    crate::type_map::enclosing_class_at(&source, &doc, position)
+                    crate::types::type_map::enclosing_class_at(&source, &doc, position)
                 } else {
-                    let tm = crate::type_map::TypeMap::from_doc_at_position(&doc, None, position);
+                    let tm =
+                        crate::types::type_map::TypeMap::from_doc_at_position(&doc, None, position);
                     tm.get(&receiver).map(|s| s.to_string())
                 };
                 if let Some(cls) = class_name {
@@ -1611,11 +1612,11 @@ impl LanguageServer for Backend {
         // Class declarations themselves (cursor on the class header) stay
         // global so renaming a class spans the whole file.
         let scope_to_class = !is_variable
-            && crate::type_map::enclosing_class_at(&source, &doc, position).as_deref()
+            && crate::types::type_map::enclosing_class_at(&source, &doc, position).as_deref()
                 != Some(word.as_str());
         let other_class_ranges: Vec<Range> = if scope_to_class {
-            let cursor_class = crate::type_map::enclosing_class_range_at(&doc, position);
-            crate::type_map::collect_all_class_ranges(&doc)
+            let cursor_class = crate::types::type_map::enclosing_class_range_at(&doc, position);
+            crate::types::type_map::collect_all_class_ranges(&doc)
                 .into_iter()
                 .filter(|r| Some(*r) != cursor_class)
                 .collect()

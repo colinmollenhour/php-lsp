@@ -192,7 +192,8 @@ impl Backend {
             }
             Some(SymbolKind::Method) => {
                 // Owning FQCN: the class/interface/trait/enum that contains the cursor.
-                let short_owner = crate::type_map::enclosing_class_at(doc.source(), doc, position)?;
+                let short_owner =
+                    crate::types::type_map::enclosing_class_at(doc.source(), doc, position)?;
                 // `resolve_fqn` walks the doc and applies the namespace prefix if any.
                 Some(crate::navigation::moniker::resolve_fqn(
                     doc,
@@ -208,7 +209,8 @@ impl Backend {
                 // AST walker which finds all `->prop` occurrences.
                 let stmts = &doc.program().stmts;
                 crate::backend::helpers::cursor_is_on_property_decl(doc.source(), stmts, position)?;
-                let short_owner = crate::type_map::enclosing_class_at(doc.source(), doc, position)?;
+                let short_owner =
+                    crate::types::type_map::enclosing_class_at(doc.source(), doc, position)?;
                 Some(crate::navigation::moniker::resolve_fqn(
                     doc,
                     &short_owner,

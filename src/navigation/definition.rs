@@ -4,8 +4,8 @@ use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::document::ast::{ParsedDoc, SourceView};
-use crate::resolve::{Container, Declaration, resolve_declaration};
 use crate::text::{strip_variable_sigil, word_at_position, zero_width_location};
+use crate::types::resolve::{Container, Declaration, resolve_declaration};
 use crate::walk::collect_var_refs_in_scope;
 
 /// Find the definition of the symbol under `position`.

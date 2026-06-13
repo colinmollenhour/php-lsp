@@ -18,7 +18,7 @@ use tower_lsp::lsp_types::Range;
 
 use crate::document::ast::ParsedDoc;
 use crate::hover::formatting::declaration_signature;
-use crate::resolve::{Container, Declaration};
+use crate::types::resolve::{Container, Declaration};
 
 // ── Public types ──────────────────────────────────────────────────────────────
 

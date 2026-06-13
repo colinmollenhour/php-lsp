@@ -63,9 +63,9 @@ fn resolve_type_at_cursor(
                     let offset = word_range_at(source, position)
                         .map(|r| doc.view().byte_of_position(r.start))
                         .unwrap_or_else(|| doc.view().byte_of_position(position));
-                    let names = crate::type_query::class_names(crate::type_query::type_at_offset(
-                        a, offset,
-                    )?);
+                    let names = crate::types::type_query::class_names(
+                        crate::types::type_query::type_at_offset(a, offset)?,
+                    );
                     // Join named classes with `|`; the downstream `type_candidates`
                     // splits unions back apart for the declaration search.
                     (!names.is_empty()).then(|| names.join("|"))
@@ -90,8 +90,9 @@ fn resolve_type_at_cursor(
         let analysis = analysis?;
         let cursor_byte = doc.view().byte_of_position(position);
         let offset = innermost_call_method_offset(&doc.program().stmts, cursor_byte)?;
-        let names =
-            crate::type_query::class_names(crate::type_query::type_at_offset(analysis, offset)?);
+        let names = crate::types::type_query::class_names(
+            crate::types::type_query::type_at_offset(analysis, offset)?,
+        );
         if names.is_empty() {
             return None;
         }
@@ -297,11 +298,11 @@ fn param_decl_type(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|cand| match cand {
-            "self" | "static" => crate::type_map::enclosing_class_at(source, doc, position)
+            "self" | "static" => crate::types::type_map::enclosing_class_at(source, doc, position)
                 .map(|c| resolve_fqn(doc, &c, imports))
                 .unwrap_or_else(|| cand.to_string()),
-            "parent" => crate::type_map::enclosing_class_at(source, doc, position)
-                .and_then(|c| crate::type_map::parent_class_name(doc, &c))
+            "parent" => crate::types::type_map::enclosing_class_at(source, doc, position)
+                .and_then(|c| crate::types::type_map::parent_class_name(doc, &c))
                 .map(|p| resolve_fqn(doc, &p, imports))
                 .unwrap_or_else(|| cand.to_string()),
             other => resolve_fqn(doc, other, imports),

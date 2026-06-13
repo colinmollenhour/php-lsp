@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position, R
 use crate::document::ast::{ParsedDoc, SourceView, format_type_hint};
 use crate::index::file_index::FileIndex;
 use crate::text::fqn_short_name;
-use crate::type_map::TypeMap;
+use crate::types::type_map::TypeMap;
 
 /// Resolve a foreach value/key variable's class (short name) for its type hint.
 /// mir-primary at the variable's byte offset; TypeMap fallback for binding
@@ -22,8 +22,8 @@ fn foreach_var_class(
     var_offset: u32,
 ) -> Option<String> {
     analysis
-        .and_then(|a| crate::type_query::type_at_offset(a, var_offset))
-        .and_then(crate::type_query::primary_class_name)
+        .and_then(|a| crate::types::type_query::type_at_offset(a, var_offset))
+        .and_then(crate::types::type_query::primary_class_name)
         .map(|fqcn| fqn_short_name(&fqcn).to_string())
         .or_else(|| type_map.get(var_key).map(str::to_owned))
 }

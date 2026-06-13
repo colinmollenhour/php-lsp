@@ -44,9 +44,6 @@
 pub mod completion;
 pub mod db;
 pub mod hover;
-pub mod resolve;
-pub mod type_map;
-pub mod type_query;
 pub mod walk;
 
 // Document lifecycle (parsed AST, salsa document store, open-file state).
@@ -60,8 +57,9 @@ mod index;
 mod lang;
 mod text;
 
-// Public module: per-file memoized symbol map (name → Vec<SymbolEntry>).
-pub mod symbol_map;
+// Type resolution & symbol lookup (type_map, type_query, resolve, symbol_map,
+// stub_members).
+mod types;
 
 // Feature groups.
 pub mod actions;
@@ -73,7 +71,6 @@ pub mod navigation;
 pub mod backend;
 mod file_rename;
 pub mod panic_guard;
-mod stub_members;
 pub mod symbols;
 #[cfg(test)]
 mod test_utils;
@@ -90,3 +87,5 @@ pub use navigation::call_hierarchy;
 pub use navigation::definition;
 pub use navigation::implementation;
 pub use navigation::references;
+pub use types::symbol_map;
+pub use types::type_map;

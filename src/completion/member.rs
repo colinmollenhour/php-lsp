@@ -4,9 +4,9 @@ use mir_analyzer::AnalysisSession;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position};
 
 use crate::document::ast::ParsedDoc;
-use crate::stub_members::stub_class_members;
 use crate::text::{fqn_short_name, utf16_offset_to_byte};
-use crate::type_map::{
+use crate::types::stub_members::stub_class_members;
+use crate::types::type_map::{
     ClassMembers, enclosing_class_at, is_backed_enum, is_enum, members_of_class, mixin_classes_of,
     parent_class_name,
 };
@@ -308,7 +308,7 @@ pub(super) fn resolve_receiver_class(
     doc: &ParsedDoc,
     position: Position,
     analysis: Option<&mir_analyzer::FileAnalysis>,
-    type_map: &crate::type_map::TypeMap,
+    type_map: &crate::types::type_map::TypeMap,
 ) -> Option<String> {
     let line = source.lines().nth(position.line as usize)?;
     let col = utf16_offset_to_byte(line, position.character as usize);
@@ -361,8 +361,8 @@ pub(super) fn receiver_class_at(
     analysis: &mir_analyzer::FileAnalysis,
     var_offset: u32,
 ) -> Option<String> {
-    let ty = crate::type_query::type_at_offset(analysis, var_offset)?;
-    let names: Vec<String> = crate::type_query::class_names(ty)
+    let ty = crate::types::type_query::type_at_offset(analysis, var_offset)?;
+    let names: Vec<String> = crate::types::type_query::class_names(ty)
         .iter()
         .map(|fqcn| fqn_short_name(fqcn).to_string())
         .collect();

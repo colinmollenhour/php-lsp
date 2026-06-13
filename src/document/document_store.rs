@@ -86,13 +86,13 @@ pub struct DocumentStore {
     /// position queries). Bounded by the set of analyzed files (open files plus
     /// their open dependents); explicitly evicted in [`DocumentStore::remove`].
     analysis_cache: DashMap<Url, (Arc<str>, Arc<mir_analyzer::FileAnalysis>)>,
-    /// Cross-request cache for the whole-doc completion [`crate::type_map::TypeMap`]
+    /// Cross-request cache for the whole-doc completion [`crate::types::type_map::TypeMap`]
     /// (`TypeMap::from_doc_with_meta`). Unlike `analysis_cache`, validity is
     /// purely per-file (the map reads only this doc plus PHPStorm meta), so the
     /// entry needs no cross-file invalidation: it is fresh when its captured
     /// source `Arc` is pointer-equal to the doc's current `source_arc()` and
     /// the meta pointer is unchanged, self-evicting on any content/meta edit.
-    type_map_cache: DashMap<Url, (Arc<str>, usize, Arc<crate::type_map::TypeMap>)>,
+    type_map_cache: DashMap<Url, (Arc<str>, usize, Arc<crate::types::type_map::TypeMap>)>,
     /// Set to `true` when the set of tracked files changes (add or remove).
     /// `sync_workspace_files` skips the collect/sort/compare path when this
     /// is `false`, avoiding a mutex acquisition on every LSP request.
@@ -462,7 +462,10 @@ impl DocumentStore {
 
     /// Salsa-backed pre-computed symbol map (name → Vec<SymbolEntry>).
     /// Memoized per revision: stable files serve from cache in O(1).
-    pub fn get_symbol_map_salsa(&self, uri: &Url) -> Option<Arc<crate::symbol_map::SymbolMap>> {
+    pub fn get_symbol_map_salsa(
+        &self,
+        uri: &Url,
+    ) -> Option<Arc<crate::types::symbol_map::SymbolMap>> {
         if self.deleted_uris.contains(uri) {
             return None;
         }
@@ -483,7 +486,7 @@ impl DocumentStore {
         &self,
         uri: &Url,
         open_urls: &[Url],
-    ) -> Vec<(Url, Arc<crate::symbol_map::SymbolMap>)> {
+    ) -> Vec<(Url, Arc<crate::types::symbol_map::SymbolMap>)> {
         open_urls
             .iter()
             .filter(|u| *u != uri)
@@ -779,7 +782,7 @@ impl DocumentStore {
     /// Cache hit when the entry's captured source `Arc` is pointer-equal to the
     /// file's current `doc.source_arc()`. A miss recomputes and overwrites, so
     /// the entry self-evicts on any content edit.
-    /// Build (or reuse) the whole-doc completion [`crate::type_map::TypeMap`]
+    /// Build (or reuse) the whole-doc completion [`crate::types::type_map::TypeMap`]
     /// for `uri`. Cache hit when the entry's captured source `Arc` is
     /// pointer-equal to `doc.source_arc()` and the PHPStorm-meta pointer is
     /// unchanged (meta lives behind `ArcSwap`, so its address is stable until
@@ -790,7 +793,7 @@ impl DocumentStore {
         uri: &Url,
         doc: &crate::document::ast::ParsedDoc,
         meta: Option<&crate::lang::phpstorm_meta::PhpStormMeta>,
-    ) -> Arc<crate::type_map::TypeMap> {
+    ) -> Arc<crate::types::type_map::TypeMap> {
         let source = doc.source_arc();
         let meta_key = meta.map_or(0usize, |m| std::ptr::from_ref(m) as usize);
         if let Some(entry) = self.type_map_cache.get(uri)
@@ -799,7 +802,9 @@ impl DocumentStore {
         {
             return Arc::clone(&entry.2);
         }
-        let map = Arc::new(crate::type_map::TypeMap::from_doc_with_meta(doc, meta));
+        let map = Arc::new(crate::types::type_map::TypeMap::from_doc_with_meta(
+            doc, meta,
+        ));
         self.type_map_cache
             .insert(uri.clone(), (source, meta_key, Arc::clone(&map)));
         map
