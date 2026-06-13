@@ -429,28 +429,10 @@ fn collect_types_expr(
     match &expr.kind {
         ExprKind::Assign(assign) => {
             if let ExprKind::Variable(var_name) = &assign.target.kind {
-                // Handle ??= (null coalescing assignment): only assigns if null
-                // so use or_insert (existing type takes precedence)
-                if assign.op == php_ast::AssignOp::Coalesce {
-                    if let ExprKind::New(new_expr) = &assign.value.kind
-                        && let Some(class_name) = extract_class_name(new_expr.class)
-                    {
-                        map.entry(format!("${}", var_name.as_str()))
-                            .or_insert(class_name);
-                    }
-                    collect_types_expr(source, assign.value, map, meta, cursor_byte, doc);
-                    return;
-                }
                 if let ExprKind::New(new_expr) = &assign.value.kind
                     && let Some(class_name) = extract_class_name(new_expr.class)
                 {
                     map.insert(format!("${}", var_name.as_str()), class_name);
-                }
-                // $copy = $original — propagate type from source variable
-                if let ExprKind::Variable(src_var) = &assign.value.kind
-                    && let Some(src_type) = map.get(&format!("${}", src_var.as_str())).cloned()
-                {
-                    map.insert(format!("${}", var_name.as_str()), src_type);
                 }
                 // `clone($obj, [...])` (PHP 8.5 clone-with) preserves the object's
                 // type; mir resolves this directly, so no TypeMap branch is needed.
@@ -1362,14 +1344,6 @@ mod tests {
         let doc = ParsedDoc::parse(src.to_string());
         let tm = TypeMap::from_doc(&doc);
         assert_eq!(tm.get("$x"), Some("Foo"));
-    }
-
-    #[test]
-    fn null_coalesce_assign_infers_type() {
-        let src = "<?php\n$obj ??= new Foo();";
-        let doc = ParsedDoc::parse(src.to_string());
-        let tm = TypeMap::from_doc(&doc);
-        assert_eq!(tm.get("$obj"), Some("Foo"));
     }
 
     #[test]
