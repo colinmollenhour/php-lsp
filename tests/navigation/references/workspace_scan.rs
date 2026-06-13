@@ -133,3 +133,98 @@ foo(); foo();
         "repeated references calls returned different counts"
     );
 }
+
+/// Files that do not contain the symbol name at all must not appear in
+/// results — the candidate prefilter (text_cache substring scan) should
+/// exclude them before any parsing or AST work happens.
+#[tokio::test]
+async fn candidate_prefilter_excludes_files_not_mentioning_name() {
+    let mut server = TestServer::new().await;
+    server
+        .open_fixture(
+            r#"//- /ship.php
+<?php
+function launchRocket(): void {}
+
+//- /mission.php
+<?php
+launchRocket();
+
+//- /unrelated.php
+<?php
+// This file never mentions launchRocket at all
+function countStars(): int { return 42; }
+"#,
+        )
+        .await;
+
+    let resp = server.references("ship.php", 1, 9, false).await;
+    assert!(resp["error"].is_null(), "references error: {resp:?}");
+    let locs: Vec<_> = resp["result"].as_array().expect("array").iter().collect();
+    let uris: Vec<&str> = locs.iter().map(|l| l["uri"].as_str().unwrap()).collect();
+
+    assert!(
+        uris.iter().any(|u| u.ends_with("mission.php")),
+        "mission.php (calls launchRocket) must be in results: {uris:?}"
+    );
+    assert!(
+        !uris.iter().any(|u| u.ends_with("unrelated.php")),
+        "unrelated.php (never mentions launchRocket) must be excluded: {uris:?}"
+    );
+}
+
+/// Method references: a file with the same method name but a different class
+/// must not appear when the server has type information (scoped ingestion path).
+#[tokio::test]
+async fn scoped_ingestion_excludes_same_name_different_class() {
+    let dir = tempfile::tempdir().unwrap();
+
+    std::fs::write(
+        dir.path().join("probe.php"),
+        "<?php\nfinal class SolarProbe {\n    public function transmit(): void {}\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("radio.php"),
+        "<?php\nfinal class RadioTower {\n    public function transmit(): void {}\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("caller.php"),
+        "<?php\n$p = new SolarProbe();\n$p->transmit();\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("tower_caller.php"),
+        "<?php\n$r = new RadioTower();\n$r->transmit();\n",
+    )
+    .unwrap();
+
+    let mut server = TestServer::with_root(dir.path()).await;
+    server.wait_for_index_ready().await;
+    server
+        .open(
+            "probe.php",
+            "<?php\nfinal class SolarProbe {\n    public function transmit(): void {}\n}\n",
+        )
+        .await;
+
+    // References on SolarProbe::transmit
+    let resp = server.references("probe.php", 2, 23, false).await;
+    assert!(resp["error"].is_null(), "references error: {resp:?}");
+    let uris: Vec<&str> = resp["result"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|l| l["uri"].as_str().unwrap())
+        .collect();
+
+    assert!(
+        uris.iter().any(|u| u.ends_with("caller.php")),
+        "caller.php (SolarProbe->transmit) must appear: {uris:?}"
+    );
+    assert!(
+        !uris.iter().any(|u| u.ends_with("tower_caller.php")),
+        "tower_caller.php (RadioTower->transmit) must NOT appear: {uris:?}"
+    );
+}
