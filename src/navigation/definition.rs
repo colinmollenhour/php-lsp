@@ -37,7 +37,7 @@ pub fn goto_definition(
         }
     }
 
-    if let Some(range) = resolve_declaration_range(sv, &doc.program().stmts, &word) {
+    if let Some(range) = resolve_definition_range(sv, &doc.program().stmts, &word) {
         return Some(Location {
             uri: uri.clone(),
             range,
@@ -46,8 +46,7 @@ pub fn goto_definition(
 
     for (other_uri, other_doc) in other_docs {
         let other_sv = other_doc.view();
-        if let Some(range) = resolve_declaration_range(other_sv, &other_doc.program().stmts, &word)
-        {
+        if let Some(range) = resolve_definition_range(other_sv, &other_doc.program().stmts, &word) {
             return Some(Location {
                 uri: other_uri.clone(),
                 range,
@@ -62,11 +61,11 @@ pub fn goto_definition(
 /// Used by the PSR-4 fallback in the backend after resolving a class to a file.
 pub fn find_declaration_range(_source: &str, doc: &ParsedDoc, name: &str) -> Option<Range> {
     let sv = doc.view();
-    resolve_declaration_range(sv, &doc.program().stmts, name)
+    resolve_definition_range(sv, &doc.program().stmts, name)
 }
 
 /// Resolve `word` to a declaration in `stmts` and return its precise name range.
-fn resolve_declaration_range(
+fn resolve_definition_range(
     sv: SourceView<'_>,
     stmts: &[Stmt<'_, '_>],
     word: &str,
@@ -82,10 +81,10 @@ fn resolve_declaration_range(
             }
         )
     })?;
-    Some(declaration_name_range(sv, &decl))
+    Some(definition_name_range(sv, &decl))
 }
 
-fn declaration_name_range(sv: SourceView<'_>, decl: &Declaration<'_>) -> Range {
+fn definition_name_range(sv: SourceView<'_>, decl: &Declaration<'_>) -> Range {
     sv.name_range_in_span(decl.name(), decl.span())
 }
 
