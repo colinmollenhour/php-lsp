@@ -8,6 +8,11 @@
 ///
 /// Call [`FileIndex::extract`] right after parsing; the `ParsedDoc` (and its
 /// bumpalo arena) can be dropped immediately after extraction.
+///
+/// The `-Def` types here (`FunctionDef`, `ClassDef`, `MethodDef`, …) are owned
+/// declaration records stored in the index — distinct from the `-Entry` rows of
+/// `SymbolMap` and the `-Ref` index handles in `db::workspace_index`. See the
+/// crate-root glossary in `lib.rs`.
 use std::sync::Arc;
 
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};

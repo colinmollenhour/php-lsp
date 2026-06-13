@@ -20,6 +20,11 @@
 //! All lookups on the aggregate run in memory against an already-materialised
 //! `Arc`; edits invalidate the aggregate through `file_index` dependency
 //! tracking as usual.
+//!
+//! Vocabulary note: the `-Ref` types here (`ClassRef`, `DeclRef`) are internal
+//! back-pointers/handles into the index — *not* LSP references. A symbol usage
+//! in code is a "reference" spelled out (see `navigation/references.rs`). See
+//! the crate-root glossary in `lib.rs`.
 
 use std::collections::HashMap;
 use std::sync::Arc;

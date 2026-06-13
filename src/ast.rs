@@ -1,4 +1,8 @@
-/// Core AST infrastructure: arena-backed `ParsedDoc`, span utilities, and TypeHint formatting.
+//! Core AST infrastructure: arena-backed `ParsedDoc`, span utilities, and TypeHint formatting.
+//!
+//! Convention: a borrowed [`SourceView`] is idiomatically bound to `sv` across
+//! the crate (offset↔position math). A `ParsedDoc` value is `doc`. See the
+//! crate-root glossary in `lib.rs`.
 use std::mem::ManuallyDrop;
 use std::sync::{Arc, LazyLock, Mutex};
 

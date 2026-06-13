@@ -7,6 +7,12 @@
 //! a borrowed handle to the matched node ([`Declaration`]) and leaves rendering (range
 //! vs. signature vs. abstract-filtering) to the caller.
 //!
+//! Vocabulary note: a [`Declaration`] is the *node where a symbol is introduced*.
+//! It backs both LSP requests, which stay distinct: `textDocument/definition`
+//! jumps to the implementing site, `textDocument/declaration` to the abstract /
+//! interface site. Both walk `Declaration` nodes; only the caller's filtering
+//! differs. See the crate-root glossary in `lib.rs`.
+//!
 //! The walker performs *name matching*, not full cursor-context classification:
 //! it matches a declaration whose name equals `word`, exactly as the three
 //! original copies did. Distinguishing "method call vs. class name at this
