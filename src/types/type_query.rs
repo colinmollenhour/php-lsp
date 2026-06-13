@@ -53,13 +53,11 @@ fn atomic_class_fqcn(atomic: &Atomic) -> Option<&str> {
 /// leading `\` (e.g. `App\Svc\User`), already resolved through the file's
 /// namespace and `use` imports.
 ///
-/// **TParent caveat**: `Atomic::TParent { fqcn }` carries the *containing*
+/// **TParent note**: `Atomic::TParent { fqcn }` carries the *containing*
 /// class's FQCN (e.g. `"ChildClass"`), not the actual parent. This function
 /// returns that fqcn as-is, which is correct for `self`/`static` navigation
-/// but wrong for `parent`. type_definition.rs works around this by bypassing
-/// mir for `parent`-typed parameters. The proper fix is a mir API
-/// `AnalysisSession::resolve_parent_fqcn(fqcn) → Option<String>` that looks
-/// up the extends chain; once available, callers can substitute it here.
+/// but wrong for `parent`. type_definition.rs bypasses mir for `parent`-typed
+/// parameters to look up the inheritance chain directly via the AST.
 pub(crate) fn class_names(ty: &Type) -> Vec<String> {
     ty.types
         .iter()
