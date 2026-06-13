@@ -1887,6 +1887,23 @@ foreach ($items as $item) { $item->$0 }
 }
 
 #[tokio::test]
+async fn probe_clone_with_member() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+class Box { public function open() {} }
+$b = new Box();
+$c = clone($b, ['x' => 1]);
+$c->$0
+"#,
+        )
+        .await;
+    expect!["Method      open"].assert_eq(&out);
+}
+
+#[tokio::test]
 async fn probe_closure_use_var_member() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);

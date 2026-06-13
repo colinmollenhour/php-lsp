@@ -461,12 +461,8 @@ fn collect_types_expr(
                 {
                     map.insert(format!("${}", var_name.as_str()), src_type);
                 }
-                // $new = clone($obj, ['prop' => $val]) — CloneWith preserves the cloned object's type
-                if let ExprKind::CloneWith(obj, _overrides) = &assign.value.kind
-                    && let Some(src_type) = resolve_var_type_str(obj, map)
-                {
-                    map.insert(format!("${}", var_name.as_str()), src_type);
-                }
+                // `clone($obj, [...])` (PHP 8.5 clone-with) preserves the object's
+                // type; mir resolves this directly, so no TypeMap branch is needed.
                 // PHPStorm meta: `$var = $obj->make(SomeClass::class)`
                 if let Some(meta) = meta
                     && let Some(inferred) = infer_from_meta_method_call(assign.value, map, meta)
