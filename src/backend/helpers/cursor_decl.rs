@@ -16,6 +16,20 @@ use crate::document::ast::str_offset;
 
 use super::position::position_to_byte_offset_strict;
 
+/// Locate `name` within `member_span` rather than searching the whole source —
+/// the global `str_offset` returns the first occurrence in the file, which
+/// causes a method named `status` to also match a property named `$status`
+/// (cursor on the `$status` declaration falsely tests positive for "on method
+/// decl").
+fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
+    let s = member_span.start as usize;
+    let e = (member_span.end as usize).min(source.len());
+    source
+        .get(s..e)?
+        .find(name)
+        .map(|off| member_span.start + off as u32)
+}
+
 /// Returns `true` if the cursor is positioned on a method name inside a class,
 /// interface, trait, or enum declaration in the AST.
 ///
@@ -31,19 +45,6 @@ pub(crate) fn cursor_is_on_method_decl(
         return false;
     };
 
-    // Locate `name` within `member_span` rather than searching the whole
-    // source — the global `str_offset` returns the first occurrence in the
-    // file, which causes a method named `status` to also match a property
-    // named `$status` (cursor on the `$status` declaration falsely tests
-    // positive for "on method decl").
-    fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
-        let s = member_span.start as usize;
-        let e = (member_span.end as usize).min(source.len());
-        source
-            .get(s..e)?
-            .find(name)
-            .map(|off| member_span.start + off as u32)
-    }
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32) -> bool {
         for stmt in stmts {
             match &stmt.kind {
@@ -125,15 +126,6 @@ pub(crate) fn cursor_is_on_property_decl(
     position: Position,
 ) -> Option<String> {
     let cursor = position_to_byte_offset_strict(source, position)?;
-
-    fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
-        let s = member_span.start as usize;
-        let e = (member_span.end as usize).min(source.len());
-        source
-            .get(s..e)?
-            .find(name)
-            .map(|off| member_span.start + off as u32)
-    }
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32) -> Option<String> {
         for stmt in stmts {
             match &stmt.kind {
@@ -190,15 +182,6 @@ pub(crate) fn cursor_is_on_constant_decl(
     position: Position,
 ) -> Option<(String, Option<String>)> {
     let cursor = position_to_byte_offset_strict(source, position)?;
-
-    fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
-        let s = member_span.start as usize;
-        let e = (member_span.end as usize).min(source.len());
-        source
-            .get(s..e)?
-            .find(name)
-            .map(|off| member_span.start + off as u32)
-    }
 
     fn check_members(source: &str, members: &[ClassMember<'_, '_>], cursor: u32) -> Option<String> {
         for member in members {
@@ -318,15 +301,6 @@ pub(crate) fn class_name_at_construct_decl(
     position: Position,
 ) -> Option<String> {
     let cursor = position_to_byte_offset_strict(source, position)?;
-
-    fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
-        let s = member_span.start as usize;
-        let e = (member_span.end as usize).min(source.len());
-        source
-            .get(s..e)?
-            .find(name)
-            .map(|off| member_span.start + off as u32)
-    }
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32, ns_prefix: &str) -> Option<String> {
         let mut current_ns = ns_prefix.to_owned();
         for stmt in stmts {
