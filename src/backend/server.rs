@@ -1150,7 +1150,6 @@ impl LanguageServer for Backend {
             let doc_opt = self.get_doc(uri);
             let (word, kind, constant_owner) =
                 resolve_reference_symbol(doc_opt.as_ref(), &source, position, word);
-            let all_docs = self.docs.all_docs_for_scan();
             let target_fqn = self.resolve_reference_target_fqn(
                 uri,
                 doc_opt.as_ref(),
@@ -1160,17 +1159,22 @@ impl LanguageServer for Backend {
                 constant_owner,
             );
 
-            // Ensure all workspace files are ingested before querying the
-            // session — it only sees files that have been opened, so
-            // background-indexed files would otherwise be invisible to
-            // `references_to`.
+            // Prefilter to files that mention `word` in their raw source text
+            // before touching the salsa parse layer. For a symbol present in
+            // 1–5% of workspace files this avoids parsing 95–99% of the tree.
+            let candidate_docs = self.docs.candidate_docs_for(&word);
+
+            // For method references, scope the mir Pass 1 + Pass 2 ingestion
+            // to candidate files only (files whose text contains the method
+            // name). Previously this ran over the full workspace — O(N files)
+            // regardless of how many actually reference the symbol.
             if matches!(kind, Some(SymbolKind::Method)) {
-                // Full-workspace mir Pass 1 + Pass 2 — by far the heaviest
-                // synchronous call in any handler. Run it on the blocking pool
-                // so it doesn't stall the executor; a JoinError (panic) falls
-                // through and the session simply sees fewer files.
+                let candidate_urls = self.docs.candidate_urls_mentioning(&word);
                 let docs = Arc::clone(&self.docs);
-                let _ = tokio::task::spawn_blocking(move || docs.ensure_all_files_ingested()).await;
+                let _ = tokio::task::spawn_blocking(move || {
+                    docs.ensure_files_ingested(&candidate_urls)
+                })
+                .await;
             }
             let owner_short: Option<String> = if matches!(kind, Some(SymbolKind::Method)) {
                 target_fqn
@@ -1214,10 +1218,14 @@ impl LanguageServer for Backend {
                 combined
             } else {
                 match target_fqn.as_deref() {
-                    Some(t) => {
-                        find_references_with_target(&word, &all_docs, include_declaration, kind, t)
-                    }
-                    None => find_references(&word, &all_docs, include_declaration, kind),
+                    Some(t) => find_references_with_target(
+                        &word,
+                        &candidate_docs,
+                        include_declaration,
+                        kind,
+                        t,
+                    ),
+                    None => find_references(&word, &candidate_docs, include_declaration, kind),
                 }
             };
 

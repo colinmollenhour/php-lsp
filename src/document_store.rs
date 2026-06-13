@@ -924,6 +924,76 @@ impl DocumentStore {
             .filter_map(|u| self.get_doc_salsa(&u).map(|d| (u, d)))
             .collect()
     }
+
+    /// Parsed documents limited to files whose raw source text contains `word`.
+    ///
+    /// Prefilters via [`Self::text_cache`] (a cheap substring scan on the raw
+    /// `Arc<str>` already in memory) before calling [`Self::get_doc_salsa`],
+    /// which triggers a salsa parse for files not yet in the AST cache.  This
+    /// means only candidate files are ever parsed — the key win over
+    /// [`all_docs_for_scan`] for find-references, which otherwise parses the
+    /// entire workspace before the memchr gate in `find_references_inner` fires.
+    ///
+    /// Files whose text is not yet in `text_cache` are included conservatively
+    /// (safe superset — never produces false negatives).
+    pub fn candidate_docs_for(&self, word: &str) -> Vec<(Url, Arc<ParsedDoc>)> {
+        let candidate_urls: Vec<Url> = self
+            .file_texts
+            .iter()
+            .filter(|e| !self.deleted_uris.contains(e.key()))
+            .filter(|e| {
+                self.text_cache
+                    .get(e.key())
+                    .map(|src| src.contains(word))
+                    .unwrap_or(true)
+            })
+            .map(|e| e.key().clone())
+            .collect();
+        candidate_urls
+            .into_iter()
+            .filter_map(|u| self.get_doc_salsa(&u).map(|d| (u, d)))
+            .collect()
+    }
+
+    /// URLs of files whose raw source text contains `word`. No parsing.
+    ///
+    /// Used to scope [`ensure_files_ingested`] for method references: only
+    /// files that mention the method name by text need mir Pass 2 analysis.
+    pub fn candidate_urls_mentioning(&self, word: &str) -> Vec<Url> {
+        self.file_texts
+            .iter()
+            .filter(|e| !self.deleted_uris.contains(e.key()))
+            .filter(|e| {
+                self.text_cache
+                    .get(e.key())
+                    .map(|src| src.contains(word))
+                    .unwrap_or(true)
+            })
+            .map(|e| e.key().clone())
+            .collect()
+    }
+
+    /// Run Pass 1 + Pass 2 analysis on the given files only.
+    ///
+    /// Scoped alternative to [`ensure_all_files_ingested`] used by
+    /// `textDocument/references` for method symbols: only files that textually
+    /// mention the method name need to be analyzed, cutting the Pass-2 cost
+    /// from O(workspace) to O(candidates).
+    pub fn ensure_files_ingested(&self, urls: &[Url]) {
+        let php_version = self.workspace_php_version();
+        let session = self.analysis_session(php_version);
+        for uri in urls {
+            let Some(doc) = self.get_doc_salsa(uri) else {
+                continue;
+            };
+            let file: Arc<str> = Arc::from(uri.as_str());
+            session.ingest_file(file.clone(), doc.source_arc());
+            let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
+            let owned_program = php_ast::owned::to_owned_program(doc.program());
+            let analyzer = mir_analyzer::FileAnalyzer::new(&session);
+            analyzer.analyze(file, doc.source(), &owned_program, &source_map);
+        }
+    }
 }
 
 /// Run `file_refs` for every workspace file in parallel.

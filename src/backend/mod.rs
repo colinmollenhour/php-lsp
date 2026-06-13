@@ -146,13 +146,14 @@ impl Backend {
         class_name: &str,
         include_declaration: bool,
     ) -> Vec<Location> {
-        let all_docs = self.docs.all_docs_for_scan();
         let short_name = fqn_short_name(class_name).to_owned();
         let class_fqn = class_name.contains('\\').then_some(class_name);
+        // Prefilter to files mentioning the short class name before parsing.
+        let candidate_docs = self.docs.candidate_docs_for(&short_name);
         // `find_constructor_references` walks `new` expressions directly —
         // bypasses the codebase/salsa index whose `ClassReference` key is too
         // broad (covers type hints, `instanceof`, `extends`, `implements`).
-        let mut locations = find_constructor_references(&short_name, &all_docs, class_fqn);
+        let mut locations = find_constructor_references(&short_name, &candidate_docs, class_fqn);
         // The cursor is already on the `__construct` name, so derive the span
         // from the identifier under the cursor rather than re-searching via
         // str_offset (which finds the first occurrence in the file and would
