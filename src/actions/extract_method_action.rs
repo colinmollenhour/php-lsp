@@ -14,7 +14,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::ast::{ParsedDoc, SourceView};
-use crate::util::utf16_offset_to_byte;
+use crate::text::utf16_offset_to_byte;
 
 // ── Public entry point ────────────────────────────────────────────────────────
 

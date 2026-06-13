@@ -5,11 +5,11 @@ use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat,
 
 use crate::ast::ParsedDoc;
 use crate::stub_members::stub_class_members;
+use crate::text::{fqn_short_name, utf16_offset_to_byte};
 use crate::type_map::{
     ClassMembers, enclosing_class_at, is_backed_enum, is_enum, members_of_class, mixin_classes_of,
     parent_class_name,
 };
-use crate::util::{fqn_short_name, utf16_offset_to_byte};
 
 use super::callable_item;
 

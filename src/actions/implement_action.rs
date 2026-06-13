@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::{
 
 use crate::ast::{ParsedDoc, SourceView, format_type_hint};
 use crate::hover::format_params_str;
-use crate::util::fqn_short_name;
+use crate::text::fqn_short_name;
 
 struct MethodStub {
     name: String,

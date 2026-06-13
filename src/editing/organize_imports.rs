@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::util::fqn_short_name;
+use crate::text::fqn_short_name;
 
 /// Analyse `source` and return an "Organize imports" code action if there is
 /// something to do (sort order is wrong or unused imports exist).

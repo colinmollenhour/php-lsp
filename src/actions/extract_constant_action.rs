@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::util::selected_text_range;
+use crate::text::selected_text_range;
 
 /// When the selection is a string, integer, or float literal, offer to extract
 /// it into a named constant.

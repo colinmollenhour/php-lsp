@@ -9,8 +9,8 @@ use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position, R
 
 use crate::ast::{ParsedDoc, SourceView, format_type_hint};
 use crate::file_index::FileIndex;
+use crate::text::fqn_short_name;
 use crate::type_map::TypeMap;
-use crate::util::fqn_short_name;
 
 /// Resolve a foreach value/key variable's class (short name) for its type hint.
 /// mir-primary at the variable's byte offset; TypeMap fallback for binding

@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::ast::{ParsedDoc, str_offset_in_range};
-use crate::util::{fqn_short_name, utf16_code_units};
+use crate::text::{fqn_short_name, utf16_code_units};
 use crate::walk::{
     all_class_ref_names_in_stmts, class_refs_in_stmts, constant_refs_in_stmts,
     fqn_new_class_refs_in_stmts, function_refs_in_stmts, global_constant_refs_in_stmts,

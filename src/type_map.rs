@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::Position;
 use crate::ast::{ParsedDoc, SourceView};
 use crate::docblock::{docblock_before, parse_docblock};
 use crate::phpstorm_meta::PhpStormMeta;
-use crate::util::fqn_short_name;
+use crate::text::fqn_short_name;
 
 /// Maps variable name (with `$`) → class name.
 #[derive(Debug, Default, Clone)]
@@ -54,7 +54,7 @@ impl TypeMap {
             let line = position.line as usize;
             if line < line_starts.len() {
                 let line_start = line_starts[line] as usize;
-                let col_byte = crate::util::utf16_offset_to_byte(
+                let col_byte = crate::text::utf16_offset_to_byte(
                     &doc.source()[line_start..],
                     position.character as usize,
                 );

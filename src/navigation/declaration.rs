@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::ast::ParsedDoc;
 use crate::resolve::{Container, Declaration, resolve_declaration};
-use crate::util::{strip_variable_sigil, utf16_code_units, word_at_position};
+use crate::text::{strip_variable_sigil, utf16_code_units, word_at_position};
 
 /// Find the abstract or interface declaration of `word`.
 /// Prefers abstract/interface declarations; falls back to any declaration.
@@ -92,7 +92,7 @@ pub fn goto_declaration_from_index(
     position: tower_lsp::lsp_types::Position,
 ) -> Option<Location> {
     use crate::file_index::ClassKind;
-    use crate::util::word_at_position;
+    use crate::text::word_at_position;
     let word = word_at_position(source, position)?;
     let bare = strip_variable_sigil(&word);
 
@@ -195,7 +195,7 @@ pub fn goto_declaration_from_index(
                 if dm.name.as_ref() == word {
                     return Some(Location {
                         uri: uri.clone(),
-                        range: crate::util::zero_width_range(dm.start_line),
+                        range: crate::text::zero_width_range(dm.start_line),
                     });
                 }
             }

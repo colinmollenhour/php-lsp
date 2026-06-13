@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
 use crate::ast::ParsedDoc;
 use crate::navigation::references::find_references_with_use;
-use crate::util::utf16_code_units;
+use crate::text::utf16_code_units;
 use crate::walk::{collect_var_refs_in_scope, property_refs_in_stmts};
 
 /// Compute a WorkspaceEdit that renames every occurrence of `word` to `new_name`
@@ -40,7 +40,7 @@ pub fn rename(
 /// Returns the range of the word at `position` if it's a renameable symbol.
 /// Used for `textDocument/prepareRename`.
 pub fn prepare_rename(source: &str, position: Position) -> Option<Range> {
-    use crate::util::word_at_position;
+    use crate::text::word_at_position;
     let word = word_at_position(source, position)?;
     if word.contains('\\') {
         return None;

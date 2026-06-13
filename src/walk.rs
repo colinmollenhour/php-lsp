@@ -15,7 +15,7 @@ use php_ast::{
 use tower_lsp::lsp_types::DocumentHighlightKind;
 
 use crate::ast::{str_offset, str_offset_in_range};
-use crate::util::fqn_short_name;
+use crate::text::fqn_short_name;
 
 // ── Public entry points ───────────────────────────────────────────────────────
 

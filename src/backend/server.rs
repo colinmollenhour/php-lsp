@@ -32,8 +32,8 @@ use crate::phpstorm_meta::PhpStormMeta;
 use crate::symbols::{
     document_symbols, resolve_workspace_symbol, workspace_symbols_from_workspace,
 };
+use crate::text::{fqn_short_name, word_at_position};
 use crate::use_import::{build_use_import_edit, find_fqn_for_class};
-use crate::util::{fqn_short_name, word_at_position};
 use crate::workspace_scan::{scan_workspace, send_refresh_requests};
 
 use crate::actions::extract_action::extract_variable_actions;
@@ -716,7 +716,7 @@ impl LanguageServer for Backend {
                             Some(t) => t,
                             None => self.get_open_text(&uri).unwrap_or_default(),
                         };
-                        crate::util::apply_content_change(&mut cur, range, &change.text);
+                        crate::text::apply_content_change(&mut cur, range, &change.text);
                         updated = Some(cur);
                     }
                 }
@@ -914,12 +914,12 @@ impl LanguageServer for Backend {
             // the declaring class before touching the in-file AST walk.  This
             // respects `insteadof` conflict resolution (which the AST walk ignores
             // because it returns the first declaration it encounters by name).
-            if let Some(word) = crate::util::word_at_position(&source, position)
+            if let Some(word) = crate::text::word_at_position(&source, position)
                 && !word.starts_with('$')
             {
                 let analysis = self.cached_analysis_async(uri).await;
                 let resolved_class = analysis.as_deref().and_then(|a| {
-                    let off = crate::util::word_range_at(&source, position)
+                    let off = crate::text::word_range_at(&source, position)
                         .map(|r| doc.view().byte_of_position(r.start))?;
                     let sym = a.symbol_at(off)?;
                     match &sym.kind {
@@ -964,7 +964,7 @@ impl LanguageServer for Backend {
             // method defined in `$var`'s class hierarchy, not the first `method`
             // found in any indexed file (which would return a wrong class).
             if let Some(line_text) = source.lines().nth(position.line as usize)
-                && let Some(word) = crate::util::word_at_position(&source, position)
+                && let Some(word) = crate::text::word_at_position(&source, position)
                 && let Some(receiver) = crate::hover::extract_receiver_var_before_cursor(
                     line_text,
                     position.character as usize,
@@ -1004,7 +1004,7 @@ impl LanguageServer for Backend {
             // current file is excluded — it was already searched above with
             // accurate AST ranges.
             let wi = self.workspace_index_async().await;
-            if let Some(word) = crate::util::word_at_position(&source, position)
+            if let Some(word) = crate::text::word_at_position(&source, position)
                 && let Some(loc) = wi.find_declaration(&word, Some(uri))
             {
                 let refined = self
@@ -1128,7 +1128,7 @@ impl LanguageServer for Backend {
                 let mut combined = session_locs;
                 if include_declaration {
                     let range =
-                        crate::util::word_range_at(&source, position).unwrap_or_else(|| Range {
+                        crate::text::word_range_at(&source, position).unwrap_or_else(|| Range {
                             start: position,
                             end: Position {
                                 line: position.line,
@@ -1277,7 +1277,7 @@ impl LanguageServer for Backend {
             // extends clauses and parameter types resolve even when their defining
             // file is never opened.  Also try the alias-resolved name so that
             // `use Foo as Bar` works even when Foo is only in the index.
-            if let Some(word) = crate::util::word_at_position(&source, position) {
+            if let Some(word) = crate::text::word_at_position(&source, position) {
                 let wi = self.workspace_index_async().await;
                 // Try the literal word first.
                 if let Some(h) = class_hover_from_index(&word, &wi.files) {
@@ -1569,12 +1569,12 @@ impl LanguageServer for Backend {
         // Need the word at the cursor to know if this is a variable rename
         // (`$foo`) — the wordPattern we send back must require/forbid `$`
         // accordingly so that linked-mode typing produces valid PHP.
-        let word = match crate::util::word_at_position(&source, position) {
+        let word = match crate::text::word_at_position(&source, position) {
             Some(w) => w,
             None => return Ok(None),
         };
         let is_variable = word.starts_with('$');
-        let cursor_word_range = match crate::util::word_range_at(&source, position) {
+        let cursor_word_range = match crate::text::word_range_at(&source, position) {
             Some(r) => r,
             None => return Ok(None),
         };
@@ -1652,7 +1652,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         let source = self.get_open_text(uri).unwrap_or_default();
         let imports = self.file_imports(uri);
-        let raw_word = crate::util::word_at_position(&source, position).unwrap_or_default();
+        let raw_word = crate::text::word_at_position(&source, position).unwrap_or_default();
         // `word_at_position` includes `\` as a word character, so the cursor on
         // a use-statement import (`use A\B\Foo`) returns the full qualified name.
         // Split to recover the short name and treat the rest as the FQN so the

@@ -1,7 +1,7 @@
 use tower_lsp::lsp_types::{DocumentHighlight, DocumentHighlightKind, Position, Range};
 
 use crate::ast::ParsedDoc;
-use crate::util::word_at_position;
+use crate::text::word_at_position;
 use crate::walk::{collect_var_refs_in_scope, refs_in_stmts};
 
 /// Return all ranges in the document where the word at `position` appears.

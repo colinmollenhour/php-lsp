@@ -22,7 +22,7 @@ use crate::config::LspConfig;
 use crate::document_store::DocumentStore;
 use crate::open_files::OpenFiles;
 use crate::phpstorm_meta::PhpStormMeta;
-use crate::util::fqn_short_name;
+use crate::text::fqn_short_name;
 
 use crate::navigation::references::find_constructor_references;
 
@@ -159,7 +159,7 @@ impl Backend {
         // from the identifier under the cursor rather than re-searching via
         // str_offset (which finds the first occurrence in the file and would
         // point at the wrong constructor in files with more than one class).
-        if include_declaration && let Some(range) = crate::util::word_range_at(source, position) {
+        if include_declaration && let Some(range) = crate::text::word_range_at(source, position) {
             locations.push(Location {
                 uri: uri.clone(),
                 range,

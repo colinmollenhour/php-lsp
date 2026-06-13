@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::util::utf16_offset_to_byte;
+use crate::text::utf16_offset_to_byte;
 
 /// When the selection is non-empty and appears to be an expression, offer to
 /// extract it into a local variable.  The generated variable name is `$extracted`

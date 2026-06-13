@@ -4,8 +4,8 @@ use php_ast::{ClassMemberKind, NamespaceBody, Param, Stmt, StmtKind};
 use tower_lsp::lsp_types::Position;
 
 use crate::ast::{ParsedDoc, format_type_hint};
+use crate::text::{fqn_short_name, utf16_offset_to_byte};
 use crate::type_map::TypeMap;
-use crate::util::{fqn_short_name, utf16_offset_to_byte};
 
 /// Resolve the class(es) of a named-argument call's receiver variable, for
 /// looking up the method's parameter signature. mir-primary: locate the

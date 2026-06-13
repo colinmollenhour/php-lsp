@@ -350,7 +350,7 @@ pub(super) fn collect_fqns_with_prefix(
 /// Returns the prefix typed after `use ` on the current line, or None if not in a use statement.
 pub(super) fn use_completion_prefix(source: &str, position: Position) -> Option<String> {
     let line = source.lines().nth(position.line as usize)?;
-    let col = crate::util::utf16_offset_to_byte(line, position.character as usize);
+    let col = crate::text::utf16_offset_to_byte(line, position.character as usize);
     let before = line[..col].trim_start();
     let prefix = before.strip_prefix("use ")?;
     Some(prefix.trim_start_matches('\\').to_string())
@@ -362,7 +362,7 @@ pub(super) fn typed_prefix(source: Option<&str>, position: Option<Position>) -> 
     let src = source?;
     let pos = position?;
     let line = src.lines().nth(pos.line as usize)?;
-    let col = crate::util::utf16_offset_to_byte(line, pos.character as usize);
+    let col = crate::text::utf16_offset_to_byte(line, pos.character as usize);
     let before = &line[..col];
     let prefix: String = before
         .chars()

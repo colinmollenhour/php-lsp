@@ -10,7 +10,7 @@ use crate::ast::ParsedDoc;
 use crate::docblock::find_docblock;
 use crate::file_index::{FileIndex, ParamDef};
 use crate::hover::format_params_str;
-use crate::util::{fqn_short_name, split_params};
+use crate::text::{fqn_short_name, split_params};
 
 /// Returns signature help for the function call the cursor is inside of.
 ///

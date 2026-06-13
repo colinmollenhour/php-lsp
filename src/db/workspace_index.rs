@@ -202,7 +202,7 @@ impl WorkspaceIndexData {
         name: &str,
         exclude: Option<&Url>,
     ) -> Option<tower_lsp::lsp_types::Location> {
-        let bare = crate::util::strip_variable_sigil(name);
+        let bare = crate::text::strip_variable_sigil(name);
         let sigil = bare != name;
         let refs = self.decls_by_name.get(bare)?;
         for r in refs {
@@ -220,7 +220,7 @@ impl WorkspaceIndexData {
             }
             return Some(tower_lsp::lsp_types::Location {
                 uri: uri.clone(),
-                range: crate::util::zero_width_range(r.line),
+                range: crate::text::zero_width_range(r.line),
             });
         }
         None

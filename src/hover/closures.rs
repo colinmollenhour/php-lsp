@@ -16,7 +16,7 @@ pub(crate) fn closure_hover(
     let line = position.line as usize;
     let line_start = *line_starts.get(line)? as usize;
     let col_byte =
-        crate::util::utf16_offset_to_byte(&source[line_start..], position.character as usize);
+        crate::text::utf16_offset_to_byte(&source[line_start..], position.character as usize);
     let cursor_byte = (line_start + col_byte) as u32;
 
     find_closure_in_stmts(source, &doc.program().stmts, cursor_byte, word.len() as u32)

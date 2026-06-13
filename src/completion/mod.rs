@@ -31,10 +31,10 @@ use crate::ast::{ParsedDoc, format_type_hint};
 use crate::docblock::find_docblock;
 use crate::hover::format_params_str;
 use crate::phpstorm_meta::PhpStormMeta;
+use crate::text::{camel_sort_key, utf16_offset_to_byte};
 use crate::type_map::{
     TypeMap, enclosing_class_at, members_of_class, params_of_function, params_of_method,
 };
-use crate::util::{camel_sort_key, utf16_offset_to_byte};
 use std::collections::HashMap;
 
 /// Build a `CompletionItem` for a callable (function or method).
@@ -534,7 +534,7 @@ pub fn filtered_completions_at(
                             // Apply fuzzy filtering based on the typed prefix
                             let prefix = before.strip_prefix(pre_arrow).unwrap_or("").to_string();
                             if !prefix.is_empty() {
-                                let fq = crate::util::FuzzyQuery::new(&prefix);
+                                let fq = crate::text::FuzzyQuery::new(&prefix);
                                 items.retain(|i| {
                                     // For properties (label starts with $), match against the
                                     // name without the $. For methods/other items, match the
@@ -553,7 +553,7 @@ pub fn filtered_completions_at(
                                         &item.label
                                     };
                                     item.sort_text =
-                                        Some(crate::util::camel_sort_key(&prefix, match_against));
+                                        Some(crate::text::camel_sort_key(&prefix, match_against));
                                     item.filter_text = Some(item.label.clone());
                                 }
                             }
@@ -790,7 +790,7 @@ pub fn filtered_completions_at(
                         .is_some_and(|s| s.eq_ignore_ascii_case(&ns_prefix))
                 });
             } else if !prefix.is_empty() {
-                let fq = crate::util::FuzzyQuery::new(&prefix);
+                let fq = crate::text::FuzzyQuery::new(&prefix);
                 items.retain(|i| fq.camel_match(&i.label));
                 for item in &mut items {
                     item.sort_text = Some(camel_sort_key(&prefix, &item.label));

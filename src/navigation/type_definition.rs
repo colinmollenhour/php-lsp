@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use crate::ast::{ParsedDoc, SourceView, format_type_hint, str_offset_in_range};
 use crate::navigation::moniker::resolve_fqn;
 use crate::navigation::references::collect_class_imports;
-use crate::util::{fqn_short_name, word_at_position, word_range_at, zero_width_range};
+use crate::text::{fqn_short_name, word_at_position, word_range_at, zero_width_range};
 use mir_analyzer::FileAnalysis;
 
 /// Resolve the PHP type at `position` to a fully-qualified class name.

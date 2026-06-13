@@ -30,7 +30,7 @@ use php_ast::{
     TraitDecl,
 };
 
-use crate::util::strip_variable_sigil;
+use crate::text::strip_variable_sigil;
 
 /// Which type-like declaration a member belongs to. Lets callers reproduce
 /// per-container behavior (e.g. definition resolves enum constants differently

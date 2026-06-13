@@ -2,7 +2,7 @@ use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 
 use crate::ast::{ParsedDoc, format_type_hint};
 use crate::docblock::{Docblock, docblock_before, parse_docblock};
-use crate::util::fqn_short_name;
+use crate::text::fqn_short_name;
 
 use super::formatting::{
     format_class_const, format_expr_literal, format_params, format_prop_prefix,

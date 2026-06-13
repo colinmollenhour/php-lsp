@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{
 
 use crate::ast::{ParsedDoc, SourceView, name_range};
 use crate::docblock::parse_docblock;
-use crate::util::zero_width_range;
+use crate::text::zero_width_range;
 
 fn is_deprecated_doc(doc: Option<&php_ast::Comment<'_>>) -> Option<bool> {
     doc.and_then(|c| {
@@ -459,7 +459,7 @@ pub fn workspace_symbols_from_index(
     let matches_kind = |k: SymbolKind| kind_filter.is_none_or(|f| f == k);
     // Lowercase the query once; the per-candidate match is allocation-free.
     // This loop visits every symbol of every FileIndex on each picker keystroke.
-    let fq = crate::util::FuzzyQuery::new(term);
+    let fq = crate::text::FuzzyQuery::new(term);
 
     let mut results = Vec::new();
     for (uri, idx) in indexes {

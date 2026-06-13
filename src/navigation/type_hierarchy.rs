@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
 
-use crate::util::zero_width_range;
+use crate::text::zero_width_range;
 
 fn make_item_from_index(
     name: &str,
@@ -32,7 +32,7 @@ pub fn prepare_type_hierarchy_from_workspace(
     position: Position,
 ) -> Option<TypeHierarchyItem> {
     use crate::file_index::ClassKind;
-    use crate::util::word_at_position;
+    use crate::text::word_at_position;
     let word = word_at_position(source, position)?;
     let refs = wi.classes_by_name.get(&word)?;
     let (uri, cls) = wi.at(*refs.first()?)?;

@@ -52,8 +52,12 @@ pub mod hover;
 pub mod resolve;
 pub mod type_map;
 pub mod type_query;
-pub mod util;
 pub mod walk;
+
+// Text mechanics (offset/word/fuzzy/range) and PHP-language name knowledge,
+// split out of the former `util` grab-bag.
+mod lang;
+mod text;
 
 // Public module: compact symbol index for background-indexed files.
 pub mod file_index;

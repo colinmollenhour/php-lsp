@@ -5,10 +5,11 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Posi
 
 use crate::ast::ParsedDoc;
 use crate::docblock::find_docblock;
+use crate::lang::php_names::{is_php_builtin, php_doc_url};
 use crate::resolve::{Declaration, resolve_declaration};
 use crate::symbol_map::{SymbolMap, is_hoverable_kind};
+use crate::text::{fqn_short_name, word_at_position, word_range_at};
 use crate::type_map::TypeMap;
-use crate::util::{fqn_short_name, is_php_builtin, php_doc_url, word_at_position, word_range_at};
 
 use super::closures::closure_hover;
 use super::formatting::{declaration_signature, wrap_php};

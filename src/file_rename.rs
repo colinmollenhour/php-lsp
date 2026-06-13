@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
 use crate::ast::ParsedDoc;
-use crate::util::byte_to_utf16;
+use crate::text::byte_to_utf16;
 
 /// Build a `WorkspaceEdit` that updates every `use` import referencing `old_fqn`
 /// to `new_fqn` across all indexed documents.

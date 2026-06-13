@@ -1,6 +1,6 @@
 use php_ast::{NamespaceBody, Stmt, StmtKind, UseKind};
 
-use crate::util::fqn_short_name;
+use crate::text::fqn_short_name;
 
 /// Extract the receiver variable from immediately before `->word` or `?->word`
 /// at the cursor's exact column position.  Uses the column rather than
