@@ -18,7 +18,7 @@ use std::sync::Arc;
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 
 use crate::ast::{ParsedDoc, format_type_hint};
-use crate::docblock::parse_docblock;
+use crate::lang::docblock::parse_docblock;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 

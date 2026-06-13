@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::ast::{ParsedDoc, SourceView, str_offset};
-use crate::docblock::parse_docblock;
+use crate::lang::docblock::parse_docblock;
 use crate::text::utf16_code_units;
 
 // Token type indices — order must match `legend()` vec order

@@ -282,11 +282,11 @@ impl LspConfig {
     pub(crate) fn from_value(v: &serde_json::Value) -> Self {
         let mut cfg = LspConfig::default();
         if let Some(ver) = v.get("phpVersion").and_then(|x| x.as_str()) {
-            if crate::autoload::is_valid_php_version(ver) {
+            if crate::lang::autoload::is_valid_php_version(ver) {
                 cfg.php_version = Some(ver.to_string());
             } else {
                 // Invalid version: skip environment detection, use the latest stubs.
-                cfg.php_version = Some(crate::autoload::PHP_8_5.to_string());
+                cfg.php_version = Some(crate::lang::autoload::PHP_8_5.to_string());
             }
         }
         if let Some(arr) = v.get("excludePaths").and_then(|x| x.as_array()) {

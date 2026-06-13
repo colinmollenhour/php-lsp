@@ -97,7 +97,7 @@ impl SymbolMap {
 /// Parse a doc-comment already attached by the parser and render it as markdown.
 /// Returns `None` when the docblock has no visible content.
 fn doc_to_markdown(c: &php_ast::Comment<'_>) -> Option<String> {
-    let md = crate::docblock::parse_docblock(c.text).to_markdown();
+    let md = crate::lang::docblock::parse_docblock(c.text).to_markdown();
     if md.is_empty() { None } else { Some(md) }
 }
 

@@ -324,7 +324,7 @@ pub fn docs_for_symbol_from_index(
             for f in &idx.functions {
                 if f.name.as_ref() == name {
                     if let Some(raw) = &f.docblock {
-                        let db = crate::docblock::parse_docblock(raw);
+                        let db = crate::lang::docblock::parse_docblock(raw);
                         let md = db.to_markdown();
                         if !md.is_empty() {
                             value.push_str("\n\n---\n\n");
@@ -338,7 +338,7 @@ pub fn docs_for_symbol_from_index(
                 for m in &cls.methods {
                     if m.name.as_ref() == name {
                         if let Some(raw) = &m.docblock {
-                            let db = crate::docblock::parse_docblock(raw);
+                            let db = crate::lang::docblock::parse_docblock(raw);
                             let md = db.to_markdown();
                             if !md.is_empty() {
                                 value.push_str("\n\n---\n\n");

@@ -44,9 +44,7 @@
 pub mod ast;
 pub mod cache;
 pub mod completion;
-pub mod config;
 pub mod db;
-pub mod docblock;
 pub mod document_store;
 pub mod hover;
 pub mod resolve;
@@ -54,8 +52,8 @@ pub mod type_map;
 pub mod type_query;
 pub mod walk;
 
-// Text mechanics (offset/word/fuzzy/range) and PHP-language name knowledge,
-// split out of the former `util` grab-bag.
+// PHP-language model (config, autoload, phpstorm_meta, docblock, php_names)
+// and generic text mechanics (offset/word/fuzzy/range).
 mod lang;
 mod text;
 
@@ -72,12 +70,10 @@ pub mod editing;
 pub mod navigation;
 
 // Infrastructure modules.
-mod autoload;
 pub mod backend;
 mod file_rename;
 mod open_files;
 pub mod panic_guard;
-mod phpstorm_meta;
 mod stub_members;
 pub mod symbols;
 #[cfg(test)]
@@ -88,6 +84,7 @@ mod workspace_scan;
 // Re-exports for benchmark crates that use the flat `php_lsp::X` paths.
 pub use analysis::semantic_diagnostics;
 pub use editing::rename;
+pub use lang::config;
 pub use navigation::call_hierarchy;
 pub use navigation::definition;
 pub use navigation::implementation;

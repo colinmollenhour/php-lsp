@@ -311,14 +311,14 @@ fn find_param_sig_in_stmts(
     callee_name: &str,
     class_name: Option<&str>,
     label: &str,
-) -> Option<(String, Option<crate::docblock::Docblock>)> {
+) -> Option<(String, Option<crate::lang::docblock::Docblock>)> {
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) if class_name.is_none() && f.name == callee_name => {
                 let param = f.params.iter().find(|p| p.name == label)?;
                 let sig = format_single_param(param);
-                let db = crate::docblock::docblock_before(source, stmt.span.start)
-                    .map(|raw| crate::docblock::parse_docblock(&raw));
+                let db = crate::lang::docblock::docblock_before(source, stmt.span.start)
+                    .map(|raw| crate::lang::docblock::parse_docblock(&raw));
                 return Some((sig, db));
             }
             StmtKind::Class(c)
@@ -333,8 +333,8 @@ fn find_param_sig_in_stmts(
                     {
                         let param = m.params.iter().find(|p| p.name == label)?;
                         let sig = format_single_param(param);
-                        let db = crate::docblock::docblock_before(source, member.span.start)
-                            .map(|raw| crate::docblock::parse_docblock(&raw));
+                        let db = crate::lang::docblock::docblock_before(source, member.span.start)
+                            .map(|raw| crate::lang::docblock::parse_docblock(&raw));
                         return Some((sig, db));
                     }
                 }
@@ -351,8 +351,8 @@ fn find_param_sig_in_stmts(
                     {
                         let param = m.params.iter().find(|p| p.name == label)?;
                         let sig = format_single_param(param);
-                        let db = crate::docblock::docblock_before(source, member.span.start)
-                            .map(|raw| crate::docblock::parse_docblock(&raw));
+                        let db = crate::lang::docblock::docblock_before(source, member.span.start)
+                            .map(|raw| crate::lang::docblock::parse_docblock(&raw));
                         return Some((sig, db));
                     }
                 }
@@ -395,7 +395,7 @@ fn format_single_param(p: &Param<'_, '_>) -> String {
 
 fn format_named_param_hover(
     sig: &str,
-    db: Option<&crate::docblock::Docblock>,
+    db: Option<&crate::lang::docblock::Docblock>,
     label: &str,
 ) -> String {
     let mut value = wrap_php(&format!("(parameter) {}", sig));

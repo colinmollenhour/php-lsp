@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Url};
 
 use crate::ast::ParsedDoc;
-use crate::docblock::find_docblock;
+use crate::lang::docblock::find_docblock;
 use crate::lang::php_names::{is_php_builtin, php_doc_url};
 use crate::resolve::{Declaration, resolve_declaration};
 use crate::symbol_map::{SymbolMap, is_hoverable_kind};

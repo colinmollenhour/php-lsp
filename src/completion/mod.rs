@@ -28,9 +28,9 @@ use tower_lsp::lsp_types::{
 use tower_lsp::lsp_types::{Documentation, MarkupContent, MarkupKind};
 
 use crate::ast::{ParsedDoc, format_type_hint};
-use crate::docblock::find_docblock;
 use crate::hover::format_params_str;
-use crate::phpstorm_meta::PhpStormMeta;
+use crate::lang::docblock::find_docblock;
+use crate::lang::phpstorm_meta::PhpStormMeta;
 use crate::text::{camel_sort_key, utf16_offset_to_byte};
 use crate::type_map::{
     TypeMap, enclosing_class_at, members_of_class, params_of_function, params_of_method,

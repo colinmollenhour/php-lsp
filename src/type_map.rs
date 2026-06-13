@@ -10,8 +10,8 @@ use php_ast::{
 use tower_lsp::lsp_types::Position;
 
 use crate::ast::{ParsedDoc, SourceView};
-use crate::docblock::{docblock_before, parse_docblock};
-use crate::phpstorm_meta::PhpStormMeta;
+use crate::lang::docblock::{docblock_before, parse_docblock};
+use crate::lang::phpstorm_meta::PhpStormMeta;
 use crate::text::fqn_short_name;
 
 /// Maps variable name (with `$`) → class name.

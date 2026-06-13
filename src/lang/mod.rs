@@ -1,5 +1,11 @@
-//! PHP-language model: built-in name knowledge and related semantics.
-//! (Configuration, autoload, stubs, and docblocks join this module in later
-//! steps of the reorganization.)
+//! PHP-language model: configuration, autoload/PSR-4 resolution, PhpStorm
+//! metadata, docblock parsing, and built-in name knowledge. Everything here is
+//! about the PHP language and project conventions, as opposed to the generic
+//! text mechanics in [`crate::text`].
 
-pub(crate) mod php_names;
+pub mod config;
+pub mod docblock;
+pub mod php_names;
+
+pub(crate) mod autoload;
+pub(crate) mod phpstorm_meta;

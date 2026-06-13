@@ -8,10 +8,10 @@ use salsa::Setter;
 use tower_lsp::lsp_types::{SemanticToken, Url};
 
 use crate::ast::ParsedDoc;
-use crate::autoload::Psr4Map;
 use crate::db::analysis::AnalysisHost;
 use crate::db::input::{FileText, Workspace, find_source_file};
 use crate::file_index::FileIndex;
+use crate::lang::autoload::Psr4Map;
 
 /// Upper bound on `parsed_cache` entries. Matched to the `lru = 2048` on
 /// `parsed_doc` in `src/db/parse.rs` so the secondary Arc retention can't
@@ -786,7 +786,7 @@ impl DocumentStore {
         &self,
         uri: &Url,
         doc: &crate::ast::ParsedDoc,
-        meta: Option<&crate::phpstorm_meta::PhpStormMeta>,
+        meta: Option<&crate::lang::phpstorm_meta::PhpStormMeta>,
     ) -> Arc<crate::type_map::TypeMap> {
         let source = doc.source_arc();
         let meta_key = meta.map_or(0usize, |m| std::ptr::from_ref(m) as usize);
@@ -1376,7 +1376,7 @@ mod tests {
         // Inject a PSR-4 map pointing at the tmp dir.
         store
             .psr4
-            .store(Arc::new(crate::autoload::Psr4Map::load(tmp.path())));
+            .store(Arc::new(crate::lang::autoload::Psr4Map::load(tmp.path())));
 
         // Mirror the consuming file (Entity not yet in source_files).
         // Uses Entity as a parameter type hint — the analyzer resolves these

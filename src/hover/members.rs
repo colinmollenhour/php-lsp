@@ -1,7 +1,7 @@
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 
 use crate::ast::{ParsedDoc, format_type_hint};
-use crate::docblock::{Docblock, docblock_before, parse_docblock};
+use crate::lang::docblock::{Docblock, docblock_before, parse_docblock};
 use crate::text::fqn_short_name;
 
 use super::formatting::{
@@ -71,7 +71,7 @@ fn find_property_info_in_stmts<'a>(
                                             if matching.is_empty() {
                                                 None
                                             } else {
-                                                Some(crate::docblock::Docblock {
+                                                Some(crate::lang::docblock::Docblock {
                                                     params: matching,
                                                     ..Default::default()
                                                 })
@@ -386,7 +386,7 @@ fn find_method_docblock(
     doc: &ParsedDoc,
     class_name: &str,
     method_name: &str,
-) -> Option<crate::docblock::Docblock> {
+) -> Option<crate::lang::docblock::Docblock> {
     find_method_docblock_in_stmts(doc.source(), &doc.program().stmts, class_name, method_name)
 }
 
@@ -396,7 +396,7 @@ pub(crate) fn resolve_method_docblock<'a>(
     docs: impl Iterator<Item = &'a ParsedDoc> + Clone,
     class_name: &str,
     method_name: &str,
-) -> Option<crate::docblock::Docblock> {
+) -> Option<crate::lang::docblock::Docblock> {
     let docs: Vec<&'a ParsedDoc> = docs.collect();
     let mut current_class = class_name.to_owned();
     for _ in 0..16 {
@@ -425,7 +425,7 @@ fn find_method_docblock_in_stmts(
     stmts: &[Stmt<'_, '_>],
     class_name: &str,
     method_name: &str,
-) -> Option<crate::docblock::Docblock> {
+) -> Option<crate::lang::docblock::Docblock> {
     find_method_docblock_impl(source, stmts, stmts, class_name, method_name)
 }
 
@@ -435,7 +435,7 @@ fn find_method_docblock_impl<'a>(
     stmts: &[Stmt<'a, 'a>],
     class_name: &str,
     method_name: &str,
-) -> Option<crate::docblock::Docblock> {
+) -> Option<crate::lang::docblock::Docblock> {
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Class(c) if c.name.map(|n| n.or_error()) == Some(class_name) => {

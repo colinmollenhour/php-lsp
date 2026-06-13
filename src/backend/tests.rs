@@ -1,7 +1,7 @@
 use super::helpers::*;
 use super::*;
 use crate::ast::ParsedDoc;
-use crate::config::{DiagnosticsConfig, FeaturesConfig, MAX_INDEXED_FILES};
+use crate::lang::config::{DiagnosticsConfig, FeaturesConfig, MAX_INDEXED_FILES};
 use crate::use_import::{build_use_import_edit, find_use_insert_line};
 use tower_lsp::lsp_types::{Position, Range, Url};
 
@@ -80,8 +80,12 @@ fn lsp_config_default_is_empty() {
 
 #[test]
 fn lsp_config_parses_php_version() {
-    let cfg = LspConfig::from_value(&serde_json::json!({"phpVersion": crate::autoload::PHP_8_2}));
-    assert_eq!(cfg.php_version.as_deref(), Some(crate::autoload::PHP_8_2));
+    let cfg =
+        LspConfig::from_value(&serde_json::json!({"phpVersion": crate::lang::autoload::PHP_8_2}));
+    assert_eq!(
+        cfg.php_version.as_deref(),
+        Some(crate::lang::autoload::PHP_8_2)
+    );
 }
 
 #[test]

@@ -17,11 +17,11 @@ use tower_lsp::Client;
 use tower_lsp::lsp_types::*;
 
 use crate::ast::ParsedDoc;
-use crate::autoload::Psr4Map;
-use crate::config::LspConfig;
 use crate::document_store::DocumentStore;
+use crate::lang::autoload::Psr4Map;
+use crate::lang::config::LspConfig;
+use crate::lang::phpstorm_meta::PhpStormMeta;
 use crate::open_files::OpenFiles;
-use crate::phpstorm_meta::PhpStormMeta;
 use crate::text::fqn_short_name;
 
 use crate::navigation::references::find_constructor_references;
@@ -316,7 +316,7 @@ impl Backend {
     /// for the full priority order.
     fn resolve_php_version(&self, explicit: Option<&str>) -> (String, &'static str) {
         let roots = self.root_paths.load();
-        crate::autoload::resolve_php_version_from_roots(&roots, explicit)
+        crate::lang::autoload::resolve_php_version_from_roots(&roots, explicit)
     }
 
     /// Compute diagnostic publishes for every open dependent of `changed_uri`.
@@ -326,7 +326,7 @@ impl Backend {
     async fn compute_dependent_publishes(
         &self,
         changed_uri: &Url,
-        diag_cfg: &crate::config::DiagnosticsConfig,
+        diag_cfg: &crate::lang::config::DiagnosticsConfig,
     ) -> Vec<(Url, Vec<Diagnostic>)> {
         compute_dependent_publishes_owned(
             Arc::clone(&self.docs),
@@ -426,7 +426,7 @@ async fn compute_dependent_publishes_owned(
     docs: Arc<DocumentStore>,
     open_files: OpenFiles,
     changed_uri: Url,
-    diag_cfg: crate::config::DiagnosticsConfig,
+    diag_cfg: crate::lang::config::DiagnosticsConfig,
 ) -> Vec<(Url, Vec<Diagnostic>)> {
     tokio::task::spawn_blocking(move || {
         // Ask mir which files actually depend on `changed_uri` and let it
@@ -508,7 +508,7 @@ pub(super) async fn publish_with_dependents(
     docs: Arc<DocumentStore>,
     open_files: OpenFiles,
     uri: Url,
-    diag_cfg: crate::config::DiagnosticsConfig,
+    diag_cfg: crate::lang::config::DiagnosticsConfig,
 ) {
     let docs_ref = Arc::clone(&docs);
     let open_files_ref = open_files.clone();

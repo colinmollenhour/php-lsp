@@ -17,18 +17,18 @@ use php_ast::{
 };
 
 use crate::ast::{ParsedDoc, str_offset};
-use crate::autoload::Psr4Map;
 use crate::completion::{CompletionCtx, filtered_completions_at};
-use crate::config::LspConfig;
 use crate::document_store::DocumentStore;
 use crate::file_rename::{use_edits_for_delete, use_edits_for_rename};
 use crate::hover::{
     class_hover_from_index, docs_for_symbol_from_index, hover_info_with_maps,
     signature_for_symbol_from_index,
 };
+use crate::lang::autoload::Psr4Map;
+use crate::lang::config::LspConfig;
+use crate::lang::phpstorm_meta::PhpStormMeta;
 use crate::open_files::{OpenFiles, compute_open_file_diagnostics};
 use crate::panic_guard::{guard_async, guard_async_result};
-use crate::phpstorm_meta::PhpStormMeta;
 use crate::symbols::{
     document_symbols, resolve_workspace_symbol, workspace_symbols_from_workspace,
 };
@@ -123,7 +123,7 @@ impl LanguageServer for Backend {
         {
             let opts = params.initialization_options.as_ref();
             let roots = self.root_paths.load_full();
-            let file_cfg = crate::autoload::load_project_config_json(&roots);
+            let file_cfg = crate::lang::autoload::load_project_config_json(&roots);
 
             if matches!(file_cfg, Some(serde_json::Value::Null)) {
                 self.client
@@ -136,14 +136,14 @@ impl LanguageServer for Backend {
 
             if let Some(serde_json::Value::Object(ref obj)) = file_cfg
                 && let Some(ver) = obj.get("phpVersion").and_then(|v| v.as_str())
-                && !crate::autoload::is_valid_php_version(ver)
+                && !crate::lang::autoload::is_valid_php_version(ver)
             {
                 self.client
                     .log_message(
                         tower_lsp::lsp_types::MessageType::WARNING,
                         format!(
                             "php-lsp: .php-lsp.json unsupported phpVersion {ver:?} — valid values: {}",
-                            crate::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
+                            crate::lang::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
                         ),
                     )
                     .await;
@@ -152,14 +152,14 @@ impl LanguageServer for Backend {
             if let Some(ver) = opts
                 .and_then(|o| o.get("phpVersion"))
                 .and_then(|v| v.as_str())
-                && !crate::autoload::is_valid_php_version(ver)
+                && !crate::lang::autoload::is_valid_php_version(ver)
             {
                 self.client
                     .log_message(
                         tower_lsp::lsp_types::MessageType::WARNING,
                         format!(
                             "php-lsp: unsupported phpVersion {ver:?} — valid values: {}",
-                            crate::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
+                            crate::lang::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
                         ),
                     )
                     .await;
@@ -187,7 +187,7 @@ impl LanguageServer for Backend {
                     merged
                 }),
                 tokio::task::spawn_blocking(move || {
-                    crate::autoload::resolve_php_version_from_roots(
+                    crate::lang::autoload::resolve_php_version_from_roots(
                         &roots_for_ver,
                         explicit_version.as_deref(),
                     )
@@ -196,23 +196,25 @@ impl LanguageServer for Backend {
             if let Ok(psr4) = psr4_result {
                 self.psr4.store(Arc::new(psr4));
             }
-            let (ver, source) =
-                ver_result.unwrap_or_else(|_| (crate::autoload::PHP_8_5.to_string(), "default"));
+            let (ver, source) = ver_result
+                .unwrap_or_else(|_| (crate::lang::autoload::PHP_8_5.to_string(), "default"));
             self.client
                 .log_message(
                     tower_lsp::lsp_types::MessageType::INFO,
                     format!("php-lsp: using PHP {ver} ({source})"),
                 )
                 .await;
-            let ver = if source != "set by editor" && !crate::autoload::is_valid_php_version(&ver) {
-                let clamped = crate::autoload::clamp_php_version(&ver);
+            let ver = if source != "set by editor"
+                && !crate::lang::autoload::is_valid_php_version(&ver)
+            {
+                let clamped = crate::lang::autoload::clamp_php_version(&ver);
                 self.client
                     .show_message(
                         tower_lsp::lsp_types::MessageType::WARNING,
                         format!(
                             "php-lsp: detected PHP {ver} is outside the supported range \
                                  ({}); using PHP {clamped} for analysis",
-                            crate::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
+                            crate::lang::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
                         ),
                     )
                     .await;
@@ -550,17 +552,17 @@ impl LanguageServer for Backend {
 
             // Re-read .php-lsp.json so a user who edits the file and then
             // triggers a configuration reload picks up the latest values.
-            let file_cfg = crate::autoload::load_project_config_json(&roots);
+            let file_cfg = crate::lang::autoload::load_project_config_json(&roots);
 
             if let Some(ver) = value.get("phpVersion").and_then(|v| v.as_str())
-                && !crate::autoload::is_valid_php_version(ver)
+                && !crate::lang::autoload::is_valid_php_version(ver)
             {
                 self.client
                     .log_message(
                         tower_lsp::lsp_types::MessageType::WARNING,
                         format!(
                             "php-lsp: unsupported phpVersion {ver:?} — valid values: {}",
-                            crate::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
+                            crate::lang::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
                         ),
                     )
                     .await;
@@ -579,15 +581,17 @@ impl LanguageServer for Backend {
                 )
                 .await;
             // Clamp unsupported versions to the nearest supported one and warn.
-            let ver = if source != "set by editor" && !crate::autoload::is_valid_php_version(&ver) {
-                let clamped = crate::autoload::clamp_php_version(&ver);
+            let ver = if source != "set by editor"
+                && !crate::lang::autoload::is_valid_php_version(&ver)
+            {
+                let clamped = crate::lang::autoload::clamp_php_version(&ver);
                 self.client
                     .show_message(
                         tower_lsp::lsp_types::MessageType::WARNING,
                         format!(
                             "php-lsp: detected PHP {ver} is outside the supported range ({}); \
                              using PHP {clamped} for analysis",
-                            crate::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
+                            crate::lang::autoload::SUPPORTED_PHP_VERSIONS.join(", ")
                         ),
                     )
                     .await;
