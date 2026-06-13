@@ -52,12 +52,28 @@ pub fn hover_info_with_maps(
     other_maps: &[(Url, Arc<SymbolMap>)],
     session: Option<&mir_analyzer::AnalysisSession>,
 ) -> Option<Hover> {
-    hover_at_with_maps(
-        source, doc, analysis, other_docs, other_maps, position, session,
+    hover_at_core(
+        source,
+        doc,
+        analysis,
+        other_docs,
+        position,
+        session,
+        |resolved_word| {
+            for (_, sym_map) in other_maps {
+                if let Some(entry) = sym_map.lookup(resolved_word, |e| is_hoverable_kind(e.kind))
+                    && let Some(sig) = &entry.signature
+                {
+                    return Some((sig.clone(), entry.doc_markdown.clone()));
+                }
+            }
+            None
+        },
     )
 }
 
-/// Full hover implementation.
+/// Full hover: the cross-file declaration lookup walks `other_docs` with
+/// [`resolve_declaration`]. See [`hover_at_core`] for the shared body.
 pub fn hover_at(
     source: &str,
     doc: &ParsedDoc,
@@ -66,303 +82,28 @@ pub fn hover_at(
     position: Position,
     session: Option<&mir_analyzer::AnalysisSession>,
 ) -> Option<Hover> {
-    let hover_range = word_range_at(source, position);
-
-    // Hover on a `use` line shows the full FQN — check before word_at since the
-    // cursor may be past the last word boundary.
-    if let Some(line_text) = source.lines().nth(position.line as usize) {
-        let trimmed = line_text.trim();
-        if trimmed.starts_with("use ") {
-            let (prefix, content) = if trimmed.starts_with("use function ") {
-                (
-                    "use function ",
-                    trimmed.strip_prefix("use function ").unwrap_or(""),
-                )
-            } else if trimmed.starts_with("use const ") {
-                (
-                    "use const ",
-                    trimmed.strip_prefix("use const ").unwrap_or(""),
-                )
-            } else {
-                ("use ", trimmed.strip_prefix("use ").unwrap_or(""))
-            };
-            let fqn = content.trim_end_matches(';').trim();
-            if !fqn.is_empty() {
-                let maybe_word = word_at_position(source, position);
-                let alias = fqn_short_name(fqn);
-                let matches = match &maybe_word {
-                    Some(w) => w == alias || fqn.contains(w.as_str()),
-                    None => true,
-                };
-                if matches {
-                    return Some(Hover {
-                        contents: HoverContents::Markup(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: format!("`{}{};`", prefix, fqn),
-                        }),
-                        range: hover_range,
-                    });
+    hover_at_core(
+        source,
+        doc,
+        analysis,
+        other_docs,
+        position,
+        session,
+        |resolved_word| {
+            for (_, other) in other_docs {
+                if let Some(sig) =
+                    resolve_declaration(&other.program().stmts, resolved_word, &is_hoverable)
+                        .and_then(|d| declaration_signature(&d, resolved_word))
+                {
+                    let md = find_docblock(&other.program().stmts, resolved_word)
+                        .map(|db| db.to_markdown())
+                        .filter(|md| !md.is_empty());
+                    return Some((sig, md));
                 }
             }
-        }
-    }
-
-    let word = word_at_position(source, position)?;
-
-    // Keyword hover — must be checked before the static-access path so that
-    // `static::foo()` still falls through.  The `::` guard prevents this branch
-    // from firing for `Class::static` or `self::method`.
-    if let Some(line_text) = source.lines().nth(position.line as usize)
-        && extract_static_class_before_cursor(line_text, position.character as usize).is_none()
-    {
-        let keyword_doc: Option<&str> = match word.as_str() {
-            "match" => Some("`match` — evaluates an expression against a set of arms (PHP 8.0)"),
-            "null" => Some("`null` — the null value; a variable has no value"),
-            "true" => Some("`true` — boolean true"),
-            "false" => Some("`false` — boolean false"),
-            "abstract" => Some(
-                "`abstract` — declares an abstract class or method that must be implemented by a subclass",
-            ),
-            "readonly" => {
-                Some("`readonly` — property or class that can only be initialised once (PHP 8.1)")
-            }
-            "yield" => Some("`yield` — produces a value from a generator function"),
-            "never" => Some(
-                "`never` — return type indicating the function always throws or exits (PHP 8.1)",
-            ),
-            "throw" => {
-                Some("`throw` — throws an exception; can be used as an expression (PHP 8.0)")
-            }
-            _ => None,
-        };
-        if let Some(doc_str) = keyword_doc {
-            return Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: doc_str.to_string(),
-                }),
-                range: hover_range,
-            });
-        }
-    }
-
-    // TypeMap is expensive; build lazily and reuse across branches (including
-    // named-arg resolution below, which also needs a TypeMap as a mir fallback).
-    let type_map_cell: OnceCell<TypeMap> = OnceCell::new();
-    let type_map =
-        || type_map_cell.get_or_init(|| TypeMap::from_doc_at_position(doc, None, position));
-
-    // Named argument hover: `foo(label: $x)` — hovering the label shows the
-    // parameter type and description.
-    if let Some(line_text) = source.lines().nth(position.line as usize)
-        && !word.starts_with('$')
-        && is_named_arg_at(line_text, position.character as usize, &word)
-        && let Some(callee) = extract_named_arg_callee(line_text, position.character as usize)
-        && let Some(value) = named_arg_hover_value(
-            source,
-            doc,
-            other_docs,
-            position,
-            &callee,
-            &word,
-            analysis,
-            &type_map_cell,
-        )
-    {
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: hover_range,
-        });
-    }
-
-    // Hover on $variable shows its inferred type. mir-primary: when mir
-    // recorded a class-typed symbol, show its full rendering (generics, unions,
-    // narrowing — e.g. `Collection<User>`, `Foo|Bar`). Scalar/`mixed` types are
-    // skipped so we fall through to the TypeMap short-name fallback (covers
-    // bindings where mir records no class-typed symbol).
-    if word.starts_with('$') {
-        if let Some(ty) = analysis.and_then(|a| {
-            let off =
-                word_range_at(source, position).map(|r| doc.view().byte_of_position(r.start))?;
-            crate::types::type_query::type_at_offset(a, off)
-        }) && !crate::types::type_query::class_names(ty).is_empty()
-        {
-            return Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: format!("`{word}` `{ty}`"),
-                }),
-                range: hover_range,
-            });
-        }
-        if let Some(class_name) = type_map().get(&word) {
-            return Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: format!("`{}` `{}`", word, class_name),
-                }),
-                range: hover_range,
-            });
-        }
-    }
-
-    // Hover on ClassName::$staticProp — word begins with '$' but is not a local var.
-    if word.starts_with('$')
-        && let Some(line_text) = source.lines().nth(position.line as usize)
-        && let Some(class_name) =
-            extract_static_class_before_cursor(line_text, position.character as usize)
-    {
-        let prop_name = word.trim_start_matches('$');
-        let effective_class = if class_name == "self" || class_name == "static" {
-            crate::types::type_map::enclosing_class_at(source, doc, position)
-                .unwrap_or(class_name.clone())
-        } else {
-            class_name.clone()
-        };
-        for d in std::iter::once(doc).chain(other_docs.iter().map(|(_, d)| d.as_ref())) {
-            if let Some((modifiers, type_str, db)) =
-                find_property_info(d, &effective_class, prop_name)
-            {
-                let sig = format!(
-                    "(property) {}{}::${}{}",
-                    modifiers,
-                    effective_class,
-                    prop_name,
-                    if type_str.is_empty() {
-                        String::new()
-                    } else {
-                        format!(": {}", type_str)
-                    }
-                );
-                let mut value = wrap_php(&sig);
-                if let Some(doc) = db {
-                    let md = doc.to_markdown();
-                    if !md.is_empty() {
-                        value.push_str("\n\n---\n\n");
-                        value.push_str(&md);
-                    }
-                }
-                return Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value,
-                    }),
-                    range: hover_range,
-                });
-            }
-        }
-    }
-
-    // mir-primary member hover: when mir recorded a resolved symbol at the
-    // cursor position, use its class name directly instead of extracting the
-    // receiver via TypeMap. This handles chains like `$a->b()->c()` where
-    // TypeMap has no variable to look up.
-    if !word.starts_with('$')
-        && let Some(sym) = analysis.and_then(|a| {
-            let off =
-                word_range_at(source, position).map(|r| doc.view().byte_of_position(r.start))?;
-            a.symbol_at(off)
-        })
-    {
-        let mir_hover = mir_member_hover(sym, &word, doc, other_docs);
-        if mir_hover.is_some() {
-            return mir_hover.map(|value| Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value,
-                }),
-                range: hover_range,
-            });
-        }
-    }
-
-    // Closure / arrow function hover: `function($x) {}` or `fn($x) => $x`.
-    // Must run before `scan_statements` so the keyword doesn't fall through to
-    // the named-function path (which won't find anything for an anonymous fn).
-    if (word == "function" || word == "fn")
-        && let Some(sig) = closure_hover(source, doc, position, &word)
-    {
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: wrap_php(&sig),
-            }),
-            range: hover_range,
-        });
-    }
-
-    // Resolve use-import aliases: `use Foo\Bar as Baz` — hovering on `Baz`
-    // should show what `Bar` is.
-    let all_stmts = &*doc.program().stmts as &[_];
-    let resolved_word = resolve_use_alias(all_stmts, &word).unwrap_or_else(|| word.clone());
-
-    // Search current document first, then cross-file (using resolved name).
-    let found = resolve_declaration(&doc.program().stmts, &resolved_word, &is_hoverable)
-        .and_then(|d| declaration_signature(&d, &resolved_word))
-        .map(|sig| (sig, source, doc));
-    let found = found.or_else(|| {
-        for (_, other) in other_docs {
-            if let Some(sig) =
-                resolve_declaration(&other.program().stmts, &resolved_word, &is_hoverable)
-                    .and_then(|d| declaration_signature(&d, &resolved_word))
-            {
-                return Some((sig, other.source(), other.as_ref()));
-            }
-        }
-        None
-    });
-
-    if let Some((sig, _sig_source, sig_doc)) = found {
-        let mut value = wrap_php(&sig);
-        if let Some(db) = find_docblock(&sig_doc.program().stmts, &resolved_word) {
-            let md = db.to_markdown();
-            if !md.is_empty() {
-                value.push_str("\n\n---\n\n");
-                value.push_str(&md);
-            }
-        }
-        if is_php_builtin(&resolved_word) {
-            value.push_str(&format!(
-                "\n\n[php.net documentation]({})",
-                php_doc_url(&resolved_word)
-            ));
-        }
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: hover_range,
-        });
-    }
-
-    // Fallback: built-in function with no user-defined counterpart.
-    if is_php_builtin(&resolved_word) {
-        let value = format!(
-            "```php\nfunction {}()\n```\n\n[php.net documentation]({})",
-            resolved_word,
-            php_doc_url(&resolved_word)
-        );
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
-            }),
-            range: hover_range,
-        });
-    }
-
-    // Hover on a built-in class name shows stub info.
-    if let Some(stub) =
-        session.and_then(|s| crate::types::stub_members::stub_class_members(s, &resolved_word))
-    {
-        return Some(builtin_class_hover(stub, &resolved_word, hover_range));
-    }
-
-    None
+            None
+        },
+    )
 }
 
 fn builtin_class_hover(
@@ -417,16 +158,19 @@ fn builtin_class_hover(
     }
 }
 
-/// Indexed variant of [`hover_at`]: replaces the cross-file `resolve_declaration`
-/// walk with O(1) symbol map lookup. All other paths are identical.
-fn hover_at_with_maps(
+/// Shared hover implementation. Every path is identical between the two public
+/// entry points except the cross-file declaration lookup, which the caller
+/// supplies via `resolve_cross_file`: [`hover_at`] walks `other_docs` with
+/// `resolve_declaration`; [`hover_info_with_maps`] does an O(1) `SymbolMap`
+/// lookup. The closure returns the `(signature, doc_markdown)` to render.
+fn hover_at_core(
     source: &str,
     doc: &ParsedDoc,
     analysis: Option<&mir_analyzer::FileAnalysis>,
     other_docs: &[(Url, Arc<ParsedDoc>)],
-    other_maps: &[(Url, Arc<SymbolMap>)],
     position: Position,
     session: Option<&mir_analyzer::AnalysisSession>,
+    resolve_cross_file: impl Fn(&str) -> Option<(String, Option<String>)>,
 ) -> Option<Hover> {
     let hover_range = word_range_at(source, position);
 
@@ -648,17 +392,8 @@ fn hover_at_with_maps(
                 (sig, doc_md)
             });
 
-    // Cross-file: O(1) symbol map lookup — no AST walk.
-    let found = current_doc_found.or_else(|| {
-        for (_, sym_map) in other_maps {
-            if let Some(entry) = sym_map.lookup(&resolved_word, |e| is_hoverable_kind(e.kind))
-                && let Some(sig) = &entry.signature
-            {
-                return Some((sig.clone(), entry.doc_markdown.clone()));
-            }
-        }
-        None
-    });
+    // Cross-file: delegated to the caller's strategy (AST walk or symbol-map lookup).
+    let found = current_doc_found.or_else(|| resolve_cross_file(&resolved_word));
 
     if let Some((sig, doc_md)) = found {
         let mut value = wrap_php(&sig);
