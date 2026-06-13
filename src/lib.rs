@@ -40,41 +40,33 @@
 // suppressed — real dead code within public API surfaces will still be caught.
 #![allow(dead_code)]
 
-// Public modules exposed for benchmark crates.
-pub mod completion;
-pub mod db;
-pub mod hover;
-pub mod walk;
+// ── Core concern modules ────────────────────────────────────────────────────
+mod document; // document lifecycle: parsed AST, salsa store, open-file state
+mod index; //    workspace indexing: compact FileIndex, background scan, cache
+mod lang; //     PHP-language model: config, autoload, phpstorm_meta, docblock, php_names
+mod text; //     generic text mechanics: offset, word, fuzzy, range
+mod types; //    type resolution & symbol lookup: type_map, type_query, resolve, symbol_map, stub_members
 
-// Document lifecycle (parsed AST, salsa document store, open-file state).
-mod document;
-
-// Workspace indexing (compact FileIndex, background scan, on-disk cache).
-mod index;
-
-// PHP-language model (config, autoload, phpstorm_meta, docblock, php_names)
-// and generic text mechanics (offset/word/fuzzy/range).
-mod lang;
-mod text;
-
-// Type resolution & symbol lookup (type_map, type_query, resolve, symbol_map,
-// stub_members).
-mod types;
-
-// Feature groups.
+// ── LSP feature capabilities ─────────────────────────────────────────────────
 pub mod actions;
 pub mod analysis;
+pub mod completion;
 pub mod editing;
+pub mod hover;
 pub mod navigation;
-
-// Infrastructure modules.
-pub mod backend;
-mod file_rename;
-pub mod panic_guard;
 pub mod symbols;
+
+// ── Salsa query layer ────────────────────────────────────────────────────────
+pub mod db;
+
+// ── Server entry point & cross-cutting infrastructure ────────────────────────
+pub mod backend;
+mod file_rename; // workspace `use`-import edits on file rename/delete
+pub mod panic_guard;
 #[cfg(test)]
 mod test_utils;
-mod use_import;
+mod use_import; //  FQN lookup + `use` statement insertion
+pub mod walk; //    AST reference-span walkers
 
 // Re-exports for benchmark crates that use the flat `php_lsp::X` paths.
 pub use analysis::semantic_diagnostics;
