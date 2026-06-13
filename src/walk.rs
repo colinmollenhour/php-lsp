@@ -14,7 +14,7 @@ use php_ast::{
 };
 use tower_lsp::lsp_types::DocumentHighlightKind;
 
-use crate::ast::{str_offset, str_offset_in_range};
+use crate::document::ast::{str_offset, str_offset_in_range};
 use crate::text::fqn_short_name;
 
 // ── Public entry points ───────────────────────────────────────────────────────
@@ -1239,7 +1239,7 @@ impl<'arena, 'src> Visitor<'arena, 'src> for ClassRefsVisitor<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::ParsedDoc;
+    use crate::document::ast::ParsedDoc;
 
     /// Return all substrings of `source` at the given spans.
     fn spans_to_strs<'a>(source: &'a str, spans: &[Span]) -> Vec<&'a str> {

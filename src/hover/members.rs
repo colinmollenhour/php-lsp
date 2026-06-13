@@ -1,6 +1,6 @@
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 
-use crate::ast::{ParsedDoc, format_type_hint};
+use crate::document::ast::{ParsedDoc, format_type_hint};
 use crate::lang::docblock::{Docblock, docblock_before, parse_docblock};
 use crate::text::fqn_short_name;
 
@@ -36,7 +36,7 @@ fn find_property_info_in_stmts<'a>(
                             let type_str = p
                                 .type_hint
                                 .as_ref()
-                                .map(|t| crate::ast::format_type_hint(t))
+                                .map(|t| crate::document::ast::format_type_hint(t))
                                 .unwrap_or_default();
                             let db = docblock_before(source, member.span.start)
                                 .map(|raw| parse_docblock(&raw));
@@ -51,7 +51,7 @@ fn find_property_info_in_stmts<'a>(
                                     let type_str = p
                                         .type_hint
                                         .as_ref()
-                                        .map(|t| crate::ast::format_type_hint(t))
+                                        .map(|t| crate::document::ast::format_type_hint(t))
                                         .unwrap_or_default();
                                     // Promoted params don't have their own docblock;
                                     // filter the constructor's docblock to the @param for this

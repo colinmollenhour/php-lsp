@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::ast::{ParsedDoc, SourceView};
+use crate::document::ast::{ParsedDoc, SourceView};
 use crate::text::utf16_offset_to_byte;
 
 // ── Public entry point ────────────────────────────────────────────────────────

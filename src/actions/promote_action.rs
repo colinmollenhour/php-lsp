@@ -25,7 +25,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::ast::{ParsedDoc, SourceView};
+use crate::document::ast::{ParsedDoc, SourceView};
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ fn collect_promote<'a>(
                         let type_hint = p
                             .type_hint
                             .as_ref()
-                            .map(|t| crate::ast::format_type_hint(t));
+                            .map(|t| crate::document::ast::format_type_hint(t));
                         prop_info.insert(
                             p.name.to_string(),
                             (

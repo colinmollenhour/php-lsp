@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 
 /// Find the fully-qualified name for a class with the given short `name` by
 /// walking the ParsedDoc AST. Returns `Namespace\ClassName` when inside a namespace.

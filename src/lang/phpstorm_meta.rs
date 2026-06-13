@@ -14,7 +14,7 @@ use std::path::Path;
 
 use php_ast::{ExprKind, NamespaceBody, Stmt, StmtKind};
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::text::fqn_short_name;
 
 type MetaEntries = HashMap<(String, String), Vec<(Option<String>, String)>>;

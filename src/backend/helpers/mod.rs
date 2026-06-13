@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::navigation::definition::find_declaration_range;
 
 use crate::actions::generate_action::{
@@ -82,7 +82,7 @@ pub(super) const DEFERRED_ACTION_TAGS: &[&str] = &[
 ];
 
 impl Backend {
-    /// Run [`crate::document_store::DocumentStore::cached_analysis`] without
+    /// Run [`crate::document::document_store::DocumentStore::cached_analysis`] without
     /// blocking the async executor. The warm path (cache entry current for the
     /// file's text) resolves synchronously; the cold path — mir Pass 1 + Pass 2,
     /// which can take hundreds of ms on large files and is hit after every

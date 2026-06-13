@@ -7,9 +7,9 @@ use dashmap::{DashMap, DashSet};
 use salsa::Setter;
 use tower_lsp::lsp_types::{SemanticToken, Url};
 
-use crate::ast::ParsedDoc;
 use crate::db::analysis::AnalysisHost;
 use crate::db::input::{FileText, Workspace, find_source_file};
+use crate::document::ast::ParsedDoc;
 use crate::file_index::FileIndex;
 use crate::lang::autoload::Psr4Map;
 
@@ -785,7 +785,7 @@ impl DocumentStore {
     pub fn cached_type_map(
         &self,
         uri: &Url,
-        doc: &crate::ast::ParsedDoc,
+        doc: &crate::document::ast::ParsedDoc,
         meta: Option<&crate::lang::phpstorm_meta::PhpStormMeta>,
     ) -> Arc<crate::type_map::TypeMap> {
         let source = doc.source_arc();

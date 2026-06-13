@@ -5,7 +5,7 @@ use std::sync::Arc;
 use php_ast::{NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Url};
 
-use crate::ast::{ParsedDoc, SourceView};
+use crate::document::ast::{ParsedDoc, SourceView};
 
 /// Returns `true` when the name written in an `extends`/`implements` clause
 /// (given as its `to_string_repr()` string) refers to the symbol we are

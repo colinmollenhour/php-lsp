@@ -1,7 +1,7 @@
 use php_ast::{ClassMemberKind, EnumMemberKind, ExprKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind};
 
-use crate::ast::{ParsedDoc, SourceView};
+use crate::document::ast::{ParsedDoc, SourceView};
 
 use super::{build_function_sig, callable_item, docblock_docs, named_arg_item};
 

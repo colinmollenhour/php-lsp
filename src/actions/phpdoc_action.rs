@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::ast::{ParsedDoc, SourceView, format_type_hint};
+use crate::document::ast::{ParsedDoc, SourceView, format_type_hint};
 
 /// Return "Generate PHPDoc" code actions for any function/method whose declaration line
 /// falls within `range` and does not already have a docblock.

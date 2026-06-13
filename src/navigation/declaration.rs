@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Location, Position, Url};
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::resolve::{Container, Declaration, resolve_declaration};
 use crate::text::{strip_variable_sigil, utf16_code_units, word_at_position};
 

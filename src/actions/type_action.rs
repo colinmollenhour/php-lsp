@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::ast::{ParsedDoc, SourceView};
+use crate::document::ast::{ParsedDoc, SourceView};
 
 /// Return "Add return type" code actions for any function/method within `range`
 /// that has no return type annotation and a concrete body.

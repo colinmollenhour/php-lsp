@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::ast::{ParsedDoc, SourceView, format_type_hint};
+use crate::document::ast::{ParsedDoc, SourceView, format_type_hint};
 
 // ── Public entry points ───────────────────────────────────────────────────────
 

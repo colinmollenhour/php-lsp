@@ -1,6 +1,6 @@
 use super::helpers::*;
 use super::*;
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::lang::config::{DiagnosticsConfig, FeaturesConfig, MAX_INDEXED_FILES};
 use crate::use_import::{build_use_import_edit, find_use_insert_line};
 use tower_lsp::lsp_types::{Position, Range, Url};

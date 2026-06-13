@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use salsa::Database;
 
-use crate::ast::ParsedDoc;
 use crate::db::input::SourceFile;
+use crate::document::ast::ParsedDoc;
 
 /// Opaque handle to a parsed document. Cheap to clone (refcount bump); never
 /// compared structurally. See module docs for the `Update` contract.

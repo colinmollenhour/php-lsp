@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::{
     DocumentSymbol, Location, OneOf, Range, SymbolInformation, SymbolKind, Url, WorkspaceSymbol,
 };
 
-use crate::ast::{ParsedDoc, SourceView, name_range};
+use crate::document::ast::{ParsedDoc, SourceView, name_range};
 use crate::lang::docblock::parse_docblock;
 use crate::text::zero_width_range;
 
@@ -418,7 +418,7 @@ fn format_fn_signature(
     params: &[php_ast::Param<'_, '_>],
     ret: Option<&php_ast::TypeHint<'_, '_>>,
 ) -> String {
-    use crate::ast::format_type_hint;
+    use crate::document::ast::format_type_hint;
     let params_str = params
         .iter()
         .map(|p| {

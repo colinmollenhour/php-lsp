@@ -677,7 +677,7 @@ mod tests {
 
     #[test]
     fn find_docblock_from_ast() {
-        use crate::ast::ParsedDoc;
+        use crate::document::ast::ParsedDoc;
         let src = "<?php\n/** Greets someone. */\nfunction greet() {}";
         let doc = ParsedDoc::parse(src.to_string());
         let db = find_docblock(&doc.program().stmts, "greet");
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn find_docblock_returns_none_without_docblock() {
-        use crate::ast::ParsedDoc;
+        use crate::document::ast::ParsedDoc;
         let src = "<?php\nfunction greet() {}";
         let doc = ParsedDoc::parse(src.to_string());
         let db = find_docblock(&doc.program().stmts, "greet");

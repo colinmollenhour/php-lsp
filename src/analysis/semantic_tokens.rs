@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{
     SemanticTokensLegend,
 };
 
-use crate::ast::{ParsedDoc, SourceView, str_offset};
+use crate::document::ast::{ParsedDoc, SourceView, str_offset};
 use crate::lang::docblock::parse_docblock;
 use crate::text::utf16_code_units;
 

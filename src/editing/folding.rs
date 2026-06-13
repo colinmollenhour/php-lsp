@@ -1,7 +1,7 @@
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
 
-use crate::ast::{ParsedDoc, SourceView};
+use crate::document::ast::{ParsedDoc, SourceView};
 
 pub fn folding_ranges(_source: &str, doc: &ParsedDoc) -> Vec<FoldingRange> {
     let sv = doc.view();

@@ -16,18 +16,18 @@ impl tower_lsp::lsp_types::notification::Notification for IndexReadyNotification
 use tower_lsp::Client;
 use tower_lsp::lsp_types::*;
 
-use crate::ast::ParsedDoc;
-use crate::document_store::DocumentStore;
+use crate::document::ast::ParsedDoc;
+use crate::document::document_store::DocumentStore;
+use crate::document::open_files::OpenFiles;
 use crate::lang::autoload::Psr4Map;
 use crate::lang::config::LspConfig;
 use crate::lang::phpstorm_meta::PhpStormMeta;
-use crate::open_files::OpenFiles;
 use crate::text::fqn_short_name;
 
 use crate::navigation::references::find_constructor_references;
 
 use crate::analysis::diagnostics::merge_file_diagnostics;
-use crate::open_files::compute_open_file_diagnostics;
+use crate::document::open_files::compute_open_file_diagnostics;
 
 pub struct Backend {
     client: Client,

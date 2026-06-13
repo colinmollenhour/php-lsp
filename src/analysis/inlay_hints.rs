@@ -7,7 +7,7 @@ use php_ast::{
 use serde_json::json;
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position, Range, Url};
 
-use crate::ast::{ParsedDoc, SourceView, format_type_hint};
+use crate::document::ast::{ParsedDoc, SourceView, format_type_hint};
 use crate::file_index::FileIndex;
 use crate::text::fqn_short_name;
 use crate::type_map::TypeMap;

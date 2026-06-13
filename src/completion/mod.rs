@@ -27,7 +27,7 @@ use tower_lsp::lsp_types::{
 
 use tower_lsp::lsp_types::{Documentation, MarkupContent, MarkupKind};
 
-use crate::ast::{ParsedDoc, format_type_hint};
+use crate::document::ast::{ParsedDoc, format_type_hint};
 use crate::hover::format_params_str;
 use crate::lang::docblock::find_docblock;
 use crate::lang::phpstorm_meta::PhpStormMeta;

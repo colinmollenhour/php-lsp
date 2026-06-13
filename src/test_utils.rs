@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::{Position, Url};
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 
 /// Strip the `$0` cursor marker from a PHP source string and return
 /// the cleaned source together with the `Position` of that marker.

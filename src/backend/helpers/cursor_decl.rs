@@ -12,7 +12,7 @@ use php_ast::{
     StmtKind,
 };
 
-use crate::ast::str_offset;
+use crate::document::ast::str_offset;
 
 use super::position::position_to_byte_offset;
 

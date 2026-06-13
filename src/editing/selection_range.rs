@@ -4,7 +4,7 @@ use php_ast::{
 };
 use tower_lsp::lsp_types::{Position, Range, SelectionRange};
 
-use crate::ast::{ParsedDoc, SourceView};
+use crate::document::ast::{ParsedDoc, SourceView};
 
 /// Build a selection-range chain for each cursor position.
 /// Levels go from innermost to outermost via `parent` links.

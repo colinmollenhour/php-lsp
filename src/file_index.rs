@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 
-use crate::ast::{ParsedDoc, format_type_hint};
+use crate::document::ast::{ParsedDoc, format_type_hint};
 use crate::lang::docblock::parse_docblock;
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -154,12 +154,12 @@ fn fqn(namespace: Option<&str>, name: &str) -> Box<str> {
 
 fn collect_stmts(
     source: &str,
-    view: &crate::ast::SourceView<'_>,
+    view: &crate::document::ast::SourceView<'_>,
     stmts: &[Stmt<'_, '_>],
     namespace: Option<&str>,
     index: &mut FileIndex,
 ) {
-    use crate::ast::str_offset;
+    use crate::document::ast::str_offset;
 
     let name_char = |name: &str| -> u32 {
         str_offset(source, name)
@@ -567,7 +567,7 @@ fn method_visibility(vis: Option<php_ast::Visibility>) -> Visibility {
 /// Return the source line (0-based) of the `@method method_name` tag within
 /// `doc_comment`. Falls back to the docblock's own start line if not found.
 fn doc_method_tag_line(
-    view: &crate::ast::SourceView<'_>,
+    view: &crate::document::ast::SourceView<'_>,
     doc_comment: &php_ast::Comment<'_>,
     method_name: &str,
 ) -> u32 {

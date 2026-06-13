@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 
 pub const PHP_LSP_SOURCE: &str = "php-lsp";
 
@@ -109,7 +109,7 @@ mod tests {
             ("emoji_in_string_ctx", "<?php\n$x = \u{1F600};"),
         ];
         for (label, src) in cases {
-            let doc = crate::ast::ParsedDoc::parse(src.to_string());
+            let doc = crate::document::ast::ParsedDoc::parse(src.to_string());
             for e in &doc.errors {
                 let span = e.span();
                 let ch = src[span.start as usize..].chars().next();

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::navigation::references::find_references_with_use;
 use crate::text::utf16_code_units;
 use crate::walk::{collect_var_refs_in_scope, property_refs_in_stmts};

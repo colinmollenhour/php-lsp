@@ -3,7 +3,7 @@ use std::sync::Arc;
 use mir_analyzer::AnalysisSession;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position};
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::stub_members::stub_class_members;
 use crate::text::{fqn_short_name, utf16_offset_to_byte};
 use crate::type_map::{

@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::{
     SignatureInformation, Url,
 };
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::file_index::{FileIndex, ParamDef};
 use crate::hover::format_params_str;
 use crate::lang::docblock::find_docblock;

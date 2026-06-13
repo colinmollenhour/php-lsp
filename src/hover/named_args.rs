@@ -3,7 +3,7 @@ use std::cell::OnceCell;
 use php_ast::{ClassMemberKind, NamespaceBody, Param, Stmt, StmtKind};
 use tower_lsp::lsp_types::Position;
 
-use crate::ast::{ParsedDoc, format_type_hint};
+use crate::document::ast::{ParsedDoc, format_type_hint};
 use crate::text::{fqn_short_name, utf16_offset_to_byte};
 use crate::type_map::TypeMap;
 
@@ -231,7 +231,7 @@ pub(crate) fn named_arg_hover_value(
     doc: &ParsedDoc,
     other_docs: &[(
         tower_lsp::lsp_types::Url,
-        std::sync::Arc<crate::ast::ParsedDoc>,
+        std::sync::Arc<crate::document::ast::ParsedDoc>,
     )],
     position: Position,
     callee: &NamedArgCallee,

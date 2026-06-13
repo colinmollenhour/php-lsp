@@ -41,16 +41,17 @@
 #![allow(dead_code)]
 
 // Public modules exposed for benchmark crates.
-pub mod ast;
 pub mod cache;
 pub mod completion;
 pub mod db;
-pub mod document_store;
 pub mod hover;
 pub mod resolve;
 pub mod type_map;
 pub mod type_query;
 pub mod walk;
+
+// Document lifecycle (parsed AST, salsa document store, open-file state).
+mod document;
 
 // PHP-language model (config, autoload, phpstorm_meta, docblock, php_names)
 // and generic text mechanics (offset/word/fuzzy/range).
@@ -72,7 +73,6 @@ pub mod navigation;
 // Infrastructure modules.
 pub mod backend;
 mod file_rename;
-mod open_files;
 pub mod panic_guard;
 mod stub_members;
 pub mod symbols;
@@ -83,6 +83,8 @@ mod workspace_scan;
 
 // Re-exports for benchmark crates that use the flat `php_lsp::X` paths.
 pub use analysis::semantic_diagnostics;
+pub use document::ast;
+pub use document::document_store;
 pub use editing::rename;
 pub use lang::config;
 pub use navigation::call_hierarchy;

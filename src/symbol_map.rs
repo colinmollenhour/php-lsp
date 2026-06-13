@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::Range;
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::hover::formatting::declaration_signature;
 use crate::resolve::{Container, Declaration};
 
@@ -105,7 +105,7 @@ fn doc_to_markdown(c: &php_ast::Comment<'_>) -> Option<String> {
 
 fn collect_stmts<'a>(
     stmts: &'a [Stmt<'a, 'a>],
-    sv: crate::ast::SourceView<'_>,
+    sv: crate::document::ast::SourceView<'_>,
     out: &mut HashMap<String, Vec<SymbolEntry>>,
 ) {
     for stmt in stmts {
@@ -310,7 +310,7 @@ fn collect_stmts<'a>(
 
 fn collect_members<'a>(
     members: impl Iterator<Item = &'a php_ast::ClassMember<'a, 'a>>,
-    sv: crate::ast::SourceView<'_>,
+    sv: crate::document::ast::SourceView<'_>,
     container: Container,
     out: &mut HashMap<String, Vec<SymbolEntry>>,
 ) {

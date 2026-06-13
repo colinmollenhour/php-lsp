@@ -5,7 +5,7 @@
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 
 use crate::analysis::diagnostics::PHP_LSP_SOURCE;
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::lang::config::DiagnosticsConfig;
 
 /// Run semantic checks on `doc` against the supplied `AnalysisSession`.

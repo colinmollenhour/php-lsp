@@ -9,8 +9,8 @@ use tower_lsp::lsp_types::request::{
 };
 
 use crate::analysis::diagnostics::parse_document_no_diags;
-use crate::document_store::DocumentStore;
-use crate::open_files::OpenFiles;
+use crate::document::document_store::DocumentStore;
+use crate::document::open_files::OpenFiles;
 
 /// Ask all connected clients to re-request semantic tokens, code lenses, inlay hints,
 /// and diagnostics. Called after bulk index operations so that previously-opened editors
@@ -231,8 +231,8 @@ mod tests {
     use super::scan_workspace;
     use crate::analysis::diagnostics::parse_document_no_diags;
     use crate::cache::WorkspaceCache;
-    use crate::document_store::DocumentStore;
-    use crate::open_files::OpenFiles;
+    use crate::document::document_store::DocumentStore;
+    use crate::document::open_files::OpenFiles;
 
     #[tokio::test]
     async fn cache_round_trip_writes_then_reads_file_index() {

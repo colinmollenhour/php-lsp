@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{
     SymbolKind, Url,
 };
 
-use crate::ast::{ParsedDoc, SourceView, span_to_range};
+use crate::document::ast::{ParsedDoc, SourceView, span_to_range};
 use crate::navigation::references::find_references;
 
 /// Find the declaration matching `name` and return a `CallHierarchyItem`.

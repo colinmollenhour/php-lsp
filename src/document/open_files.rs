@@ -4,8 +4,8 @@ use dashmap::DashMap;
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
 use crate::analysis::semantic_diagnostics::issues_to_diagnostics;
-use crate::ast::ParsedDoc;
-use crate::document_store::DocumentStore;
+use crate::document::ast::ParsedDoc;
+use crate::document::document_store::DocumentStore;
 use crate::lang::config::DiagnosticsConfig;
 
 /// Per-open-file state owned by `Backend` (Phase E4).

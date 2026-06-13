@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::{DocumentHighlight, DocumentHighlightKind, Position, Range};
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::text::word_at_position;
 use crate::walk::{collect_var_refs_in_scope, refs_in_stmts};
 

@@ -14,7 +14,7 @@ use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use serde_json::json;
 use tower_lsp::lsp_types::{CodeLens, Command, Url};
 
-use crate::ast::{ParsedDoc, SourceView};
+use crate::document::ast::{ParsedDoc, SourceView};
 use crate::navigation::implementation::find_implementations;
 use crate::navigation::references::{SymbolKind, find_references};
 use crate::type_map::parent_class_name;

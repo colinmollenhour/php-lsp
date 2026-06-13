@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::ast::{ParsedDoc, SourceView, format_type_hint};
+use crate::document::ast::{ParsedDoc, SourceView, format_type_hint};
 use crate::hover::format_params_str;
 use crate::text::fqn_short_name;
 

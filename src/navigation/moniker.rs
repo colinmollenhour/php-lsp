@@ -3,7 +3,7 @@ use tower_lsp::lsp_types::*;
 
 use std::collections::HashMap;
 
-use crate::ast::ParsedDoc;
+use crate::document::ast::ParsedDoc;
 use crate::text::word_at_position;
 
 /// Return a moniker for the symbol at `position`.

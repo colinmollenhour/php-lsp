@@ -2,7 +2,7 @@
 use php_ast::{ExprKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{DocumentLink, Position, Range, Url};
 
-use crate::ast::{ParsedDoc, SourceView};
+use crate::document::ast::{ParsedDoc, SourceView};
 use crate::text::byte_to_utf16;
 
 pub fn document_links(uri: &Url, doc: &ParsedDoc, _source: &str) -> Vec<DocumentLink> {
