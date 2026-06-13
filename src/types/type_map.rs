@@ -460,33 +460,6 @@ fn collect_types_expr(
                 {
                     map.insert(format!("${}", var_name.as_str()), inferred);
                 }
-                // $var = ClassName::CaseName for enum cases or ClassName::CONST
-                // Try StaticPropertyAccess first (enum cases might use this)
-                if let ExprKind::StaticPropertyAccess(s) = &assign.value.kind
-                    && let ExprKind::Identifier(class_name) = &s.class.kind
-                {
-                    map.insert(format!("${}", var_name.as_str()), class_name.to_string());
-                }
-                // Also try ClassConstAccess (might be how enum cases are parsed)
-                if let ExprKind::ClassConstAccess(c) = &assign.value.kind
-                    && let ExprKind::Identifier(class_name) = &c.class.kind
-                {
-                    map.insert(format!("${}", var_name.as_str()), class_name.to_string());
-                }
-            }
-            // Handle destructuring: [$a, $b] = [...] or list($a, $b) = [...]
-            else if let ExprKind::Array(elements) = &assign.target.kind {
-                for elem in elements.iter() {
-                    // In destructuring, variables can be in either key or value
-                    // For [$a, $b], variables are in value; for [key => $var], variable is in value
-                    if let ExprKind::Variable(var_name) = &elem.value.kind {
-                        map.entry(format!("${}", var_name.as_str())).or_default();
-                    } else if let Some(key) = &elem.key
-                        && let ExprKind::Variable(var_name) = &key.kind
-                    {
-                        map.entry(format!("${}", var_name.as_str())).or_default();
-                    }
-                }
             }
             collect_types_expr(source, assign.value, map, meta, cursor_byte, doc);
         }
