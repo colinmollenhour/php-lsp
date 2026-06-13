@@ -74,16 +74,16 @@ impl Backend {
     /// Background-index a file from disk, but only if it isn't currently
     /// open in the editor — the editor's buffer is authoritative while a
     /// file is open, and we must not overwrite it with disk contents.
-    fn index_if_not_open(&self, uri: Url, text: &str) {
+    fn ingest_if_not_open(&self, uri: Url, text: &str) {
         if !self.open_files.contains(&uri) {
-            self.docs.index(uri, text);
+            self.docs.ingest(uri, text);
         }
     }
 
-    /// Variant of [`index_if_not_open`] that reuses an already-parsed doc.
-    fn index_from_doc_if_not_open(&self, uri: Url, doc: &ParsedDoc) {
+    /// Variant of [`ingest_if_not_open`] that reuses an already-parsed doc.
+    fn ingest_from_doc_if_not_open(&self, uri: Url, doc: &ParsedDoc) {
         if !self.open_files.contains(&uri) {
-            self.docs.index_from_doc(uri, doc);
+            self.docs.ingest_from_doc(uri, doc);
         }
     }
 

@@ -179,7 +179,7 @@ pub(crate) async fn scan_workspace(
                 docs.mirror_text(uri, text);
                 docs.seed_cached_index(uri, Arc::new(index));
             } else {
-                docs.index_from_doc(uri.clone(), &doc);
+                docs.ingest_from_doc(uri.clone(), &doc);
             }
             1
         };

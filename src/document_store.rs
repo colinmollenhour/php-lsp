@@ -218,7 +218,7 @@ impl DocumentStore {
 
     /// Like [`mirror_text`] but takes an already-allocated `Arc<str>`.
     ///
-    /// Callers that already hold an `Arc<str>` (e.g. `index_from_doc` reusing
+    /// Callers that already hold an `Arc<str>` (e.g. `ingest_from_doc` reusing
     /// `ParsedDoc::source_arc()`) use this to avoid a second allocation and to
     /// ensure `text_cache` and `parsed_cache` hold the same Arc pointer —
     /// enabling `Arc::ptr_eq` validation in `get_parsed_cached`.
@@ -384,19 +384,19 @@ impl DocumentStore {
     ///
     /// Salsa's `parsed_doc` query parses lazily on first read; diagnostics
     /// are populated by `did_open` when the editor actually opens the file.
-    pub fn index(&self, uri: Url, text: &str) {
+    pub fn ingest(&self, uri: Url, text: &str) {
         self.mirror_text(&uri, text);
     }
 
     /// Index a file using an already-parsed `ParsedDoc`, avoiding a second parse.
     ///
-    /// Prefer this over [`index`] when the caller already has a `ParsedDoc` (e.g.
+    /// Prefer this over [`ingest`] when the caller already has a `ParsedDoc` (e.g.
     /// after running `DefinitionCollector` during workspace scan). Reuses the
     /// `Arc<str>` already owned by `doc` so that `text_cache` and `SourceFile::text`
     /// share the same pointer — enabling the `Arc::ptr_eq` fast path in
     /// `get_parsed_cached` on the first subsequent salsa query, without an extra
     /// `Arc::from(source)` allocation.
-    pub fn index_from_doc(&self, uri: Url, doc: &ParsedDoc) {
+    pub fn ingest_from_doc(&self, uri: Url, doc: &ParsedDoc) {
         self.mirror_text_arc(&uri, doc.source_arc());
     }
 
@@ -1037,7 +1037,7 @@ mod tests {
     #[test]
     fn index_registers_file_in_salsa() {
         let store = DocumentStore::new();
-        store.index(uri("/lib.php"), "<?php\nfunction lib_fn() {}");
+        store.ingest(uri("/lib.php"), "<?php\nfunction lib_fn() {}");
         let idx = store.get_index_salsa(&uri("/lib.php")).unwrap();
         assert_eq!(idx.functions.len(), 1);
         assert_eq!(idx.functions[0].name, "lib_fn".into());
@@ -1047,7 +1047,7 @@ mod tests {
     fn remove_hides_file_from_index() {
         let store = DocumentStore::new();
         let u = uri("/lib.php");
-        store.index(u.clone(), "<?php");
+        store.ingest(u.clone(), "<?php");
         store.remove(&u);
         assert!(store.get_index_salsa(&u).is_none());
     }
@@ -1056,7 +1056,7 @@ mod tests {
     fn remove_and_reopen_reuses_source_file_handle() {
         let store = DocumentStore::new();
         let u = uri("/lib.php");
-        store.index(u.clone(), "<?php");
+        store.ingest(u.clone(), "<?php");
         let ft_before = store.source_file(&u).unwrap();
         store.remove(&u);
         assert!(
@@ -1076,7 +1076,7 @@ mod tests {
         let store = DocumentStore::new();
         let uris: Vec<Url> = (0..20).map(|i| uri(&format!("/churn/f{i}.php"))).collect();
         for u in &uris {
-            store.index(u.clone(), "<?php class A {}");
+            store.ingest(u.clone(), "<?php class A {}");
         }
         let count_before = store.source_files_len();
         for _ in 0..10 {
@@ -1084,7 +1084,7 @@ mod tests {
                 store.remove(u);
             }
             for u in &uris {
-                store.index(u.clone(), "<?php class A {}");
+                store.ingest(u.clone(), "<?php class A {}");
             }
         }
         assert_eq!(
@@ -1098,7 +1098,7 @@ mod tests {
     fn all_indexes_includes_every_mirrored_file() {
         let store = DocumentStore::new();
         open(&store, uri("/a.php"), "<?php\nfunction a() {}".to_string());
-        store.index(uri("/b.php"), "<?php\nfunction b() {}");
+        store.ingest(uri("/b.php"), "<?php\nfunction b() {}");
         assert_eq!(store.all_indexes().len(), 2);
     }
 
@@ -1135,7 +1135,7 @@ mod tests {
     #[test]
     fn index_populates_file_index_with_symbols() {
         let store = DocumentStore::new();
-        store.index(uri("/a.php"), "<?php\nfunction hello() {}");
+        store.ingest(uri("/a.php"), "<?php\nfunction hello() {}");
         let idx = store.get_index_salsa(&uri("/a.php")).unwrap();
         assert_eq!(idx.functions.len(), 1);
         assert_eq!(idx.functions[0].name, "hello".into());
@@ -1193,20 +1193,20 @@ mod tests {
     }
 
     #[test]
-    fn mirror_tracks_index_and_index_from_doc() {
+    fn mirror_tracks_ingest_and_ingest_from_doc() {
         let store = DocumentStore::new();
 
         // Background `index(url, text)` path.
         let u1 = uri("/bg1.php");
-        store.index(u1.clone(), "<?php\nclass Bg1 {}");
+        store.ingest(u1.clone(), "<?php\nclass Bg1 {}");
         assert_eq!(salsa_index_names(&store, &u1), vec!["Bg1".to_string()]);
 
-        // `index_from_doc(url, &doc)` path (workspace-scan Phase 2).
+        // `ingest_from_doc(url, &doc)` path (workspace-scan Phase 2).
         let u2 = uri("/bg2.php");
         let doc = crate::analysis::diagnostics::parse_document_no_diags(
             "<?php\nclass Bg2 {}\nfunction f() {}",
         );
-        store.index_from_doc(u2.clone(), &doc);
+        store.ingest_from_doc(u2.clone(), &doc);
         assert_eq!(
             salsa_index_names(&store, &u2),
             vec!["Bg2".to_string(), "f".to_string()]
@@ -1238,7 +1238,7 @@ mod tests {
         let overflow = PARSED_CACHE_CAP + 100;
         for i in 0..overflow {
             let u = uri(&format!("/cap/file{i}.php"));
-            store.index(u.clone(), "<?php\nclass A {}");
+            store.ingest(u.clone(), "<?php\nclass A {}");
             // Force a parsed_cache insert via get_doc_salsa.
             let _ = store.get_doc_salsa(&u);
         }
@@ -1277,7 +1277,7 @@ mod tests {
         // open/closed distinction now lives on `Backend::get_doc`.
         let store = DocumentStore::new();
         let u = uri("/e4_doc.php");
-        store.index(u.clone(), "<?php\nclass P {}");
+        store.ingest(u.clone(), "<?php\nclass P {}");
         assert!(store.get_doc_salsa(&u).is_some());
     }
 
@@ -1418,7 +1418,7 @@ mod tests {
         const N: usize = 50;
         for i in 0..N {
             let u = uri(&format!("/scan/file{i}.php"));
-            store.index(u, &format!("<?php\nclass C{i} {{}}\nfunction f{i}() {{}}"));
+            store.ingest(u, &format!("<?php\nclass C{i} {{}}\nfunction f{i}() {{}}"));
         }
 
         let first: Vec<_> = store.all_docs_for_scan();
@@ -1443,7 +1443,7 @@ mod tests {
         // not the rest. This locks in self-eviction via Arc::ptr_eq on text.
         let edited_url = uri("/scan/file0.php");
         let pre_edit = store.get_doc_salsa(&edited_url).unwrap();
-        store.index(edited_url.clone(), "<?php\nclass C0Edited {}");
+        store.ingest(edited_url.clone(), "<?php\nclass C0Edited {}");
         let post_edit = store.get_doc_salsa(&edited_url).unwrap();
         assert!(
             !Arc::ptr_eq(&pre_edit, &post_edit),

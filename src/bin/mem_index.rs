@@ -137,9 +137,9 @@ fn main() {
             let doc = ParsedDoc::parse(src_arc.clone());
             let file: Arc<str> = Arc::from(url.as_str());
             s.ingest_file(file, src_arc);
-            store.index_from_doc(url.clone(), &doc);
+            store.ingest_from_doc(url.clone(), &doc);
         } else {
-            store.index(url.clone(), src);
+            store.ingest(url.clone(), src);
         }
     }
 

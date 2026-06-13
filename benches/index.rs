@@ -20,7 +20,7 @@ fn bench_index_single(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(name), source, |b, src| {
             b.iter(|| {
                 let store = DocumentStore::new();
-                store.index(uri.clone(), src);
+                store.ingest(uri.clone(), src);
             });
         });
     }
@@ -31,7 +31,7 @@ fn bench_index_single(c: &mut Criterion) {
 fn bench_get_doc(c: &mut Criterion) {
     let store = DocumentStore::new();
     let uri = Url::parse("file:///bench/medium.php").unwrap();
-    store.index(uri.clone(), MEDIUM);
+    store.ingest(uri.clone(), MEDIUM);
 
     c.bench_function("index/get_doc", |b| {
         b.iter(|| black_box(store.get_doc_salsa(&uri)));
@@ -45,7 +45,7 @@ fn bench_all_docs(c: &mut Criterion) {
         .map(|i| Url::parse(&format!("file:///bench/file{i}.php")).unwrap())
         .collect();
     for u in &urls {
-        store.index(u.clone(), SMALL);
+        store.ingest(u.clone(), SMALL);
     }
 
     c.bench_function("index/all_docs_10", |b| {
@@ -80,7 +80,7 @@ fn bench_workspace_scan(c: &mut Criterion) {
                     let store = DocumentStore::new();
                     for i in 0..n {
                         let (_, src) = fixtures[i % fixtures.len()];
-                        store.index(uris[i].clone(), src);
+                        store.ingest(uris[i].clone(), src);
                     }
                 });
             },
@@ -129,7 +129,7 @@ fn bench_workspace_scan_laravel(c: &mut Criterion) {
             // keeps every file in the mirror. The old `set_max_indexed`
             // call has been removed.
             for (url, src) in &php_files {
-                store.index(url.clone(), src);
+                store.ingest(url.clone(), src);
             }
         });
     });
@@ -148,7 +148,7 @@ fn bench_mirror_same_text_contended(c: &mut Criterion) {
 
     let store = Arc::new(DocumentStore::new());
     let uri = Url::parse("file:///bench/mirror.php").unwrap();
-    store.index(uri.clone(), MEDIUM);
+    store.ingest(uri.clone(), MEDIUM);
 
     let threads = 8usize;
     let iters_per_thread = 500usize;
@@ -161,7 +161,7 @@ fn bench_mirror_same_text_contended(c: &mut Criterion) {
                 let uri = uri.clone();
                 handles.push(std::thread::spawn(move || {
                     for _ in 0..iters_per_thread {
-                        store.index(black_box(uri.clone()), black_box(MEDIUM));
+                        store.ingest(black_box(uri.clone()), black_box(MEDIUM));
                     }
                 }));
             }
@@ -179,7 +179,7 @@ fn bench_mirror_same_text_contended(c: &mut Criterion) {
 fn bench_get_doc_repeated(c: &mut Criterion) {
     let store = DocumentStore::new();
     let uri = Url::parse("file:///bench/hotdoc.php").unwrap();
-    store.index(uri.clone(), MEDIUM);
+    store.ingest(uri.clone(), MEDIUM);
     let _warm = store.get_doc_salsa(&uri);
 
     c.bench_function("index/get_doc_repeated", |b| {
@@ -208,7 +208,7 @@ fn bench_sync_workspace_clean(c: &mut Criterion) {
             .collect();
         for (i, uri) in uris.iter().enumerate() {
             let (_, src) = fixtures[i % fixtures.len()];
-            store.index(uri.clone(), src);
+            store.ingest(uri.clone(), src);
         }
         // Warm: initial sync so the dirty flag is clear.
         let _ = store.get_workspace_index_salsa();
@@ -243,7 +243,7 @@ fn bench_sync_workspace_dirty(c: &mut Criterion) {
             .collect();
         for (i, uri) in uris.iter().enumerate() {
             let (_, src) = fixtures[i % fixtures.len()];
-            store.index(uri.clone(), src);
+            store.ingest(uri.clone(), src);
         }
         // Warm: initial sync so workspace salsa input is set.
         let _ = store.get_workspace_index_salsa();
@@ -296,7 +296,7 @@ fn bench_candidate_docs_prefilter(c: &mut Criterion) {
     let make_store = || {
         let store = DocumentStore::new();
         for (url, src) in &php_files {
-            store.index(url.clone(), src);
+            store.ingest(url.clone(), src);
         }
         store
     };
@@ -373,7 +373,7 @@ fn bench_candidate_docs_prefilter_laravel(c: &mut Criterion) {
     let make_store = || {
         let store = DocumentStore::new();
         for (url, src) in &php_files {
-            store.index(url.clone(), src);
+            store.ingest(url.clone(), src);
         }
         store
     };

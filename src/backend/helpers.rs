@@ -721,7 +721,7 @@ impl Backend {
         // the AST regardless of whether the editor has the file open.
         if self.docs.get_doc_salsa(&file_uri).is_none() {
             let text = tokio::fs::read_to_string(&path).await.ok()?;
-            self.index_if_not_open(file_uri.clone(), &text);
+            self.ingest_if_not_open(file_uri.clone(), &text);
         }
 
         let doc = self.docs.get_doc_salsa(&file_uri)?;

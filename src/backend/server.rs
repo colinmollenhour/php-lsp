@@ -790,12 +790,12 @@ impl LanguageServer for Backend {
                     if let Ok(path) = change.uri.to_file_path()
                         && let Ok(text) = tokio::fs::read_to_string(&path).await
                     {
-                        // Salsa path: index_from_doc mirrors the new text into
+                        // Salsa path: ingest_from_doc mirrors the new text into
                         // the SourceFile input. On the next codebase() call,
                         // salsa re-runs file_definitions for this file and the
                         // aggregator re-folds — no manual remove/collect/finalize.
                         let doc = parse_document_no_diags(&text);
-                        self.index_from_doc_if_not_open(change.uri.clone(), &doc);
+                        self.ingest_from_doc_if_not_open(change.uri.clone(), &doc);
                     }
                 }
                 FileChangeType::DELETED => {
@@ -1945,7 +1945,7 @@ impl LanguageServer for Backend {
                 && let Ok(path) = new_uri.to_file_path()
                 && let Ok(text) = tokio::fs::read_to_string(&path).await
             {
-                self.index_if_not_open(new_uri, &text);
+                self.ingest_if_not_open(new_uri, &text);
             }
         }
     }
@@ -2019,7 +2019,7 @@ impl LanguageServer for Backend {
                 && let Ok(path) = uri.to_file_path()
                 && let Ok(text) = tokio::fs::read_to_string(&path).await
             {
-                self.index_if_not_open(uri, &text);
+                self.ingest_if_not_open(uri, &text);
             }
         }
         send_refresh_requests(&self.client).await;

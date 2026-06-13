@@ -33,7 +33,7 @@ fn setup_store_50() -> (DocumentStore, Vec<Url>) {
         .map(|i| Url::parse(&format!("file:///iai/file{i}.php")).unwrap())
         .collect();
     for (i, uri) in urls.iter().enumerate() {
-        store.index(uri.clone(), fixtures[i % fixtures.len()]);
+        store.ingest(uri.clone(), fixtures[i % fixtures.len()]);
     }
     (store, urls)
 }

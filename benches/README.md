@@ -111,7 +111,7 @@ Delta (peak - before):   48 864 KB (47.7 MB)
 
 The large DocumentStore delta (~47 MB) comes from the system allocator holding
 freed bumpalo arena pages after the double-parse per file in `scan_workspace`
-(parse #1 for `DefinitionCollector`, parse #2 inside `docs.index()`). The
+(parse #1 for `DefinitionCollector`, parse #2 inside `docs.ingest()`). The
 Codebase itself is tiny.
 
 This writes `dhat-heap.json` in the current directory. Open it at:
