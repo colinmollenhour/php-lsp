@@ -27,6 +27,7 @@ use crate::util::fqn_short_name;
 use crate::navigation::references::find_constructor_references;
 
 use crate::analysis::diagnostics::merge_file_diagnostics;
+use crate::open_files::compute_open_file_diagnostics;
 
 pub struct Backend {
     client: Client,
@@ -497,6 +498,34 @@ async fn compute_dependent_publishes_owned(
     })
     .await
     .unwrap_or_default()
+}
+
+/// Compute and publish diagnostics for `uri`, then republish any open files
+/// that depend on it. Requires `open_files.set_parse_diagnostics` to be up to
+/// date for `uri` before this is called.
+pub(super) async fn publish_with_dependents(
+    client: Client,
+    docs: Arc<DocumentStore>,
+    open_files: OpenFiles,
+    uri: Url,
+    diag_cfg: crate::config::DiagnosticsConfig,
+) {
+    let docs_ref = Arc::clone(&docs);
+    let open_files_ref = open_files.clone();
+    let uri_ref = uri.clone();
+    let diag_cfg_ref = diag_cfg.clone();
+    let all_diags = tokio::task::spawn_blocking(move || {
+        compute_open_file_diagnostics(&docs_ref, &open_files_ref, &uri_ref, &diag_cfg_ref)
+    })
+    .await
+    .unwrap_or_default();
+    client
+        .publish_diagnostics(uri.clone(), all_diags, None)
+        .await;
+    let dependents = compute_dependent_publishes_owned(docs, open_files, uri, diag_cfg).await;
+    for (dep_uri, dep_diags) in dependents {
+        client.publish_diagnostics(dep_uri, dep_diags, None).await;
+    }
 }
 
 /// Generate a stable result_id for diagnostics. Uses the count and position of diagnostics

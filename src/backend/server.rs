@@ -70,7 +70,7 @@ use crate::navigation::type_hierarchy::{
 
 use crate::analysis::code_lens::code_lenses;
 use crate::analysis::diagnostics::{
-    merge_file_diagnostics, parse_document, parse_document_no_diags,
+    diagnostics_from_doc, merge_file_diagnostics, parse_document, parse_document_no_diags,
 };
 use crate::analysis::document_highlight::document_highlights;
 use crate::analysis::inlay_hints::inlay_hints;
@@ -96,7 +96,7 @@ use super::helpers::{
 };
 use super::{
     Backend, IndexReadyNotification, build_mir_symbol, compute_dependent_publishes_owned,
-    compute_diagnostic_result_id, resolve_reference_symbol,
+    compute_diagnostic_result_id, publish_with_dependents, resolve_reference_symbol,
 };
 
 #[async_trait]
@@ -676,52 +676,25 @@ impl LanguageServer for Backend {
             // Store text immediately so other features work while parsing.
             // This also mirrors the new text into salsa, so the codebase query
             // sees it when semantic_diagnostics runs below.
-            self.set_open_text(uri.clone(), text.clone());
+            self.set_open_text(uri.clone(), text);
 
-            let docs_for_spawn = Arc::clone(&self.docs);
-            let diag_cfg = self.config.load().diagnostics.clone();
-
-            // Phase I: semantic analysis on the blocking pool (CPU-bound, hundreds
-            // of ms on cold files).  We skip the redundant standalone parse_document
-            // call that used to precede this — get_semantic_issues_salsa already
-            // parses via salsa internally and caches the ParsedDoc.  Parse errors
-            // are read from that cached doc after the blocking task completes.
-            let uri_sem = uri.clone();
-            let sem_issues = tokio::task::spawn_blocking(move || {
-                docs_for_spawn.get_semantic_issues_salsa(&uri_sem)
-            })
-            .await
-            .unwrap_or(None);
-
-            // Extract parse errors from the salsa-cached ParsedDoc.  On the fast
+            // Seed parse diagnostics from the salsa-cached doc. On the fast
             // path this is a lock-free DashMap lookup — no re-parse.
             let parse_diags = self
                 .docs
                 .get_doc_salsa(&uri)
-                .map(|doc| crate::analysis::diagnostics::diagnostics_from_doc(&doc))
+                .map(|doc| diagnostics_from_doc(&doc))
                 .unwrap_or_default();
+            self.set_parse_diagnostics(&uri, parse_diags);
 
-            self.set_parse_diagnostics(&uri, parse_diags.clone());
-            let semantic = sem_issues
-                .map(|issues| {
-                    crate::semantic_diagnostics::issues_to_diagnostics(&issues, &uri, &diag_cfg)
-                })
-                .unwrap_or_default();
-            let all_diags = merge_file_diagnostics(parse_diags, semantic);
-            // Publish for the opened file FIRST — see did_change for why ordering matters.
-            self.client
-                .publish_diagnostics(uri.clone(), all_diags, None)
-                .await;
-
-            // Cross-file republish via the session's parallel re-analysis API.
-            // Only files whose Pass-2 actually changed appear in the result —
-            // we don't blast every open file with a publish like the old loop.
-            let dependents = self.compute_dependent_publishes(&uri, &diag_cfg).await;
-            for (dep_uri, dep_diags) in dependents {
-                self.client
-                    .publish_diagnostics(dep_uri, dep_diags, None)
-                    .await;
-            }
+            publish_with_dependents(
+                self.client.clone(),
+                Arc::clone(&self.docs),
+                self.open_files.clone(),
+                uri,
+                self.config.load().diagnostics.clone(),
+            )
+            .await;
         })
         .await
     }
@@ -761,69 +734,18 @@ impl LanguageServer for Backend {
             let diag_cfg = self.config.load().diagnostics.clone();
             tokio::spawn(async move {
                 // 100 ms debounce: if another edit arrives before we parse,
-                // the version gate in Backend below will discard this result.
+                // the version gate below will discard this result.
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-                let (_doc, diagnostics) =
+                let (_doc, parse_diags) =
                     tokio::task::spawn_blocking(move || parse_document(&text))
                         .await
                         .unwrap_or_else(|_| (ParsedDoc::default(), vec![]));
 
                 // Only apply if no newer edit arrived while we were parsing.
-                // Backend-level gate replaces the old `apply_parse` version check.
                 if open_files.current_version(&uri) == Some(version) {
-                    open_files.set_parse_diagnostics(&uri, diagnostics.clone());
-
-                    // Phase I: the salsa `semantic_issues` walk is synchronous
-                    // and CPU-bound on a cold file — run it on the blocking
-                    // pool so the async runtime stays responsive. Returns the
-                    // full diagnostic bundle (semantic + dup-decl + deprecated
-                    // calls), all computed off-thread.
-                    let docs_sem = Arc::clone(&docs);
-                    let uri_sem = uri.clone();
-                    let diag_cfg_sem = diag_cfg.clone();
-                    let extra_sem = tokio::task::spawn_blocking(move || {
-                        docs_sem
-                            .get_semantic_issues_salsa(&uri_sem)
-                            .map(|issues| {
-                                crate::semantic_diagnostics::issues_to_diagnostics(
-                                    &issues,
-                                    &uri_sem,
-                                    &diag_cfg_sem,
-                                )
-                            })
-                            .unwrap_or_default()
-                    })
-                    .await
-                    .unwrap_or_default();
-
-                    let all_diags = merge_file_diagnostics(diagnostics, extra_sem);
-                    // Publish for the changed file FIRST. Test harnesses (and
-                    // some clients) consume publishDiagnostics for unrelated
-                    // URIs while waiting for one specific URI; reversing this
-                    // order would silently swallow the changed file's publish.
-                    client
-                        .publish_diagnostics(uri.clone(), all_diags, None)
-                        .await;
-
-                    // Cross-file republish via the session's parallel
-                    // re-analysis API. Only files whose Pass-2 changed are
-                    // returned — the old loop blasted every open file.
-                    //
-                    // Race window: if `other` is being edited concurrently,
-                    // its own debounced did_change will still fire a republish,
-                    // so any briefly-stale publish here self-corrects within
-                    // ~100 ms.
-                    let dependents = compute_dependent_publishes_owned(
-                        Arc::clone(&docs),
-                        open_files.clone(),
-                        uri.clone(),
-                        diag_cfg.clone(),
-                    )
-                    .await;
-                    for (dep_uri, dep_diags) in dependents {
-                        client.publish_diagnostics(dep_uri, dep_diags, None).await;
-                    }
+                    open_files.set_parse_diagnostics(&uri, parse_diags);
+                    publish_with_dependents(client, docs, open_files, uri, diag_cfg).await;
                 }
             });
         })
