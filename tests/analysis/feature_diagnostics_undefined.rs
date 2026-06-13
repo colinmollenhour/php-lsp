@@ -319,7 +319,7 @@ async fn undefined_function_detected_in_closure() {
     server
         .check_diagnostics(
             r#"<?php
-$fn = function() {
+$fn = function(): void {
     nonexistent_function();
 //  ^^^^^^^^^^^^^^^^^^^^^^ error: nonexistent_function
 };
