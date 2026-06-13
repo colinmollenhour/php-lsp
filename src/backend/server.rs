@@ -851,6 +851,9 @@ impl LanguageServer for Backend {
             let uri_for_tm = uri.clone();
             let get_type_map =
                 move || docs_for_tm.cached_type_map(&uri_for_tm, &doc_for_tm, meta_opt);
+            let session = self
+                .docs
+                .analysis_session(self.docs.workspace_php_version());
             let ctx = CompletionCtx {
                 source: Some(&source),
                 position: Some(position),
@@ -860,6 +863,7 @@ impl LanguageServer for Backend {
                 find_class_doc: Some(&find_class_doc_fn),
                 analysis: analysis.as_deref(),
                 type_map: Some(&get_type_map),
+                session: Some(session),
             };
             Ok(Some(CompletionResponse::Array(filtered_completions_at(
                 &doc,
@@ -1254,6 +1258,9 @@ impl LanguageServer for Backend {
             let other_docs = self.docs.other_docs(uri, &self.open_urls());
             let other_maps = self.docs.other_symbol_maps(uri, &self.open_urls());
             let analysis = self.cached_analysis_async(uri).await;
+            let hover_session = self
+                .docs
+                .analysis_session(self.docs.workspace_php_version());
             let result = hover_info_with_maps(
                 &source,
                 &doc,
@@ -1261,6 +1268,7 @@ impl LanguageServer for Backend {
                 position,
                 &other_docs,
                 &other_maps,
+                Some(&hover_session),
             );
             if result.is_some() {
                 return Ok(result);

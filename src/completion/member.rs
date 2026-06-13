@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
+use mir_analyzer::AnalysisSession;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position};
 
 use crate::ast::ParsedDoc;
-use crate::stubs::builtin_class_members;
+use crate::stub_members::stub_class_members;
 use crate::type_map::{
     ClassMembers, enclosing_class_at, is_backed_enum, is_enum, members_of_class, mixin_classes_of,
     parent_class_name,
@@ -17,8 +18,9 @@ pub(super) fn all_instance_members(
     doc: &ParsedDoc,
     other_docs: &[Arc<ParsedDoc>],
     find_class_doc: Option<super::ClassDocLookup<'_>>,
+    session: Option<&AnalysisSession>,
 ) -> Vec<CompletionItem> {
-    all_members(class_name, doc, other_docs, find_class_doc, false)
+    all_members(class_name, doc, other_docs, find_class_doc, session, false)
 }
 
 pub(super) fn all_static_members(
@@ -26,8 +28,9 @@ pub(super) fn all_static_members(
     doc: &ParsedDoc,
     other_docs: &[Arc<ParsedDoc>],
     find_class_doc: Option<super::ClassDocLookup<'_>>,
+    session: Option<&AnalysisSession>,
 ) -> Vec<CompletionItem> {
-    all_members(class_name, doc, other_docs, find_class_doc, true)
+    all_members(class_name, doc, other_docs, find_class_doc, session, true)
 }
 
 /// Common class-hierarchy traversal for both instance (`->`) and static (`::`)
@@ -39,6 +42,7 @@ fn all_members(
     doc: &ParsedDoc,
     other_docs: &[Arc<ParsedDoc>],
     find_class_doc: Option<super::ClassDocLookup<'_>>,
+    session: Option<&AnalysisSession>,
     is_static: bool,
 ) -> Vec<CompletionItem> {
     let all: Vec<&ParsedDoc> = std::iter::once(doc)
@@ -148,7 +152,8 @@ fn all_members(
 
         // Built-in stubs only apply when the class is not defined in any user
         // document — a user class shadowing a built-in name wins.
-        if !found_in_docs && let Some(stub) = builtin_class_members(&current) {
+        if !found_in_docs && let Some(stub) = session.and_then(|s| stub_class_members(s, &current))
+        {
             if parent.is_none() {
                 parent = stub.parent.clone();
             }

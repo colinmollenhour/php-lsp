@@ -38,7 +38,7 @@ mod file_rename;
 mod open_files;
 pub mod panic_guard;
 mod phpstorm_meta;
-mod stubs;
+mod stub_members;
 pub mod symbols;
 #[cfg(test)]
 mod test_utils;

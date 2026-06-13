@@ -217,6 +217,9 @@ pub struct CompletionCtx<'a> {
     /// instead of walking the full AST on every completion request. `None`
     /// (unit tests) builds the map fresh.
     pub type_map: Option<&'a dyn Fn() -> Arc<TypeMap>>,
+    /// mir-analyzer session for querying phpstorm-stubs member info on
+    /// built-in PHP classes. `None` in unit tests that don't require stubs.
+    pub session: Option<std::sync::Arc<mir_analyzer::AnalysisSession>>,
 }
 
 /// Whole-doc [`TypeMap`] through the ctx cache when wired, else a fresh build.
@@ -371,9 +374,13 @@ pub fn filtered_completions_at(
                     let mut seen = std::collections::HashSet::new();
                     for class_name in class_names.split('|') {
                         let class_name = class_name.trim();
-                        for item in
-                            all_instance_members(class_name, doc, other_docs, ctx.find_class_doc)
-                        {
+                        for item in all_instance_members(
+                            class_name,
+                            doc,
+                            other_docs,
+                            ctx.find_class_doc,
+                            ctx.session.as_deref(),
+                        ) {
                             if seen.insert(item.label.clone()) {
                                 items.push(item);
                             }
@@ -395,7 +402,13 @@ pub fn filtered_completions_at(
             if let (Some(src), Some(pos)) = (source, position)
                 && let Some(class_name) = resolve_static_receiver(src, doc, other_docs, pos)
             {
-                let items = all_static_members(&class_name, doc, other_docs, ctx.find_class_doc);
+                let items = all_static_members(
+                    &class_name,
+                    doc,
+                    other_docs,
+                    ctx.find_class_doc,
+                    ctx.session.as_deref(),
+                );
                 if !items.is_empty() {
                     return items;
                 }
@@ -510,6 +523,7 @@ pub fn filtered_completions_at(
                                 doc,
                                 other_docs,
                                 ctx.find_class_doc,
+                                ctx.session.as_deref(),
                             ) {
                                 if seen.insert(item.label.clone()) {
                                     items.push(item);

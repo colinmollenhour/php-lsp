@@ -35,7 +35,7 @@ pub(crate) fn hover_info(
     position: Position,
     other_docs: &[(Url, Arc<ParsedDoc>)],
 ) -> Option<Hover> {
-    hover_at(source, doc, analysis, other_docs, position)
+    hover_at(source, doc, analysis, other_docs, position, None)
 }
 
 /// Indexed variant: uses pre-computed [`SymbolMap`]s for the cross-file
@@ -49,8 +49,11 @@ pub fn hover_info_with_maps(
     position: Position,
     other_docs: &[(Url, Arc<ParsedDoc>)],
     other_maps: &[(Url, Arc<SymbolMap>)],
+    session: Option<&mir_analyzer::AnalysisSession>,
 ) -> Option<Hover> {
-    hover_at_with_maps(source, doc, analysis, other_docs, other_maps, position)
+    hover_at_with_maps(
+        source, doc, analysis, other_docs, other_maps, position, session,
+    )
 }
 
 /// Full hover implementation.
@@ -60,6 +63,7 @@ pub fn hover_at(
     analysis: Option<&mir_analyzer::FileAnalysis>,
     other_docs: &[(Url, Arc<ParsedDoc>)],
     position: Position,
+    session: Option<&mir_analyzer::AnalysisSession>,
 ) -> Option<Hover> {
     let hover_range = word_range_at(source, position);
 
@@ -350,55 +354,65 @@ pub fn hover_at(
     }
 
     // Hover on a built-in class name shows stub info.
-    if let Some(stub) = crate::stubs::builtin_class_members(&resolved_word) {
-        let method_names: Vec<&str> = stub
-            .methods
-            .iter()
-            .filter(|(_, is_static)| !is_static)
-            .map(|(n, _)| n.as_str())
-            .take(8)
-            .collect();
-        let static_names: Vec<&str> = stub
-            .methods
-            .iter()
-            .filter(|(_, is_static)| *is_static)
-            .map(|(n, _)| n.as_str())
-            .take(4)
-            .collect();
-        let mut lines = vec![format!("**{}** — built-in class", resolved_word)];
-        if !method_names.is_empty() {
-            lines.push(format!(
-                "Methods: {}",
-                method_names
-                    .iter()
-                    .map(|n| format!("`{n}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        if !static_names.is_empty() {
-            lines.push(format!(
-                "Static: {}",
-                static_names
-                    .iter()
-                    .map(|n| format!("`{n}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        if let Some(parent) = &stub.parent {
-            lines.push(format!("Extends: `{parent}`"));
-        }
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: lines.join("\n\n"),
-            }),
-            range: hover_range,
-        });
+    if let Some(stub) =
+        session.and_then(|s| crate::stub_members::stub_class_members(s, &resolved_word))
+    {
+        return Some(builtin_class_hover(stub, &resolved_word, hover_range));
     }
 
     None
+}
+
+fn builtin_class_hover(
+    stub: crate::type_map::ClassMembers,
+    name: &str,
+    range: Option<tower_lsp::lsp_types::Range>,
+) -> Hover {
+    let method_names: Vec<&str> = stub
+        .methods
+        .iter()
+        .filter(|(_, is_static)| !is_static)
+        .map(|(n, _)| n.as_str())
+        .take(8)
+        .collect();
+    let static_names: Vec<&str> = stub
+        .methods
+        .iter()
+        .filter(|(_, is_static)| *is_static)
+        .map(|(n, _)| n.as_str())
+        .take(4)
+        .collect();
+    let mut lines = vec![format!("**{}** — built-in class", name)];
+    if !method_names.is_empty() {
+        lines.push(format!(
+            "Methods: {}",
+            method_names
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !static_names.is_empty() {
+        lines.push(format!(
+            "Static: {}",
+            static_names
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(parent) = &stub.parent {
+        lines.push(format!("Extends: `{parent}`"));
+    }
+    Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: lines.join("\n\n"),
+        }),
+        range,
+    }
 }
 
 /// Indexed variant of [`hover_at`]: replaces the cross-file `resolve_declaration`
@@ -410,6 +424,7 @@ fn hover_at_with_maps(
     other_docs: &[(Url, Arc<ParsedDoc>)],
     other_maps: &[(Url, Arc<SymbolMap>)],
     position: Position,
+    session: Option<&mir_analyzer::AnalysisSession>,
 ) -> Option<Hover> {
     let hover_range = word_range_at(source, position);
 
@@ -680,52 +695,10 @@ fn hover_at_with_maps(
         });
     }
 
-    if let Some(stub) = crate::stubs::builtin_class_members(&resolved_word) {
-        let method_names: Vec<&str> = stub
-            .methods
-            .iter()
-            .filter(|(_, is_static)| !is_static)
-            .map(|(n, _)| n.as_str())
-            .take(8)
-            .collect();
-        let static_names: Vec<&str> = stub
-            .methods
-            .iter()
-            .filter(|(_, is_static)| *is_static)
-            .map(|(n, _)| n.as_str())
-            .take(4)
-            .collect();
-        let mut lines = vec![format!("**{}** — built-in class", resolved_word)];
-        if !method_names.is_empty() {
-            lines.push(format!(
-                "Methods: {}",
-                method_names
-                    .iter()
-                    .map(|n| format!("`{n}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        if !static_names.is_empty() {
-            lines.push(format!(
-                "Static: {}",
-                static_names
-                    .iter()
-                    .map(|n| format!("`{n}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        if let Some(parent) = &stub.parent {
-            lines.push(format!("Extends: `{parent}`"));
-        }
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: lines.join("\n\n"),
-            }),
-            range: hover_range,
-        });
+    if let Some(stub) =
+        session.and_then(|s| crate::stub_members::stub_class_members(s, &resolved_word))
+    {
+        return Some(builtin_class_hover(stub, &resolved_word, hover_range));
     }
 
     None
@@ -1159,7 +1132,7 @@ mod tests {
     fn hover_on_variable_shows_type() {
         let src = "<?php\n$obj = new Mailer();\n$obj";
         let doc = ParsedDoc::parse(src.to_string());
-        let h = hover_at(src, &doc, None, &[], pos(2, 2));
+        let h = hover_at(src, &doc, None, &[], pos(2, 2), None);
         assert!(h.is_some());
         let text = match h.unwrap().contents {
             HoverContents::Markup(m) => m.value,
@@ -1169,16 +1142,14 @@ mod tests {
     }
 
     #[test]
-    fn hover_on_builtin_class_shows_stub_info() {
+    fn hover_on_builtin_class_requires_session() {
+        // Without a session, built-in class hover returns None (stubs are
+        // queried through the mir AnalysisSession). Full coverage lives in
+        // the integration tests that use TestServer with a real session.
         let src = "<?php\n$pdo = new PDO('sqlite::memory:');\n$pdo->query('SELECT 1');";
         let doc = ParsedDoc::parse(src.to_string());
-        let h = hover_at(src, &doc, None, &[], pos(1, 12));
-        assert!(h.is_some(), "should hover on PDO");
-        let text = match h.unwrap().contents {
-            HoverContents::Markup(m) => m.value,
-            _ => String::new(),
-        };
-        assert!(text.contains("PDO"), "hover should mention PDO");
+        let h = hover_at(src, &doc, None, &[], pos(1, 12), None);
+        assert!(h.is_none(), "built-in class hover requires a session");
     }
 
     #[test]
@@ -1194,6 +1165,7 @@ mod tests {
                 line: 1,
                 character: 20,
             },
+            None,
         );
         assert!(h.is_some());
         let text = match h.unwrap().contents {
