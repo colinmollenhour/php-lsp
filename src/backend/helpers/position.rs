@@ -119,26 +119,29 @@ pub(crate) fn symbol_kind_at(source: &str, position: Position, word: &str) -> Op
     Some(SymbolKind::Function)
 }
 
-/// Convert an LSP `Position` to a byte offset within `source`.
-/// Returns `None` if the position is beyond the end of the source.
-pub(crate) fn position_to_byte_offset(source: &str, position: Position) -> Option<u32> {
-    let mut byte_offset = 0usize;
-    for (idx, line) in source.split('\n').enumerate() {
-        if idx as u32 == position.line {
-            // Strip trailing \r so CRLF lines don't affect column counting.
-            let line_content = line.trim_end_matches('\r');
-            let mut col = 0u32;
-            for (byte_idx, ch) in line_content.char_indices() {
-                if col >= position.character {
-                    return Some((byte_offset + byte_idx) as u32);
-                }
-                col += ch.len_utf16() as u32;
-            }
-            return Some((byte_offset + line_content.len()) as u32);
+/// Convert an LSP `Position` to a byte offset within `source`, returning `None`
+/// when `position.line` is past the end of `source`.
+///
+/// This is the strict counterpart to [`crate::text::position_to_byte_offset`],
+/// which instead clamps an out-of-range line to `source.len()`. Use this variant
+/// for cursor lookups, where a position outside the document means "nothing
+/// here"; columns past the end of a line still clamp to the line's end.
+pub(crate) fn position_to_byte_offset_strict(source: &str, position: Position) -> Option<u32> {
+    let mut line_start = 0usize;
+    for _ in 0..position.line {
+        match source[line_start..].find('\n') {
+            Some(i) => line_start += i + 1,
+            None => return None,
         }
-        byte_offset += line.len() + 1; // +1 for the '\n'
     }
-    None
+    let line_end = source[line_start..]
+        .find('\n')
+        .map_or(source.len(), |i| line_start + i);
+    // Strip a trailing \r so CRLF columns count like LF columns.
+    let line_content = source[line_start..line_end].trim_end_matches('\r');
+    let byte =
+        line_start + crate::text::utf16_offset_to_byte(line_content, position.character as usize);
+    Some(byte as u32)
 }
 
 /// Returns `true` when `inner` is fully contained inside `outer` (the LSP

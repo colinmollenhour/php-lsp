@@ -91,8 +91,7 @@ use crate::editing::signature_help::signature_help;
 use super::helpers::{
     DEFERRED_ACTION_TAGS, class_name_at_construct_decl, cursor_is_on_constant_decl,
     cursor_is_on_method_decl, cursor_is_on_property_decl, defer_actions, is_after_arrow,
-    php_file_op, position_to_byte_offset, promoted_property_at_cursor, range_within, run_phpunit,
-    symbol_kind_at,
+    php_file_op, promoted_property_at_cursor, range_within, run_phpunit, symbol_kind_at,
 };
 use super::{
     Backend, IndexReadyNotification, build_mir_symbol, compute_dependent_publishes_owned,

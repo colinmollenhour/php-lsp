@@ -389,7 +389,7 @@ fn position_to_byte_offset_first_line() {
     let src = "<?php\nfoo();";
     // Character 0 → byte 0.
     assert_eq!(
-        position_to_byte_offset(
+        position_to_byte_offset_strict(
             src,
             Position {
                 line: 0,
@@ -400,7 +400,7 @@ fn position_to_byte_offset_first_line() {
     );
     // Character 4 → byte 4 (last char 'p' of "<?php").
     assert_eq!(
-        position_to_byte_offset(
+        position_to_byte_offset_strict(
             src,
             Position {
                 line: 0,
@@ -411,7 +411,7 @@ fn position_to_byte_offset_first_line() {
     );
     // Character 5 is past the end of "<?php" (5 chars) — clamps to line_content.len().
     assert_eq!(
-        position_to_byte_offset(
+        position_to_byte_offset_strict(
             src,
             Position {
                 line: 0,
@@ -427,7 +427,7 @@ fn position_to_byte_offset_second_line() {
     let src = "<?php\nfoo();";
     // Start of line 1 is byte 6 (after "<?php\n").
     assert_eq!(
-        position_to_byte_offset(
+        position_to_byte_offset_strict(
             src,
             Position {
                 line: 1,
@@ -438,7 +438,7 @@ fn position_to_byte_offset_second_line() {
     );
     // "foo" ends at character 3 → byte 9.
     assert_eq!(
-        position_to_byte_offset(
+        position_to_byte_offset_strict(
             src,
             Position {
                 line: 1,
@@ -454,7 +454,7 @@ fn position_to_byte_offset_line_boundary_returns_none() {
     // A source with exactly one line has only line 0; line 1 must return None.
     let src = "<?php";
     assert_eq!(
-        position_to_byte_offset(
+        position_to_byte_offset_strict(
             src,
             Position {
                 line: 1,
@@ -464,7 +464,7 @@ fn position_to_byte_offset_line_boundary_returns_none() {
         None
     );
     assert_eq!(
-        position_to_byte_offset(
+        position_to_byte_offset_strict(
             src,
             Position {
                 line: 5,

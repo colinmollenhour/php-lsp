@@ -14,7 +14,7 @@ use php_ast::{
 
 use crate::document::ast::str_offset;
 
-use super::position::position_to_byte_offset;
+use super::position::position_to_byte_offset_strict;
 
 /// Returns `true` if the cursor is positioned on a method name inside a class,
 /// interface, trait, or enum declaration in the AST.
@@ -27,7 +27,7 @@ pub(crate) fn cursor_is_on_method_decl(
     stmts: &[Stmt<'_, '_>],
     position: Position,
 ) -> bool {
-    let Some(cursor) = position_to_byte_offset(source, position) else {
+    let Some(cursor) = position_to_byte_offset_strict(source, position) else {
         return false;
     };
 
@@ -124,7 +124,7 @@ pub(crate) fn cursor_is_on_property_decl(
     stmts: &[Stmt<'_, '_>],
     position: Position,
 ) -> Option<String> {
-    let cursor = position_to_byte_offset(source, position)?;
+    let cursor = position_to_byte_offset_strict(source, position)?;
 
     fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
         let s = member_span.start as usize;
@@ -189,7 +189,7 @@ pub(crate) fn cursor_is_on_constant_decl(
     stmts: &[Stmt<'_, '_>],
     position: Position,
 ) -> Option<(String, Option<String>)> {
-    let cursor = position_to_byte_offset(source, position)?;
+    let cursor = position_to_byte_offset_strict(source, position)?;
 
     fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
         let s = member_span.start as usize;
@@ -317,7 +317,7 @@ pub(crate) fn class_name_at_construct_decl(
     stmts: &[Stmt<'_, '_>],
     position: Position,
 ) -> Option<String> {
-    let cursor = position_to_byte_offset(source, position)?;
+    let cursor = position_to_byte_offset_strict(source, position)?;
 
     fn name_offset_in_member(source: &str, member_span: php_ast::Span, name: &str) -> Option<u32> {
         let s = member_span.start as usize;
@@ -395,7 +395,7 @@ pub(crate) fn promoted_property_at_cursor(
     stmts: &[Stmt<'_, '_>],
     position: Position,
 ) -> Option<String> {
-    let cursor = position_to_byte_offset(source, position)?;
+    let cursor = position_to_byte_offset_strict(source, position)?;
 
     fn check(source: &str, stmts: &[Stmt<'_, '_>], cursor: u32) -> Option<String> {
         for stmt in stmts {
