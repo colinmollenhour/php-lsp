@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use php_ast::{
-    BinaryOp, ClassMemberKind, EnumMemberKind, ExprKind, NamespaceBody, Stmt, StmtKind, TypeHint,
+    ClassMemberKind, EnumMemberKind, ExprKind, NamespaceBody, Stmt, StmtKind, TypeHint,
     TypeHintKind,
 };
 use tower_lsp::lsp_types::Position;
@@ -343,28 +343,9 @@ fn collect_types_stmts(
                     collect_types_stmts(source, &inner.stmts, map, meta, cursor_byte, doc);
                 }
             }
-            // if ($x instanceof Foo) — narrow $x to Foo inside the then-branch
+            // `if ($x instanceof Foo)` narrowing is handled by mir's flow-sensitive
+            // analysis (Type::narrow_instanceof); we only recurse into the branches.
             StmtKind::If(if_stmt) => {
-                // Check whether the condition is a simple `$var instanceof ClassName`.
-                if let ExprKind::Binary(b) = &if_stmt.condition.kind
-                    && b.op == BinaryOp::Instanceof
-                    && let (ExprKind::Variable(var_name), ExprKind::Identifier(class)) =
-                        (&b.left.kind, &b.right.kind)
-                {
-                    let var_key = format!("${}", var_name.as_str());
-                    let narrowed = class
-                        .as_str()
-                        .trim_start_matches('\\')
-                        .rsplit('\\')
-                        .next()
-                        .unwrap_or(class)
-                        .to_string();
-                    // Insert narrowed type then recurse into then-branch.
-                    // The flat map keeps the last write, so code after the if-block
-                    // may see the narrowed type — acceptable trade-off for a simple
-                    // single-pass map.
-                    map.insert(var_key, narrowed);
-                }
                 collect_types_stmts(
                     source,
                     std::slice::from_ref(if_stmt.then_branch),
@@ -1513,30 +1494,6 @@ mod tests {
             tm.get("$this"),
             Some("Mailer"),
             "Closure::bind with typed object should map $this to that class"
-        );
-    }
-
-    #[test]
-    fn instanceof_narrows_variable_type() {
-        let src = "<?php\nif ($x instanceof Foo) { $x->foo(); }";
-        let doc = ParsedDoc::parse(src.to_string());
-        let tm = TypeMap::from_doc(&doc);
-        assert_eq!(
-            tm.get("$x"),
-            Some("Foo"),
-            "instanceof should narrow $x to Foo inside the if body"
-        );
-    }
-
-    #[test]
-    fn instanceof_narrows_fqn_to_short_name() {
-        let src = "<?php\nif ($x instanceof App\\Services\\Mailer) { $x->send(); }";
-        let doc = ParsedDoc::parse(src.to_string());
-        let tm = TypeMap::from_doc(&doc);
-        assert_eq!(
-            tm.get("$x"),
-            Some("Mailer"),
-            "instanceof with FQN should narrow to short name"
         );
     }
 

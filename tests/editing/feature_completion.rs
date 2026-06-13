@@ -1866,6 +1866,42 @@ if ($x instanceof Foo) { $x->$0 }
     .assert_eq(&out);
 }
 
+// --- Zone 1 redundancy probes: scenarios TypeMap inference handles as a
+// fallback. These assert the feature-level behavior so we can tell whether mir
+// covers them when the TypeMap branch is disabled. ---
+
+#[tokio::test]
+async fn probe_array_map_foreach_element_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+class Widget { public function render() {} }
+$items = array_map(fn($x): Widget => $x, []);
+foreach ($items as $item) { $item->$0 }
+"#,
+        )
+        .await;
+    expect!["Method      render"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn probe_closure_use_var_member() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+class PaymentService { public function process() {} }
+$svc = new PaymentService();
+$fn = function() use ($svc) { $svc->$0 };
+"#,
+        )
+        .await;
+    expect!["Method      process"].assert_eq(&out);
+}
+
 #[tokio::test]
 async fn completion_constructor_chain_arrow() {
     let mut s = TestServer::new().await;
