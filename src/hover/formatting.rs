@@ -323,7 +323,7 @@ pub fn docs_for_symbol_from_index(
         for (_, idx) in indexes {
             for f in &idx.functions {
                 if f.name.as_ref() == name {
-                    if let Some(raw) = &f.doc {
+                    if let Some(raw) = &f.docblock {
                         let db = crate::docblock::parse_docblock(raw);
                         let md = db.to_markdown();
                         if !md.is_empty() {
@@ -337,7 +337,7 @@ pub fn docs_for_symbol_from_index(
             for cls in &idx.classes {
                 for m in &cls.methods {
                     if m.name.as_ref() == name {
-                        if let Some(raw) = &m.doc {
+                        if let Some(raw) = &m.docblock {
                             let db = crate::docblock::parse_docblock(raw);
                             let md = db.to_markdown();
                             if !md.is_empty() {

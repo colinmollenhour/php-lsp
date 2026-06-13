@@ -33,7 +33,7 @@ pub struct FunctionDef {
     pub params: Vec<ParamDef>,
     pub return_type: Option<Box<str>>,
     /// Raw docblock text (the `/** … */` comment before the declaration).
-    pub doc: Option<Box<str>>,
+    pub docblock: Option<Box<str>>,
     pub start_line: u32,
     /// Character position of the function name on its line (UTF-16 code units).
     pub name_char: u32,
@@ -101,7 +101,7 @@ pub struct MethodDef {
     pub visibility: Visibility,
     pub params: Vec<ParamDef>,
     pub return_type: Option<Box<str>>,
-    pub doc: Option<Box<str>>,
+    pub docblock: Option<Box<str>>,
     pub start_line: u32,
     /// Character position of the method name on its line (UTF-16 code units).
     pub name_char: u32,
@@ -202,7 +202,7 @@ fn collect_stmts(
                     fqn: fqn(ns, f_name),
                     params: extract_params(&f.params),
                     return_type: f.return_type.as_ref().map(|t| format_type_hint(t).into()),
-                    doc: doc_text,
+                    docblock: doc_text,
                     start_line,
                     name_char: name_char(f_name),
                 });
@@ -277,7 +277,7 @@ fn collect_stmts(
                                     .return_type
                                     .as_ref()
                                     .map(|t| format_type_hint(t).into()),
-                                doc: mdoc,
+                                docblock: mdoc,
                                 start_line: mstart,
                                 name_char: name_char(m_name),
                             });
@@ -377,7 +377,7 @@ fn collect_stmts(
                                     .return_type
                                     .as_ref()
                                     .map(|t| format_type_hint(t).into()),
-                                doc: mdoc,
+                                docblock: mdoc,
                                 start_line: mstart,
                                 name_char: name_char(m_name),
                             });
@@ -432,7 +432,7 @@ fn collect_stmts(
                                     .return_type
                                     .as_ref()
                                     .map(|t| format_type_hint(t).into()),
-                                doc: mdoc,
+                                docblock: mdoc,
                                 start_line: mstart,
                                 name_char: name_char(m_name),
                             });
@@ -513,7 +513,7 @@ fn collect_stmts(
                                     .return_type
                                     .as_ref()
                                     .map(|t| format_type_hint(t).into()),
-                                doc: mdoc,
+                                docblock: mdoc,
                                 start_line: mstart,
                                 name_char: name_char(m_name),
                             });
