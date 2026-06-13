@@ -9,13 +9,19 @@
 //!
 //! ## Contract callers must respect
 //!
-//! mir symbol spans are **end-exclusive and identifier-only**: the variable
-//! `$q` at bytes `76..78` is found by `symbol_at(76)` or `symbol_at(77)` but
-//! **not** `symbol_at(78)`. Callers must pass a byte offset that lands strictly
-//! inside the token of interest — for a variable, `word_range_at(..).start`
-//! (the `$`) is always inside. The primitive is intentionally dumb: it does no
-//! offset fudging, because only the caller has the AST context to pick a
-//! correct in-token offset without grabbing an adjacent token.
+//! For variable/identifier symbols, mir spans are **end-exclusive and
+//! identifier-only**: the variable `$q` at bytes `76..78` is found by
+//! `symbol_at(76)` or `symbol_at(77)` but **not** `symbol_at(78)`. Callers must
+//! pass a byte offset that lands strictly inside the token of interest — for a
+//! variable, `word_range_at(..).start` (the `$`) is always inside.
+//!
+//! Call-like symbols (method/static/function calls) additionally carry an
+//! `expr_span` covering the whole call node; when an offset misses every
+//! identifier token, `symbol_at` falls back to the innermost enclosing call by
+//! `expr_span`. Note the convention: for a chain gap that fallback resolves to
+//! the *following* call. Consumers wanting a different one (type_definition.rs
+//! wants the *preceding* call's return type in `a()$0->b()`) still locate their
+//! own in-token offset via the AST.
 
 use mir_analyzer::{FileAnalysis, Type};
 use mir_types::Atomic;
