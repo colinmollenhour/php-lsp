@@ -511,6 +511,18 @@ pub fn filtered_completions_at(
                         ctx.analysis
                             .and_then(|a| receiver_class_at(a, var_offset))
                             .or_else(|| type_map.get(&receiver).map(str::to_owned))
+                            .or_else(|| {
+                                let val_name = receiver.trim_start_matches('$');
+                                let arr_name =
+                                    crate::types::array_inference::find_foreach_array_var(
+                                        &doc.program().stmts,
+                                        val_name,
+                                    )?;
+                                crate::types::array_inference::scan_array_map_return(
+                                    &doc.program().stmts,
+                                    arr_name,
+                                )
+                            })
                     } else {
                         None
                     };

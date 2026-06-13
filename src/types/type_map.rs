@@ -376,16 +376,7 @@ fn collect_types_stmts(
                 }
             }
 
-            // foreach ($arr as $item) — propagate element type from $arr[] to $item
             StmtKind::Foreach(f) => {
-                if let ExprKind::Variable(arr_name) = &f.expr.kind {
-                    let elem_key = format!("${}[]", arr_name.as_str());
-                    if let Some(elem_type) = map.get(&elem_key).cloned()
-                        && let ExprKind::Variable(val_name) = &f.value.kind
-                    {
-                        map.insert(format!("${}", val_name.as_str()), elem_type);
-                    }
-                }
                 collect_types_stmts(
                     source,
                     std::slice::from_ref(f.body),
@@ -468,10 +459,6 @@ fn collect_types_expr(
                     && let Some(inferred) = infer_from_meta_method_call(assign.value, map, meta)
                 {
                     map.insert(format!("${}", var_name.as_str()), inferred);
-                }
-                // $result = array_map(fn($x): Foo => ..., $arr) → $result[] = Foo
-                if let Some(elem_type) = extract_array_callback_return_type(assign.value) {
-                    map.insert(format!("${}[]", var_name.as_str()), elem_type);
                 }
                 // $var = ClassName::CaseName for enum cases or ClassName::CONST
                 // Try StaticPropertyAccess first (enum cases might use this)
@@ -570,47 +557,6 @@ fn collect_types_expr(
 
         _ => {}
     }
-}
-
-/// For `array_map`/`array_filter` calls: extract the return type of the first
-/// (callback) argument if it has an explicit type hint, e.g.
-/// `array_map(fn($x): Foo => $x->transform(), $arr)` → `"Foo"`.
-fn extract_array_callback_return_type(expr: &php_ast::Expr<'_, '_>) -> Option<String> {
-    let ExprKind::FunctionCall(call) = &expr.kind else {
-        return None;
-    };
-    let fn_name = match &call.name.kind {
-        ExprKind::Identifier(n) => n.as_str(),
-        _ => return None,
-    };
-    if fn_name != "array_map" && fn_name != "array_filter" {
-        return None;
-    }
-    let callback_arg = call.args.first()?;
-    extract_callback_return_type(&callback_arg.value)
-}
-
-/// Extract the return-type class name from a Closure or ArrowFunction expression.
-fn extract_callback_return_type(expr: &php_ast::Expr<'_, '_>) -> Option<String> {
-    let hint = match &expr.kind {
-        ExprKind::Closure(c) => c.return_type.as_ref()?,
-        ExprKind::ArrowFunction(af) => af.return_type.as_ref()?,
-        _ => return None,
-    };
-    if let TypeHintKind::Named(name) = &hint.kind {
-        let s = name.to_string_repr();
-        let base = s.trim_start_matches('\\');
-        let short = fqn_short_name(base);
-        if short
-            .chars()
-            .next()
-            .map(|c| c.is_uppercase())
-            .unwrap_or(false)
-        {
-            return Some(short.to_string());
-        }
-    }
-    None
 }
 
 /// Look up the class of a `$variable` expression from the current map.
@@ -1428,30 +1374,6 @@ mod tests {
         let doc = ParsedDoc::parse(src.to_string());
         assert!(!is_enum(&doc, "Foo"));
         assert!(!is_backed_enum(&doc, "Foo"));
-    }
-
-    #[test]
-    fn array_map_with_typed_closure_populates_element_type() {
-        let src = "<?php\n$objs = new Foo();\n$result = array_map(fn($x): Bar => $x->transform(), $objs);";
-        let doc = ParsedDoc::parse(src.to_string());
-        let tm = TypeMap::from_doc(&doc);
-        assert_eq!(
-            tm.get("$result[]"),
-            Some("Bar"),
-            "array_map with typed fn callback should store element type as $result[]"
-        );
-    }
-
-    #[test]
-    fn foreach_propagates_array_map_element_type() {
-        let src = "<?php\n$items = array_map(fn($x): Widget => $x, []);\nforeach ($items as $item) { $item-> }";
-        let doc = ParsedDoc::parse(src.to_string());
-        let tm = TypeMap::from_doc(&doc);
-        assert_eq!(
-            tm.get("$item"),
-            Some("Widget"),
-            "foreach over array_map result should propagate element type to loop variable"
-        );
     }
 
     #[test]
