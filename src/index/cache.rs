@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn file_index_round_trips() {
         use crate::document::ast::ParsedDoc;
-        use crate::file_index::FileIndex;
+        use crate::index::file_index::FileIndex;
 
         let dir = TempDir::new().unwrap();
         let cache = WorkspaceCache::with_dir(dir.path().to_path_buf());

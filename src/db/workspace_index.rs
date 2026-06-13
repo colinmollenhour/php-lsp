@@ -34,7 +34,7 @@ use tower_lsp::lsp_types::Url;
 
 use crate::db::index::file_index;
 use crate::db::input::Workspace;
-use crate::file_index::FileIndex;
+use crate::index::file_index::FileIndex;
 
 /// Back-pointer into `WorkspaceIndexData.files`: `(file_idx, class_idx)` where
 /// `class_idx` indexes into `files[file_idx].1.classes`.
@@ -185,7 +185,7 @@ fn build_maps(files: &[(Url, Arc<FileIndex>)]) -> BuildMapsResult {
 
 impl WorkspaceIndexData {
     /// Resolve a `ClassRef` back to its `(uri, class_def)` pair.
-    pub fn at(&self, r: ClassRef) -> Option<(&Url, &crate::file_index::ClassDef)> {
+    pub fn at(&self, r: ClassRef) -> Option<(&Url, &crate::index::file_index::ClassDef)> {
         let (uri, idx) = self.files.get(r.file as usize)?;
         let cls = idx.classes.get(r.class as usize)?;
         Some((uri, cls))

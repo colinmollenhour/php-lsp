@@ -7,8 +7,8 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::document::ast::ParsedDoc;
-use crate::file_index::{FileIndex, ParamDef};
 use crate::hover::format_params_str;
+use crate::index::file_index::{FileIndex, ParamDef};
 use crate::lang::docblock::find_docblock;
 use crate::text::{fqn_short_name, split_params};
 

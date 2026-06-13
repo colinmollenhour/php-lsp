@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use mir_analyzer::PhpVersion;
 
-use crate::file_index::FileIndex;
+use crate::index::file_index::FileIndex;
 
 /// Immortal per-file text input. One per unique URI ever seen.
 /// Holds the raw source text and the optional K2 on-disk cache seed.

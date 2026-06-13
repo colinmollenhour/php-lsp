@@ -8,7 +8,7 @@ use salsa::Database;
 
 use crate::db::input::SourceFile;
 use crate::db::parse::parsed_doc;
-use crate::file_index::FileIndex;
+use crate::index::file_index::FileIndex;
 
 /// Arc wrapper for `FileIndex`. Uses structural equality on the inner
 /// `FileIndex` so salsa can short-circuit downstream queries (e.g.

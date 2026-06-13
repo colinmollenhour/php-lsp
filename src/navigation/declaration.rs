@@ -87,11 +87,11 @@ pub fn goto_declaration_from_index(
     source: &str,
     indexes: &[(
         tower_lsp::lsp_types::Url,
-        std::sync::Arc<crate::file_index::FileIndex>,
+        std::sync::Arc<crate::index::file_index::FileIndex>,
     )],
     position: tower_lsp::lsp_types::Position,
 ) -> Option<Location> {
-    use crate::file_index::ClassKind;
+    use crate::index::file_index::ClassKind;
     use crate::text::word_at_position;
     let word = word_at_position(source, position)?;
     let bare = strip_variable_sigil(&word);

@@ -55,7 +55,7 @@ pub(crate) async fn scan_workspace(
     root: std::path::PathBuf,
     docs: Arc<DocumentStore>,
     open_files: OpenFiles,
-    cache: Option<crate::cache::WorkspaceCache>,
+    cache: Option<crate::index::cache::WorkspaceCache>,
     exclude_paths: &[String],
     include_paths: &[String],
     max_files: usize,
@@ -158,14 +158,14 @@ pub(crate) async fn scan_workspace(
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
-                Some(crate::cache::WorkspaceCache::key_for_stat(
+                Some(crate::index::cache::WorkspaceCache::key_for_stat(
                     uri.as_str(),
                     mtime_secs,
                     meta.len(),
                 ))
             });
             if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref())
-                && let Some(index) = cache.read::<crate::file_index::FileIndex>(key)
+                && let Some(index) = cache.read::<crate::index::file_index::FileIndex>(key)
             {
                 docs.mirror_text(uri, text);
                 docs.seed_cached_index(uri, Arc::new(index));
@@ -174,7 +174,7 @@ pub(crate) async fn scan_workspace(
 
             let doc = parse_document_no_diags(text);
             if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref()) {
-                let index = crate::file_index::FileIndex::extract(&doc);
+                let index = crate::index::file_index::FileIndex::extract(&doc);
                 let _ = cache.write(key, &index);
                 docs.mirror_text(uri, text);
                 docs.seed_cached_index(uri, Arc::new(index));
@@ -230,9 +230,9 @@ mod tests {
 
     use super::scan_workspace;
     use crate::analysis::diagnostics::parse_document_no_diags;
-    use crate::cache::WorkspaceCache;
     use crate::document::document_store::DocumentStore;
     use crate::document::open_files::OpenFiles;
+    use crate::index::cache::WorkspaceCache;
 
     #[tokio::test]
     async fn cache_round_trip_writes_then_reads_file_index() {
@@ -273,7 +273,7 @@ mod tests {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let sentinel = crate::file_index::FileIndex {
+        let sentinel = crate::index::file_index::FileIndex {
             namespace: Some("CACHE_HIT_MARKER".into()),
             ..Default::default()
         };
@@ -466,7 +466,7 @@ mod tests {
             let doc = parse_document_no_diags(text);
             parse_ns.fetch_add(tp.elapsed().as_nanos() as u64, Ordering::Relaxed);
             let te = Instant::now();
-            let _ = crate::file_index::FileIndex::extract(&doc);
+            let _ = crate::index::file_index::FileIndex::extract(&doc);
             extract_ns.fetch_add(te.elapsed().as_nanos() as u64, Ordering::Relaxed);
         });
         let t_parse_wall = t3.elapsed();
@@ -488,7 +488,7 @@ mod tests {
                         .unwrap_or(0);
                     let key = WorkspaceCache::key_for_stat(uri.as_str(), mtime, meta.len());
                     let doc = parse_document_no_diags(text);
-                    let idx = crate::file_index::FileIndex::extract(&doc);
+                    let idx = crate::index::file_index::FileIndex::extract(&doc);
                     let _ = cache.write(&key, &idx);
                 }
             }
@@ -511,7 +511,10 @@ mod tests {
                         .unwrap_or(0);
                     let key = WorkspaceCache::key_for_stat(uri.as_str(), mtime, meta.len());
                     let tr = Instant::now();
-                    if cache.read::<crate::file_index::FileIndex>(&key).is_some() {
+                    if cache
+                        .read::<crate::index::file_index::FileIndex>(&key)
+                        .is_some()
+                    {
                         hits.fetch_add(1, Ordering::Relaxed);
                     }
                     cache_read_ns.fetch_add(tr.elapsed().as_nanos() as u64, Ordering::Relaxed);

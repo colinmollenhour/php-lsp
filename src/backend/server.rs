@@ -25,6 +25,7 @@ use crate::hover::{
     class_hover_from_index, docs_for_symbol_from_index, hover_info_with_maps,
     signature_for_symbol_from_index,
 };
+use crate::index::workspace_scan::{scan_workspace, send_refresh_requests};
 use crate::lang::autoload::Psr4Map;
 use crate::lang::config::LspConfig;
 use crate::lang::phpstorm_meta::PhpStormMeta;
@@ -34,7 +35,6 @@ use crate::symbols::{
 };
 use crate::text::{fqn_short_name, word_at_position};
 use crate::use_import::{build_use_import_edit, find_fqn_for_class};
-use crate::workspace_scan::{scan_workspace, send_refresh_requests};
 
 use crate::actions::extract_action::extract_variable_actions;
 use crate::actions::extract_constant_action::extract_constant_actions;
@@ -463,7 +463,7 @@ impl LanguageServer for Backend {
                     // runner, read-only home), `new` returns None and every
                     // per-file `cache.as_ref()` guard below no-ops — scan still
                     // runs, just without persistence.
-                    let cache = crate::cache::WorkspaceCache::new(&root);
+                    let cache = crate::index::cache::WorkspaceCache::new(&root);
                     // Wire the first available cache directory into the
                     // AnalysisSession builder so stub-parse results survive
                     // server restarts.
@@ -649,7 +649,7 @@ impl LanguageServer for Backend {
                     let path_clone = path.clone();
                     let client = self.client.clone();
                     tokio::spawn(async move {
-                        let cache = crate::cache::WorkspaceCache::new(&path_clone);
+                        let cache = crate::index::cache::WorkspaceCache::new(&path_clone);
                         scan_workspace(
                             path_clone,
                             docs,

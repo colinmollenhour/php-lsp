@@ -451,9 +451,9 @@ fn format_fn_signature(
 #[allow(deprecated)]
 pub fn workspace_symbols_from_index(
     query: &str,
-    indexes: &[(Url, Arc<crate::file_index::FileIndex>)],
+    indexes: &[(Url, Arc<crate::index::file_index::FileIndex>)],
 ) -> Vec<SymbolInformation> {
-    use crate::file_index::ClassKind;
+    use crate::index::file_index::ClassKind;
 
     let (kind_filter, term) = parse_kind_filter(query);
     let matches_kind = |k: SymbolKind| kind_filter.is_none_or(|f| f == k);

@@ -31,7 +31,7 @@ pub fn prepare_type_hierarchy_from_workspace(
     wi: &crate::db::workspace_index::WorkspaceIndexData,
     position: Position,
 ) -> Option<TypeHierarchyItem> {
-    use crate::file_index::ClassKind;
+    use crate::index::file_index::ClassKind;
     use crate::text::word_at_position;
     let word = word_at_position(source, position)?;
     let refs = wi.classes_by_name.get(&word)?;
@@ -51,7 +51,7 @@ pub fn supertypes_of_from_workspace(
     item: &TypeHierarchyItem,
     wi: &crate::db::workspace_index::WorkspaceIndexData,
 ) -> Vec<TypeHierarchyItem> {
-    use crate::file_index::ClassKind;
+    use crate::index::file_index::ClassKind;
     let mut super_names: Vec<Arc<str>> = Vec::new();
     if let Some(refs) = wi.classes_by_name.get(&item.name) {
         for r in refs {
@@ -88,7 +88,7 @@ pub fn subtypes_of_from_workspace(
     item: &TypeHierarchyItem,
     wi: &crate::db::workspace_index::WorkspaceIndexData,
 ) -> Vec<TypeHierarchyItem> {
-    use crate::file_index::ClassKind;
+    use crate::index::file_index::ClassKind;
     let Some(refs) = wi.subtypes_of.get(item.name.as_str()) else {
         return Vec::new();
     };

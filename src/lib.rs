@@ -41,7 +41,6 @@
 #![allow(dead_code)]
 
 // Public modules exposed for benchmark crates.
-pub mod cache;
 pub mod completion;
 pub mod db;
 pub mod hover;
@@ -53,13 +52,13 @@ pub mod walk;
 // Document lifecycle (parsed AST, salsa document store, open-file state).
 mod document;
 
+// Workspace indexing (compact FileIndex, background scan, on-disk cache).
+mod index;
+
 // PHP-language model (config, autoload, phpstorm_meta, docblock, php_names)
 // and generic text mechanics (offset/word/fuzzy/range).
 mod lang;
 mod text;
-
-// Public module: compact symbol index for background-indexed files.
-pub mod file_index;
 
 // Public module: per-file memoized symbol map (name → Vec<SymbolEntry>).
 pub mod symbol_map;
@@ -79,13 +78,13 @@ pub mod symbols;
 #[cfg(test)]
 mod test_utils;
 mod use_import;
-mod workspace_scan;
 
 // Re-exports for benchmark crates that use the flat `php_lsp::X` paths.
 pub use analysis::semantic_diagnostics;
 pub use document::ast;
 pub use document::document_store;
 pub use editing::rename;
+pub use index::file_index;
 pub use lang::config;
 pub use navigation::call_hierarchy;
 pub use navigation::definition;

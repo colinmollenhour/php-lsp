@@ -248,7 +248,7 @@ pub fn signature_for_symbol_from_index(
     name: &str,
     indexes: &[(
         tower_lsp::lsp_types::Url,
-        std::sync::Arc<crate::file_index::FileIndex>,
+        std::sync::Arc<crate::index::file_index::FileIndex>,
     )],
 ) -> Option<String> {
     for (_, idx) in indexes {
@@ -315,7 +315,7 @@ pub fn docs_for_symbol_from_index(
     name: &str,
     indexes: &[(
         tower_lsp::lsp_types::Url,
-        std::sync::Arc<crate::file_index::FileIndex>,
+        std::sync::Arc<crate::index::file_index::FileIndex>,
     )],
 ) -> Option<String> {
     if let Some(sig) = signature_for_symbol_from_index(name, indexes) {
@@ -373,10 +373,10 @@ pub fn class_hover_from_index(
     word: &str,
     indexes: &[(
         tower_lsp::lsp_types::Url,
-        std::sync::Arc<crate::file_index::FileIndex>,
+        std::sync::Arc<crate::index::file_index::FileIndex>,
     )],
 ) -> Option<Hover> {
-    use crate::file_index::ClassKind;
+    use crate::index::file_index::ClassKind;
 
     for (_, idx) in indexes {
         for cls in &idx.classes {

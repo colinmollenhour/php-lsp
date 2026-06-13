@@ -459,7 +459,7 @@ pub fn goto_type_definition_from_index(
     source: &str,
     doc: &ParsedDoc,
     analysis: Option<&FileAnalysis>,
-    indexes: &[(Url, std::sync::Arc<crate::file_index::FileIndex>)],
+    indexes: &[(Url, std::sync::Arc<crate::index::file_index::FileIndex>)],
     position: Position,
 ) -> Vec<Location> {
     let Some((imports, class_name)) = resolve_type_at_cursor(source, doc, analysis, position)

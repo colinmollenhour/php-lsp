@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{SemanticToken, Url};
 use crate::db::analysis::AnalysisHost;
 use crate::db::input::{FileText, Workspace, find_source_file};
 use crate::document::ast::ParsedDoc;
-use crate::file_index::FileIndex;
+use crate::index::file_index::FileIndex;
 use crate::lang::autoload::Psr4Map;
 
 /// Upper bound on `parsed_cache` entries. Matched to the `lru = 2048` on
@@ -364,7 +364,10 @@ impl DocumentStore {
     }
 
     #[cfg(test)]
-    pub fn snapshot_query_file_index(&self, uri: &Url) -> Option<crate::file_index::FileIndex> {
+    pub fn snapshot_query_file_index(
+        &self,
+        uri: &Url,
+    ) -> Option<crate::index::file_index::FileIndex> {
         if self.deleted_uris.contains(uri) {
             return None;
         }
@@ -1227,7 +1230,7 @@ mod tests {
     fn seed_cached_index_noops_for_unknown_uri() {
         let store = DocumentStore::new();
         let u = uri("/never_mirrored.php");
-        let index = Arc::new(crate::file_index::FileIndex::default());
+        let index = Arc::new(crate::index::file_index::FileIndex::default());
         assert!(!store.seed_cached_index(&u, index));
     }
 

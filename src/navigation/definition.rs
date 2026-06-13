@@ -94,7 +94,7 @@ pub fn find_declaration_in_indexes(
     name: &str,
     indexes: &[(
         tower_lsp::lsp_types::Url,
-        std::sync::Arc<crate::file_index::FileIndex>,
+        std::sync::Arc<crate::index::file_index::FileIndex>,
     )],
 ) -> Option<Location> {
     let bare = strip_variable_sigil(name);
@@ -149,7 +149,7 @@ pub fn find_method_in_class_hierarchy(
     method_name: &str,
     indexes: &[(
         tower_lsp::lsp_types::Url,
-        std::sync::Arc<crate::file_index::FileIndex>,
+        std::sync::Arc<crate::index::file_index::FileIndex>,
     )],
 ) -> Option<Location> {
     let mut queue: std::collections::VecDeque<String> =
@@ -262,8 +262,11 @@ mod tests {
 
     // ── find_method_in_class_hierarchy ───────────────────────────────────────
 
-    fn make_index(path: &str, src: &str) -> (Url, std::sync::Arc<crate::file_index::FileIndex>) {
-        use crate::file_index::FileIndex;
+    fn make_index(
+        path: &str,
+        src: &str,
+    ) -> (Url, std::sync::Arc<crate::index::file_index::FileIndex>) {
+        use crate::index::file_index::FileIndex;
         let u = Url::parse(&format!("file://{path}")).unwrap();
         let d = ParsedDoc::parse(src.to_string());
         (u, std::sync::Arc::new(FileIndex::extract(&d)))
