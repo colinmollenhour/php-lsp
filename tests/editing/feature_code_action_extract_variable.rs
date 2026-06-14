@@ -168,3 +168,28 @@ $x = $0$foo$0;
         .await;
     expect!["<action not found: Extract variable>"].assert_eq(&out);
 }
+
+#[tokio::test]
+async fn extract_variable_multibyte_unicode_string() {
+    // "é" is 2 UTF-8 bytes but 1 UTF-16 code unit; LSP positions are UTF-16.
+    // Slicing by byte offset would either panic or return garbage.
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+function greet(): string {
+    return $0"café"$0;
+}
+"#,
+            "Extract variable",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        function greet(): string {
+            $extracted = "café";
+            return $extracted;
+        }
+    "#]]
+    .assert_eq(&out);
+}

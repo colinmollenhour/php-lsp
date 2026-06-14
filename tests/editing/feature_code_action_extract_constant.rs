@@ -210,3 +210,57 @@ use Foo\Bar;
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn extract_constant_url_string_derives_screaming_snake_name() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class ApiClient {
+    public function endpoint(): string {
+        return $0"https://api.example.com"$0;
+    }
+}
+"#,
+            "Extract constant",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        class ApiClient {
+            private const HTTPS_API_EXAMPLE_COM = "https://api.example.com";
+            public function endpoint(): string {
+                return self::HTTPS_API_EXAMPLE_COM;
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn extract_constant_all_special_chars_falls_back_to_default_name() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class Symbols {
+    public function noise(): string {
+        return $0"!!!"$0;
+    }
+}
+"#,
+            "Extract constant",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        class Symbols {
+            private const EXTRACTED_CONSTANT = "!!!";
+            public function noise(): string {
+                return self::EXTRACTED_CONSTANT;
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}
