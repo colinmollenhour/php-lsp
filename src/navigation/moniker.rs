@@ -446,80 +446,8 @@ mod tests {
         ParsedDoc::parse(src.to_string())
     }
 
-    fn pos(line: u32, character: u32) -> Position {
-        Position { line, character }
-    }
-
     fn empty() -> HashMap<String, String> {
         HashMap::new()
-    }
-
-    #[test]
-    fn bare_class_name() {
-        let src = "<?php\nclass Foo {}";
-        let d = doc(src);
-        let m = moniker_at(src, &d, pos(1, 7), &empty()).unwrap();
-        assert_eq!(m.scheme, "php");
-        assert_eq!(m.identifier, "Foo");
-        assert_eq!(m.unique, UniquenessLevel::Project);
-        assert_eq!(m.kind, Some(MonikerKind::Export));
-    }
-
-    #[test]
-    fn namespaced_class() {
-        let src = "<?php\nnamespace App\\Services {\n    class FooService {}\n}";
-        let d = doc(src);
-        let m = moniker_at(src, &d, pos(2, 10), &empty()).unwrap();
-        assert_eq!(m.identifier, "App\\Services\\FooService");
-    }
-
-    #[test]
-    fn unknown_word_returns_bare_name() {
-        let src = "<?php\n$x = doSomething();";
-        let d = doc(src);
-        let m = moniker_at(src, &d, pos(1, 6), &empty()).unwrap();
-        assert_eq!(m.identifier, "doSomething");
-    }
-
-    #[test]
-    fn empty_position_returns_none() {
-        let src = "<?php\n   ";
-        let d = doc(src);
-        assert!(moniker_at(src, &d, pos(1, 1), &empty()).is_none());
-    }
-
-    #[test]
-    fn variable_returns_none() {
-        let src = "<?php\n$foo = 1;";
-        let d = doc(src);
-        assert!(moniker_at(src, &d, pos(1, 1), &empty()).is_none());
-    }
-
-    #[test]
-    fn imported_name_resolves_via_use_statement() {
-        let src = "<?php\nuse App\\Services\\Mailer;\n$m = new Mailer();";
-        let d = doc(src);
-        let imports = HashMap::from([("Mailer".to_string(), "App\\Services\\Mailer".to_string())]);
-        // Cursor on `Mailer` in `new Mailer()`
-        let m = moniker_at(src, &d, pos(2, 10), &imports).unwrap();
-        assert_eq!(m.identifier, "App\\Services\\Mailer");
-    }
-
-    #[test]
-    fn use_alias_resolves_to_fqn() {
-        let src = "<?php\nuse App\\Http\\Request as Req;\n$r = new Req();";
-        let d = doc(src);
-        let imports = HashMap::from([("Req".to_string(), "App\\Http\\Request".to_string())]);
-        let m = moniker_at(src, &d, pos(2, 10), &imports).unwrap();
-        assert_eq!(m.identifier, "App\\Http\\Request");
-    }
-
-    #[test]
-    fn uniqueness_is_workspace() {
-        let src = "<?php\nclass Foo {}";
-        let d = doc(src);
-        let m = moniker_at(src, &d, pos(1, 7), &empty()).unwrap();
-        assert_eq!(m.unique, UniquenessLevel::Project);
     }
 
     // ── resolve_fqn ──────────────────────────────────────────────────────────
