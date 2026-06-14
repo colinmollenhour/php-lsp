@@ -222,6 +222,10 @@ pub struct LspConfig {
     /// implementations / type-hierarchy against vendor types — at the cost of
     /// a slower initial scan.
     pub index_vendor: bool,
+    /// Emit extra diagnostic log messages on startup: cache hit/miss ratio,
+    /// workspace root paths, and PSR-4 namespace count.
+    /// Enable via `initializationOptions.debug = true`.
+    pub debug: bool,
 }
 
 impl Default for LspConfig {
@@ -234,6 +238,7 @@ impl Default for LspConfig {
             features: FeaturesConfig::default(),
             max_indexed_files: MAX_INDEXED_FILES,
             index_vendor: false,
+            debug: false,
         }
     }
 }
@@ -312,6 +317,9 @@ impl LspConfig {
         }
         if let Some(b) = v.get("indexVendor").and_then(|x| x.as_bool()) {
             cfg.index_vendor = b;
+        }
+        if let Some(b) = v.get("debug").and_then(|x| x.as_bool()) {
+            cfg.debug = b;
         }
         cfg
     }

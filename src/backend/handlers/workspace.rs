@@ -332,13 +332,19 @@ impl Backend {
             let docs = Arc::clone(&self.docs);
             let open_files = self.open_files.clone();
             let client = self.client.clone();
-            let (exclude_paths, include_paths, max_indexed_files) = {
+            let psr4 = self.psr4.clone();
+            let (exclude_paths, include_paths, max_indexed_files, debug) = {
                 let cfg = self.config.load();
                 let mut exclude = cfg.exclude_paths.clone();
                 if !cfg.index_vendor && !exclude.iter().any(|p| p == "vendor" || p == "vendor/") {
                     exclude.push("vendor/".to_string());
                 }
-                (exclude, cfg.include_paths.clone(), cfg.max_indexed_files)
+                (
+                    exclude,
+                    cfg.include_paths.clone(),
+                    cfg.max_indexed_files,
+                    cfg.debug,
+                )
             };
             tokio::spawn(async move {
                 client
@@ -355,17 +361,19 @@ impl Backend {
                     })
                     .await;
 
+                let scan_start = std::time::Instant::now();
                 let mut total = 0usize;
+                let mut from_cache = 0usize;
                 let mut session_cache_set = false;
-                for root in roots {
-                    let cache = crate::index::cache::WorkspaceCache::new(&root);
+                for root in &roots {
+                    let cache = crate::index::cache::WorkspaceCache::new(root);
                     if !session_cache_set && let Some(ref c) = cache {
                         let session_dir = c.cache_dir().join("session");
                         docs.set_session_cache_dir(session_dir);
                         session_cache_set = true;
                     }
-                    total += scan_workspace(
-                        root,
+                    let (n, c) = scan_workspace(
+                        root.clone(),
                         Arc::clone(&docs),
                         open_files.clone(),
                         cache,
@@ -374,7 +382,11 @@ impl Backend {
                         max_indexed_files,
                     )
                     .await;
+                    total += n;
+                    from_cache += c;
                 }
+                let elapsed = scan_start.elapsed();
+                let elapsed_s = elapsed.as_secs_f64();
 
                 client
                     .send_notification::<ProgressNotification>(ProgressParams {
@@ -390,9 +402,28 @@ impl Backend {
                 client
                     .log_message(
                         MessageType::INFO,
-                        format!("php-lsp: indexed {total} workspace files"),
+                        format!("php-lsp: indexed {total} files in {elapsed_s:.1} s"),
                     )
                     .await;
+
+                if debug {
+                    let parsed = total.saturating_sub(from_cache);
+                    let root_list = roots
+                        .iter()
+                        .map(|r| r.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let ns_count = psr4.load().project_namespace_count();
+                    client
+                        .log_message(
+                            MessageType::INFO,
+                            format!(
+                                "php-lsp: debug: {from_cache} from cache, {parsed} parsed fresh \
+                                 | {ns_count} PSR-4 namespaces | roots: {root_list}"
+                            ),
+                        )
+                        .await;
+                }
 
                 send_refresh_requests(&client).await;
 
@@ -406,7 +437,10 @@ impl Backend {
         }
 
         self.client
-            .log_message(MessageType::INFO, "php-lsp ready")
+            .log_message(
+                MessageType::INFO,
+                format!("php-lsp {} ready", env!("CARGO_PKG_VERSION")),
+            )
             .await;
     }
 

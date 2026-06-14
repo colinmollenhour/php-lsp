@@ -126,6 +126,10 @@ impl Psr4Map {
             .sort_by_key(|e| std::cmp::Reverse(e.0.len()));
     }
 
+    pub fn project_namespace_count(&self) -> usize {
+        self.project_entries.len()
+    }
+
     /// Reverse of `resolve`: given a file path, return the PSR-4 FQN, or
     /// `None` if the path isn't under a known project namespace prefix.
     pub fn file_to_fqn(&self, path: &Path) -> Option<String> {

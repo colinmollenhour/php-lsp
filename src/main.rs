@@ -30,8 +30,18 @@ async fn main() {
         std::process::exit(0);
     }
 
+    let build = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    let log_hint = if std::env::var_os("RUST_LOG").is_some() {
+        " (tracing → stderr)"
+    } else {
+        " (set RUST_LOG=php_lsp=debug to enable tracing)"
+    };
     eprintln!(
-        "php-lsp {} — listening on stdin/stdout",
+        "php-lsp {} ({build}) — listening on stdin/stdout{log_hint}",
         env!("CARGO_PKG_VERSION")
     );
     let stdin = tokio::io::stdin();

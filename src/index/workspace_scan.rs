@@ -51,6 +51,8 @@ pub(crate) async fn send_refresh_requests(client: &Client) {
     skip(docs, open_files, cache, exclude_paths, include_paths),
     fields(root = %root.display())
 )]
+/// `(total_indexed, from_cache)` — files counted in the index and how many
+/// came from the on-disk cache without re-parsing.
 pub(crate) async fn scan_workspace(
     root: std::path::PathBuf,
     docs: Arc<DocumentStore>,
@@ -59,7 +61,7 @@ pub(crate) async fn scan_workspace(
     exclude_paths: &[String],
     include_paths: &[String],
     max_files: usize,
-) -> usize {
+) -> (usize, usize) {
     // Phase 1: synchronous directory walk in the blocking pool.
     //
     // The async version called next_entry().await and file_type().await for
@@ -144,6 +146,8 @@ pub(crate) async fn scan_workspace(
     // stat syscall (~5 µs/file with no async scheduling overhead), far cheaper
     // than hashing the full file content (~1 ms/file CPU on warm starts).
     tokio::task::spawn_blocking(move || {
+        let cache_hits = std::sync::atomic::AtomicUsize::new(0);
+
         let index_file = |(uri, text): &(Url, String)| -> usize {
             if open_files.contains(uri) {
                 return 0;
@@ -169,6 +173,7 @@ pub(crate) async fn scan_workspace(
             {
                 docs.mirror_text(uri, text);
                 docs.seed_cached_index(uri, Arc::new(index));
+                cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 return 1;
             }
 
@@ -189,10 +194,11 @@ pub(crate) async fn scan_workspace(
             total += chunk.par_iter().map(index_file).sum::<usize>();
             docs.sync_workspace_files();
         }
-        total
+        let from_cache = cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+        (total, from_cache)
     })
     .await
-    .unwrap_or(0)
+    .unwrap_or((0, 0))
 }
 
 fn matches_any(rel_path: &str, patterns: &[String]) -> bool {
@@ -259,7 +265,7 @@ mod tests {
             50_000,
         )
         .await;
-        assert_eq!(count1, 1, "first scan should index 1 file");
+        assert_eq!(count1.0, 1, "first scan should index 1 file");
 
         // Overwrite the cache entry with a sentinel. The scan now uses a
         // stat-based key (mtime + size), so we must derive the same key
@@ -292,7 +298,7 @@ mod tests {
             50_000,
         )
         .await;
-        assert_eq!(count2, 1, "second scan should still index 1 file");
+        assert_eq!(count2.0, 1, "second scan should still index 1 file");
 
         let idx2 = docs2
             .snapshot_query_file_index(&uri)
