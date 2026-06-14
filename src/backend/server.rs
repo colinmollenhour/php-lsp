@@ -354,7 +354,27 @@ impl LanguageServer for Backend {
         // showed after the last did_change.
         let diag_cfg = self.config.load().diagnostics.clone();
         let all = compute_open_file_diagnostics(&self.docs, &self.open_files, &uri, &diag_cfg);
-        self.client.publish_diagnostics(uri, all, None).await;
+        self.client
+            .publish_diagnostics(uri.clone(), all, None)
+            .await;
+
+        // Persist the FileIndex to the disk cache so that a server restart
+        // can skip re-parsing this file even for edits that happened between
+        // workspace scans.
+        if let (Some(text), Some(root)) = (
+            self.get_open_text(&uri),
+            self.root_paths.load().first().cloned(),
+        ) {
+            tokio::task::spawn_blocking(move || {
+                let Some(cache) = crate::index::cache::WorkspaceCache::new(&root) else {
+                    return;
+                };
+                let key = crate::index::cache::WorkspaceCache::key_for(uri.as_str(), &text);
+                let doc = parse_document_no_diags(&text);
+                let index = crate::index::file_index::FileIndex::extract(&doc);
+                let _ = cache.write(&key, &index);
+            });
+        }
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
