@@ -214,7 +214,7 @@ impl Backend {
                             start: position,
                             end: Position {
                                 line: position.line,
-                                character: position.character + word.len() as u32,
+                                character: position.character + word.encode_utf16().count() as u32,
                             },
                         });
                     combined.push(Location {
