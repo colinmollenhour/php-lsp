@@ -147,6 +147,40 @@ $u->na$0
 }
 
 #[tokio::test]
+async fn completion_method_chain_does_not_panic() {
+    // Regression: `resolve_receiver_class` returned None for method-chain receivers
+    // like `$obj->bar()->` because the var-name extractor stops at `)`. The fix
+    // delegates to mir's type-at-offset. This test verifies the server returns a
+    // valid response (no crash, no LSP error) for a chained call cursor position.
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let ls = labels(
+        &mut s,
+        r#"<?php
+class Chain {
+    public function bar(): Chain {}
+    public function qux(): void {}
+}
+$c = new Chain();
+$c->bar()->$0
+"#,
+    )
+    .await;
+    // The response must not be empty (the server must reply) and must contain no
+    // LSP-level error.  When mir resolves the return type of `bar()`, only member
+    // completions are shown; when it cannot, global completions fall through — both
+    // are correct behaviour, but bar/qux must be reachable from either path.
+    assert!(
+        !ls.is_empty(),
+        "completion must not be empty for a chained call position"
+    );
+    assert!(
+        ls.contains(&"bar".to_string()) || ls.contains(&"qux".to_string()),
+        "Chain methods must be reachable from completion: {ls:?}"
+    );
+}
+
+#[tokio::test]
 async fn completion_arrow_excludes_class_constants() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);

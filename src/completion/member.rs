@@ -333,7 +333,11 @@ pub(super) fn resolve_receiver_class(
         .rev()
         .collect();
     if var_name.is_empty() {
-        return None;
+        // Method-chain receiver like `$obj->getUser()->`: `before` ends with `)`,
+        // so the take_while extractor collects nothing.  Ask mir for the type of
+        // the call-expression at that position; mir records the return type there.
+        let chain_offset = line_byte_offset(doc, position.line, before.len());
+        return analysis.and_then(|a| receiver_class_at(a, chain_offset));
     }
     let var_name = if var_name.starts_with('$') {
         var_name
