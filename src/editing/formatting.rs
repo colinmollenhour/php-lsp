@@ -91,8 +91,6 @@ pub fn format_range(source: &str, range: Range) -> Option<Vec<TextEdit>> {
     }])
 }
 
-// ── Formatter invocation ──────────────────────────────────────────────────────
-
 fn run_formatter(source: &str) -> Option<String> {
     try_php_cs_fixer(source).or_else(|| try_phpcbf(source))
 }

@@ -410,8 +410,6 @@ impl Backend {
             .await;
     }
 
-    // ── File-rename notifications ────────────────────────────────────────────
-
     pub(crate) async fn handle_will_rename_files(
         &self,
         params: RenameFilesParams,
@@ -471,8 +469,6 @@ impl Backend {
             }
         }
     }
-
-    // ── File-create notifications ────────────────────────────────────────────
 
     pub(crate) async fn handle_will_create_files(
         &self,
@@ -547,8 +543,6 @@ impl Backend {
         }
         send_refresh_requests(&self.client).await;
     }
-
-    // ── File-delete notifications ────────────────────────────────────────────
 
     pub(crate) async fn handle_will_delete_files(
         &self,

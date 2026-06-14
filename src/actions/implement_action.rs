@@ -57,14 +57,12 @@ fn collect_actions(
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Class(c) => {
-                // Only consider classes whose declaration overlaps the requested range.
                 let class_start = sv.position_of(stmt.span.start).line;
                 let class_end = sv.position_of(stmt.span.end).line;
                 if class_start > range.end.line || class_end < range.start.line {
                     continue;
                 }
 
-                // Gather method names already in this class.
                 let existing: HashSet<String> = c
                     .body
                     .members
@@ -80,7 +78,6 @@ fn collect_actions(
 
                 let mut missing: Vec<MethodStub> = Vec::new();
 
-                // Interfaces this class implements.
                 for iface in c.implements.iter() {
                     let iface_name = iface.to_string_repr().into_owned();
                     let short = fqn_short_name(&iface_name).to_string();
@@ -93,7 +90,6 @@ fn collect_actions(
                     }
                 }
 
-                // Abstract parent class (if any).
                 if let Some(parent) = &c.extends {
                     let parent_name = parent.to_string_repr().into_owned();
                     let short = fqn_short_name(&parent_name).to_string();
@@ -116,7 +112,6 @@ fn collect_actions(
                 }
 
                 let mut stub_text = generate_stub_text(&missing);
-                // Insert just before the closing `}` of the class.
                 let closing_pos = sv.position_of(stmt.span.end.saturating_sub(1));
                 let insert_pos = closing_pos;
                 // For single-line classes `class Foo {}` the `}` is not at column 0,

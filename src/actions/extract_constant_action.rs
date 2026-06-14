@@ -61,8 +61,6 @@ pub fn extract_constant_actions(source: &str, range: Range, uri: &Url) -> Vec<Co
     }
 }
 
-// ── Literal detection ─────────────────────────────────────────────────────────
-
 fn is_literal(s: &str) -> bool {
     is_string_literal(s) || is_int_literal(s) || is_float_literal(s)
 }
@@ -90,8 +88,6 @@ fn is_float_literal(s: &str) -> bool {
         && dots == 1
 }
 
-// ── Constant name derivation ──────────────────────────────────────────────────
-
 fn derive_const_name(literal: &str) -> String {
     if is_string_literal(literal) {
         let inner = &literal[1..literal.len() - 1];
@@ -109,7 +105,6 @@ fn derive_name_from_string(s: &str) -> String {
         .collect::<String>()
         .to_uppercase();
 
-    // Collapse consecutive underscores, strip leading and trailing underscores.
     let mut name = String::new();
     let mut prev_under = true;
     for c in raw.chars() {
@@ -139,8 +134,6 @@ fn derive_name_from_string(s: &str) -> String {
     }
 }
 
-// ── Scope detection ───────────────────────────────────────────────────────────
-
 #[derive(Debug, PartialEq)]
 enum ContainerKind {
     ClassOrTrait,
@@ -157,10 +150,8 @@ fn find_class_scope(lines: &[&str], sel_line: usize) -> Option<(usize, Container
     for i in (0..=sel_line).rev() {
         let line = lines[i].trim();
         if let Some(kind) = container_kind(line) {
-            // Find the opening brace.
             for (j, brace_line) in lines.iter().enumerate().skip(i) {
                 if brace_line.contains('{') {
-                    // Verify the selection falls inside the container body.
                     if find_matching_close(lines, j)
                         .is_some_and(|close| sel_line > j && sel_line < close)
                     {
@@ -234,9 +225,7 @@ fn find_matching_close(lines: &[&str], open_line: usize) -> Option<usize> {
     None
 }
 
-/// Returns `Some(ContainerKind)` if `line` is a class/interface/trait declaration.
 fn container_kind(line: &str) -> Option<ContainerKind> {
-    // Strip PHP modifier keywords before the type keyword.
     let stripped = line
         .trim_start_matches("abstract ")
         .trim_start_matches("final ")
@@ -275,8 +264,6 @@ fn file_scope_insert_line(lines: &[&str]) -> usize {
     }
     last_preamble
 }
-
-// ── Action builder ────────────────────────────────────────────────────────────
 
 fn build_action(
     title: &str,

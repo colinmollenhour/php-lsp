@@ -1158,8 +1158,6 @@ impl LanguageServer for Backend {
         self.handle_did_rename_files(params).await
     }
 
-    // ── File-create notifications ────────────────────────────────────────────
-
     async fn will_create_files(&self, params: CreateFilesParams) -> Result<Option<WorkspaceEdit>> {
         self.handle_will_create_files(params).await
     }
@@ -1167,8 +1165,6 @@ impl LanguageServer for Backend {
     async fn did_create_files(&self, params: CreateFilesParams) {
         self.handle_did_create_files(params).await
     }
-
-    // ── File-delete notifications ────────────────────────────────────────────
 
     /// Before a file is deleted, return workspace edits that remove every
     /// `use` import referencing its PSR-4 class name.
@@ -1179,8 +1175,6 @@ impl LanguageServer for Backend {
     async fn did_delete_files(&self, params: DeleteFilesParams) {
         self.handle_did_delete_files(params).await
     }
-
-    // ── Moniker ──────────────────────────────────────────────────────────────
 
     async fn moniker(&self, params: MonikerParams) -> Result<Option<Vec<Moniker>>> {
         let uri = &params.text_document_position_params.text_document.uri;
@@ -1193,8 +1187,6 @@ impl LanguageServer for Backend {
         let imports = self.file_imports(uri);
         Ok(moniker_at(&source, &doc, position, &imports).map(|m| vec![m]))
     }
-
-    // ── Inline values ────────────────────────────────────────────────────────
 
     async fn inline_value(&self, params: InlineValueParams) -> Result<Option<Vec<InlineValue>>> {
         let uri = &params.text_document.uri;

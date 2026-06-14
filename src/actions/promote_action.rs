@@ -27,8 +27,6 @@ use tower_lsp::lsp_types::{
 
 use crate::document::ast::{ParsedDoc, SourceView};
 
-// ── Public entry point ────────────────────────────────────────────────────────
-
 pub fn promote_constructor_actions(
     _source: &str,
     doc: &ParsedDoc,
@@ -40,8 +38,6 @@ pub fn promote_constructor_actions(
     collect_promote(&doc.program().stmts, sv, range, uri, &mut out);
     out
 }
-
-// ── Internal ──────────────────────────────────────────────────────────────────
 
 /// Describes a property/param pair that can be promoted.
 struct Promotion {

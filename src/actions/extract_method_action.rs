@@ -16,8 +16,6 @@ use tower_lsp::lsp_types::{
 use crate::document::ast::{ParsedDoc, SourceView};
 use crate::text::{selected_text_range, utf16_offset_to_byte};
 
-// ── Public entry point ────────────────────────────────────────────────────────
-
 /// Return a "Extract method" code action when `range` spans multiple lines inside
 /// a class method body. Returns an empty vec when the preconditions are not met.
 pub fn extract_method_actions(
@@ -26,12 +24,10 @@ pub fn extract_method_actions(
     range: Range,
     uri: &Url,
 ) -> Vec<CodeActionOrCommand> {
-    // Only trigger on multi-line selections.
     if range.start.line >= range.end.line {
         return vec![];
     }
 
-    // Find the enclosing class and method.
     let sv = doc.view();
     let stmts = &doc.program().stmts;
     let (class_end_offset, method_is_static) = match find_enclosing_class(stmts, sv, range) {
@@ -44,12 +40,9 @@ pub fn extract_method_actions(
         return vec![];
     }
 
-    // Split the source at the selection boundaries so we can compare variable
-    // usage in each region.
     let before = text_before(source, range);
     let after = text_after(source, range);
 
-    // Variables that appear before the selection and also inside it → parameters.
     let vars_before = collect_assigned_vars(&before);
     let vars_in_selection = collect_vars_in_text(&selected);
     let params: Vec<String> = vars_in_selection
@@ -58,14 +51,12 @@ pub fn extract_method_actions(
         .cloned()
         .collect();
 
-    // Variables assigned inside the selection that are also used after it → return value.
     let vars_assigned_in = collect_assigned_vars(&selected);
     let vars_used_after = collect_vars_in_text(&after);
     let returned: Option<String> = vars_assigned_in
         .into_iter()
         .find(|v| vars_used_after.contains(v));
 
-    // ── Build the replacement call ────────────────────────────────────────────
     let indent = line_indent(source, range.start.line);
     let call_prefix = if method_is_static {
         "self::"
@@ -80,7 +71,6 @@ pub fn extract_method_actions(
         None => format!("{indent}{call_prefix}extractedMethod({params_call_list});\n"),
     };
 
-    // ── Build the new method ──────────────────────────────────────────────────
     let static_kw = if method_is_static { "static " } else { "" };
     let param_decls: String = params
         .iter()
@@ -103,7 +93,6 @@ pub fn extract_method_actions(
         body = indent_block(&method_body, "        "),
     );
 
-    // Insert the new method just before the closing brace of the class.
     let closing_line = sv.position_of(class_end_offset.saturating_sub(1)).line;
     let insert_pos = Position {
         line: closing_line,
@@ -114,12 +103,10 @@ pub fn extract_method_actions(
     changes.insert(
         uri.clone(),
         vec![
-            // Replace the selected lines with the method call.
             TextEdit {
                 range,
                 new_text: call_text,
             },
-            // Insert the extracted method before the class closing brace.
             TextEdit {
                 range: Range {
                     start: insert_pos,
@@ -140,8 +127,6 @@ pub fn extract_method_actions(
         ..Default::default()
     })]
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Returns `(class_span_end_offset, method_is_static)` when `range` is inside a
 /// class method body, walking into namespaced blocks as needed.
@@ -223,13 +208,11 @@ fn collect_assigned_vars(text: &str) -> Vec<String> {
                 end += 1;
             }
             if end > start {
-                // Skip whitespace after the variable name.
                 let mut j = end;
                 while j < bytes.len() && bytes[j] == b' ' {
                     j += 1;
                 }
-                // Check for assignment operator (=, +=, -=, *=, /=, .=, etc.)
-                // but NOT == or ===.
+                // `=` but not `==` or `===`
                 let is_assignment = j < bytes.len()
                     && bytes[j] == b'='
                     && (j + 1 >= bytes.len() || bytes[j + 1] != b'=');

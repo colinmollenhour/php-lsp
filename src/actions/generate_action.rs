@@ -8,8 +8,6 @@ use tower_lsp::lsp_types::{
 
 use crate::document::ast::{ParsedDoc, SourceView, format_type_hint};
 
-// ── Public entry points ───────────────────────────────────────────────────────
-
 pub fn generate_constructor_actions(
     _source: &str,
     doc: &ParsedDoc,
@@ -33,8 +31,6 @@ pub fn generate_getters_setters_actions(
     collect_getters_setters(&doc.program().stmts, sv, range, uri, &mut out);
     out
 }
-
-// ── Internal ──────────────────────────────────────────────────────────────────
 
 struct Prop {
     name: String,
@@ -179,8 +175,6 @@ fn collect_getters_setters<'a>(
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 fn non_static_props(c: &php_ast::ClassDecl<'_, '_>) -> Vec<Prop> {
     let mut props: Vec<Prop> = c
         .body
@@ -280,8 +274,6 @@ fn capitalize(s: &str) -> String {
         Some(c) => c.to_uppercase().to_string() + chars.as_str(),
     }
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

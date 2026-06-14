@@ -80,8 +80,6 @@ impl PhpStormMeta {
     }
 }
 
-// ── AST walking ───────────────────────────────────────────────────────────────
-
 fn collect_overrides(stmts: &[Stmt<'_, '_>], meta: &mut PhpStormMeta) {
     for stmt in stmts {
         match &stmt.kind {

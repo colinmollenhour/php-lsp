@@ -260,8 +260,6 @@ fn find_method_range_impl(
 mod tests {
     use super::*;
 
-    // ── find_method_in_class_hierarchy ───────────────────────────────────────
-
     fn make_index(
         path: &str,
         src: &str,

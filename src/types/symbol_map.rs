@@ -20,8 +20,6 @@ use crate::document::ast::ParsedDoc;
 use crate::hover::formatting::declaration_signature;
 use crate::types::resolve::{Container, Declaration};
 
-// ── Public types ──────────────────────────────────────────────────────────────
-
 /// Which kind of PHP declaration this entry represents. Mirrors the variants of
 /// [`Declaration`] so callers can reconstruct any accept predicate without an
 /// AST walk.
@@ -92,16 +90,12 @@ impl SymbolMap {
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 /// Parse a doc-comment already attached by the parser and render it as markdown.
 /// Returns `None` when the docblock has no visible content.
 fn doc_to_markdown(c: &php_ast::Comment<'_>) -> Option<String> {
     let md = crate::lang::docblock::parse_docblock(c.text).to_markdown();
     if md.is_empty() { None } else { Some(md) }
 }
-
-// ── AST walker ────────────────────────────────────────────────────────────────
 
 fn collect_stmts<'a>(
     stmts: &'a [Stmt<'a, 'a>],
@@ -415,8 +409,6 @@ fn push(out: &mut HashMap<String, Vec<SymbolEntry>>, key: String, entry: SymbolE
     out.entry(key).or_default().push(entry);
 }
 
-// ── Predicate helpers (mirrors resolve.rs / declaration.rs predicates) ────────
-
 /// Reconstruct the `is_hoverable` predicate from a stored [`SymbolEntryKind`].
 pub fn is_hoverable_kind(kind: SymbolEntryKind) -> bool {
     !matches!(
@@ -453,8 +445,6 @@ pub fn is_definition_entry(e: &SymbolEntry) -> bool {
         }
     )
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

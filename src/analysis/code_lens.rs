@@ -217,8 +217,6 @@ fn collect_lenses(
     }
 }
 
-// ── Lens constructors ─────────────────────────────────────────────────────────
-
 fn ref_count_lens(
     range: tower_lsp::lsp_types::Range,
     name: &str,
@@ -307,8 +305,6 @@ fn run_test_lens(
         data: None,
     }
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Count how many classes across `all_docs` use `trait_name` via a `use` statement.
 fn trait_usage_locations(

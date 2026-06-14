@@ -61,8 +61,6 @@ impl Backend {
         }
     }
 
-    // ── Open-file state convenience wrappers (Phase E4) ──────────────────────
-
     fn set_open_text(&self, uri: Url, text: String) -> u64 {
         self.open_files.set_open_text(&self.docs, uri, text)
     }

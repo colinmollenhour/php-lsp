@@ -443,8 +443,6 @@ fn format_fn_signature(
     format!("({}){}", params_str, ret_str)
 }
 
-// ── Index-based variants ──────────────────────────────────────────────────────
-
 /// `workspace_symbols` variant that queries `FileIndex` entries instead of
 /// full `ParsedDoc` ASTs.  Used by the backend for cross-file symbol search
 /// when background files only retain a compact index.

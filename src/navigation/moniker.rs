@@ -450,8 +450,6 @@ mod tests {
         HashMap::new()
     }
 
-    // ── resolve_fqn ──────────────────────────────────────────────────────────
-
     #[test]
     fn resolve_fqn_qualified_via_aliased_use() {
         // `use App\Sub;` then `new Sub\Foo()` must resolve to `App\Sub\Foo`.

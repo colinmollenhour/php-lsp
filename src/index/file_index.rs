@@ -20,8 +20,6 @@ use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use crate::document::ast::{ParsedDoc, format_type_hint};
 use crate::lang::docblock::parse_docblock;
 
-// ── Public types ──────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FileIndex {
     pub namespace: Option<Box<str>>,
@@ -130,8 +128,6 @@ pub struct PropertyDef {
     pub name_char: u32,
 }
 
-// ── Extract ───────────────────────────────────────────────────────────────────
-
 impl FileIndex {
     /// Walk `doc.program().stmts` once and build a compact symbol index.
     pub fn extract(doc: &ParsedDoc) -> Self {
@@ -142,8 +138,6 @@ impl FileIndex {
         index
     }
 }
-
-// ── Internal helpers ─────────────────────────────────────────────────────────
 
 fn fqn(namespace: Option<&str>, name: &str) -> Box<str> {
     match namespace {
@@ -172,7 +166,6 @@ fn collect_stmts(
 
     for stmt in stmts {
         match &stmt.kind {
-            // ── Namespace ────────────────────────────────────────────────────
             StmtKind::Namespace(ns) => {
                 let ns_name = ns.name.as_ref().map(|n| n.to_string_repr().into());
 
@@ -196,7 +189,6 @@ fn collect_stmts(
                 }
             }
 
-            // ── Top-level function ───────────────────────────────────────────
             StmtKind::Function(f) => {
                 let doc_text = f.doc_comment.as_ref().map(|c| c.text.into());
                 let start_line = view.position_of(stmt.span.start).line;
@@ -213,7 +205,6 @@ fn collect_stmts(
                 });
             }
 
-            // ── Class ────────────────────────────────────────────────────────
             StmtKind::Class(c) => {
                 let Some(class_name) = c.name else { continue };
                 let class_name_str = class_name.or_error();
@@ -338,7 +329,6 @@ fn collect_stmts(
                 index.classes.push(class_def);
             }
 
-            // ── Interface ────────────────────────────────────────────────────
             StmtKind::Interface(i) => {
                 let start_line = view.position_of(stmt.span.start).line;
                 let ns = cur_ns.as_deref();
@@ -396,7 +386,6 @@ fn collect_stmts(
                 index.classes.push(iface_def);
             }
 
-            // ── Trait ────────────────────────────────────────────────────────
             StmtKind::Trait(t) => {
                 let start_line = view.position_of(stmt.span.start).line;
                 let ns = cur_ns.as_deref();
@@ -470,7 +459,6 @@ fn collect_stmts(
                 index.classes.push(trait_def);
             }
 
-            // ── Enum ─────────────────────────────────────────────────────────
             StmtKind::Enum(e) => {
                 let start_line = view.position_of(stmt.span.start).line;
                 let ns = cur_ns.as_deref();
@@ -532,7 +520,6 @@ fn collect_stmts(
                 index.classes.push(enum_def);
             }
 
-            // ── Top-level const ──────────────────────────────────────────────
             StmtKind::Const(consts) => {
                 for c in consts.iter() {
                     index.constants.push(Box::from(c.name.or_error()));
@@ -589,8 +576,6 @@ fn doc_method_tag_line(
     }
     view.position_of(doc_comment.span.start).line
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

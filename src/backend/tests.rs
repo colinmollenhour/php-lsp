@@ -382,8 +382,6 @@ fn undefined_function_message_not_matched_by_extraction() {
     );
 }
 
-// ── position_to_byte_offset ──────────────────────────────────────────────
-
 #[test]
 fn position_to_byte_offset_first_line() {
     let src = "<?php\nfoo();";
@@ -474,8 +472,6 @@ fn position_to_byte_offset_line_boundary_returns_none() {
         None
     );
 }
-
-// ── cursor_is_on_method_decl ─────────────────────────────────────────────
 
 #[test]
 fn cursor_on_method_decl_name_returns_true() {

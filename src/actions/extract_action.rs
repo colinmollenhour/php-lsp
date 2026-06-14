@@ -12,7 +12,6 @@ use crate::text::selected_text_range;
 /// (a safe, unambiguous placeholder that the user can then rename with the LSP
 /// rename action).
 pub fn extract_variable_actions(source: &str, range: Range, uri: &Url) -> Vec<CodeActionOrCommand> {
-    // Only act on non-empty selections.
     if range.start == range.end {
         return vec![];
     }
@@ -20,7 +19,6 @@ pub fn extract_variable_actions(source: &str, range: Range, uri: &Url) -> Vec<Co
     if selected.is_empty() || selected.trim().is_empty() {
         return vec![];
     }
-    // Don't offer on selections that are already a simple variable or plain keyword.
     let trimmed = selected.trim();
     if trimmed.starts_with('$')
         && trimmed
@@ -31,17 +29,14 @@ pub fn extract_variable_actions(source: &str, range: Range, uri: &Url) -> Vec<Co
         return vec![];
     }
 
-    // Determine the indentation of the line where the selection starts.
     let indent = line_indent(source, range.start.line);
 
-    // Insert `$extracted = <expression>;` on the line before the start of the selection.
     let insert_pos = Position {
         line: range.start.line,
         character: 0,
     };
     let insert_text = format!("{indent}$extracted = {trimmed};\n");
 
-    // Replace the selected text with `$extracted`.
     let replace_text = "$extracted".to_string();
 
     let mut changes = HashMap::new();
@@ -73,8 +68,6 @@ pub fn extract_variable_actions(source: &str, range: Range, uri: &Url) -> Vec<Co
     })]
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 fn line_indent(source: &str, line: u32) -> String {
     source
         .lines()
@@ -82,8 +75,6 @@ fn line_indent(source: &str, line: u32) -> String {
         .map(|l| l.chars().take_while(|c| c.is_whitespace()).collect())
         .unwrap_or_default()
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

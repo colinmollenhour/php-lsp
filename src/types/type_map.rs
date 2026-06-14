@@ -106,18 +106,15 @@ fn type_hint_to_class_string(
                 Some(short.to_string())
             }
             Atomic::TParent { fqcn } => {
-                // If we have the doc and enclosing class, resolve to the actual parent class
                 if let (Some(doc), Some(enc_class)) = (doc, enclosing_class) {
                     if let Some(parent) = parent_class_name(doc, enc_class) {
                         let short = fqn_short_name(&parent);
                         Some(short.to_string())
                     } else {
-                        // No parent found, fall back to enclosing class short name
                         let short = fqn_short_name(fqcn);
                         Some(short.to_string())
                     }
                 } else {
-                    // No doc context, use enclosing class as fallback
                     let short = fqn_short_name(fqcn);
                     Some(short.to_string())
                 }
@@ -134,7 +131,6 @@ fn type_hint_to_class_string(
                                 Some(short.to_string())
                             }
                             Atomic::TParent { fqcn } => {
-                                // Same logic as above for parent in intersections
                                 if let (Some(doc), Some(enc_class)) = (doc, enclosing_class) {
                                     if let Some(parent) = parent_class_name(doc, enc_class) {
                                         let short = fqn_short_name(&parent);
@@ -216,24 +212,18 @@ fn collect_types_stmts(
     doc: &ParsedDoc,
 ) {
     for stmt in stmts {
-        // Check for `/** @var ClassName $varName */` docblock before this statement.
         if let Some(raw) = docblock_before(source, stmt.span.start) {
             let db = parse_docblock(&raw);
             if let Some(type_str) = db.var_type {
-                // Only map object types (starts with uppercase or backslash).
-                // type_str may be a union like "Foo|null"; take the first class part.
                 let class_name = docblock_class_parts(&type_str).into_iter().next();
                 if let Some(class_name) = class_name {
                     if let Some(vname) = db.var_name {
-                        // `@var Foo $obj` — explicit variable name.
                         map.insert(format!("${}", vname.as_str()), class_name);
-                    } else if let StmtKind::Expression(e) = &stmt.kind {
-                        // `@var Foo` above `$obj = ...` — infer from the LHS.
-                        if let ExprKind::Assign(a) = &e.kind
-                            && let ExprKind::Variable(vn) = &a.target.kind
-                        {
-                            map.insert(format!("${}", vn.as_str()), class_name);
-                        }
+                    } else if let StmtKind::Expression(e) = &stmt.kind
+                        && let ExprKind::Assign(a) = &e.kind
+                        && let ExprKind::Variable(vn) = &a.target.kind
+                    {
+                        map.insert(format!("${}", vn.as_str()), class_name);
                     }
                 }
             }
@@ -242,13 +232,11 @@ fn collect_types_stmts(
         match &stmt.kind {
             StmtKind::Expression(e) => collect_types_expr(source, e, map, meta, cursor_byte, doc),
             StmtKind::Function(f) => {
-                // Only collect params/body when cursor is inside this function (or no cursor).
                 let in_scope =
                     cursor_byte.is_none_or(|c| stmt.span.start <= c && c <= stmt.span.end);
                 if !in_scope {
                     continue;
                 }
-                // Read @param docblock hints — fills in types for untyped params
                 collect_param_docblock_types(source, stmt.span.start, map);
                 for p in f.params.iter() {
                     if let Some(hint) = &p.type_hint
@@ -263,13 +251,11 @@ fn collect_types_stmts(
                 let class_name = c.name.map(|n| n.to_string());
                 for member in c.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind {
-                        // Only collect params/body when cursor is inside this method (or no cursor).
                         let in_scope = cursor_byte
                             .is_none_or(|cb| member.span.start <= cb && cb <= member.span.end);
                         if !in_scope {
                             continue;
                         }
-                        // Read @param docblock hints — fills in types for untyped params
                         collect_param_docblock_types(source, member.span.start, map);
                         for p in m.params.iter() {
                             if let Some(hint) = &p.type_hint
@@ -282,7 +268,6 @@ fn collect_types_stmts(
                                 map.insert(format!("${}", p.name), class_str);
                             }
                         }
-                        // Set $this to the enclosing class for instance methods.
                         if !m.is_static
                             && let Some(ref cname) = class_name
                         {
@@ -343,8 +328,7 @@ fn collect_types_stmts(
                     collect_types_stmts(source, &inner.stmts, map, meta, cursor_byte, doc);
                 }
             }
-            // `if ($x instanceof Foo)` narrowing is handled by mir's flow-sensitive
-            // analysis (Type::narrow_instanceof); we only recurse into the branches.
+            // `instanceof` narrowing is handled by mir's flow-sensitive analysis; we only recurse into the branches.
             StmtKind::If(if_stmt) => {
                 collect_types_stmts(
                     source,
@@ -396,7 +380,6 @@ fn collect_types_stmts(
                 }
             }
 
-            // static $var = expr — infer type from the default value expression.
             StmtKind::StaticVar(vars) => {
                 for var in vars.iter() {
                     let var_key = format!("${}", &var.name.to_string());
@@ -446,7 +429,6 @@ fn collect_types_expr(
             collect_types_expr(source, assign.value, map, meta, cursor_byte, doc);
         }
 
-        // Walk closure bodies so inner assignments are also captured
         ExprKind::Closure(c) => {
             for p in c.params.iter() {
                 if let Some(hint) = &p.type_hint
@@ -620,14 +602,11 @@ fn collect_members_stmts(
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
                             out.methods.push((m.name.to_string(), m.is_static));
-                            // Constructor-promoted params become instance properties.
                             if m.name == "__construct" {
                                 for p in m.params.iter() {
                                     if p.visibility.is_some() {
                                         out.properties.push((p.name.to_string(), false));
-                                        // Detect `readonly` in the source text before the
-                                        // param name (the AST does not expose this flag on
-                                        // Param, so we scan the raw text of the param span).
+                                        // AST does not expose the `readonly` flag on Param; scan the raw span text.
                                         let param_src =
                                             &source[p.span.start as usize..p.span.end as usize];
                                         if param_src.contains("readonly") {
@@ -658,18 +637,15 @@ fn collect_members_stmts(
             StmtKind::Enum(e) if e.name == class_name => {
                 out.found = true;
                 let is_backed = e.scalar_type.is_some();
-                // Every enum instance exposes `->name`; backed enums also expose `->value`.
                 out.properties.push(("name".to_string(), false));
                 if is_backed {
                     out.properties.push(("value".to_string(), false));
                 }
-                // Built-in static methods present on every enum.
                 out.methods.push(("cases".to_string(), true));
                 if is_backed {
                     out.methods.push(("from".to_string(), true));
                     out.methods.push(("tryFrom".to_string(), true));
                 }
-                // User-declared cases, methods, and constants.
                 for member in e.body.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Case(c) => {

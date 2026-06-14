@@ -670,7 +670,6 @@ fn collect_class_member(
 
 fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<RawToken>) {
     match &expr.kind {
-        // ── Literals ──────────────────────────────────────────────────────────
         ExprKind::Int(_) | ExprKind::Float(_) => {
             let span_len = expr.span.end - expr.span.start;
             push_at(out, sv, expr.span.start, span_len, TT_NUMBER, 0);
@@ -709,7 +708,6 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
                 collect_expr(sv, &arg.value, out);
             }
         }
-        // ── Calls ─────────────────────────────────────────────────────────────
         ExprKind::FunctionCall(f) => {
             if let ExprKind::Identifier(name) = &f.name.kind {
                 let name_str: &str = name;
@@ -762,7 +760,6 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
                 collect_expr(sv, &arg.value, out);
             }
         }
-        // ── Compound expressions ──────────────────────────────────────────────
         ExprKind::Assign(a) => {
             collect_expr(sv, a.target, out);
             collect_expr(sv, a.value, out);
@@ -828,7 +825,6 @@ fn collect_expr(sv: SourceView<'_>, expr: &php_ast::Expr<'_, '_>, out: &mut Vec<
                 collect_expr(sv, &arm.body, out);
             }
         }
-        // ── Variables ─────────────────────────────────────────────────────────
         ExprKind::Variable(_) => {
             let segment = &sv.source()[expr.span.start as usize..expr.span.end as usize];
             let len: u32 = utf16_code_units(segment);
