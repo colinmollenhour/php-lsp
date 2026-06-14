@@ -1619,3 +1619,105 @@ async fn semantic_tokens_delta_large_file_changes() {
     let has_result = result["data"].is_array() || result["edits"].is_array();
     assert!(has_result, "large file delta should return result");
 }
+
+/// `é` (U+00E9) is 2 UTF-8 bytes but 1 UTF-16 code unit.
+/// A named type hint `Héros` has byte-length 6 but UTF-16 length 5.
+/// The token's `length` field must reflect UTF-16 units.
+#[tokio::test]
+async fn semantic_tokens_named_type_hint_multibyte_utf16_length() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open("mb_type.php", "<?php\nfunction greet(Héros $h): void {}\n")
+        .await;
+
+    let resp = server.semantic_tokens_full("mb_type.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:9 len=5 type=function mods=0b1
+        1:15 len=5 type=type mods=0b0
+        1:21 len=2 type=parameter mods=0b1
+        1:26 len=4 type=type mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Attribute names with multibyte characters must use UTF-16 lengths.
+/// `Routé`: R(1) o(1) u(1) t(1) é(2 bytes, 1 UTF-16) → len=5, not 6.
+#[tokio::test]
+async fn semantic_tokens_attribute_name_multibyte_utf16_length() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server
+        .open(
+            "mb_attr.php",
+            "<?php\n#[Routé(\"/home\")]\nfunction index() {}\n",
+        )
+        .await;
+
+    let resp = server.semantic_tokens_full("mb_attr.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:2 len=5 type=class mods=0b0
+        2:9 len=5 type=function mods=0b1"#]]
+    .assert_eq(&out);
+}
+
+/// String literals with multibyte characters must report UTF-16 length.
+/// `"café"`: " + c + a + f + é(1 UTF-16) + " = 6 UTF-16 units, not 7 bytes.
+#[tokio::test]
+async fn semantic_tokens_string_literal_multibyte_utf16_length() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server.open("mb_str.php", "<?php\n$s = \"café\";\n").await;
+
+    let resp = server.semantic_tokens_full("mb_str.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=2 type=variable mods=0b0
+        1:5 len=6 type=string mods=0b0"#]]
+    .assert_eq(&out);
+}
+
+/// Variable names with multibyte characters must report UTF-16 length.
+/// `$café`: $ + c + a + f + é(1 UTF-16) = 5 UTF-16 units, not 6 bytes.
+#[tokio::test]
+async fn semantic_tokens_variable_multibyte_utf16_length() {
+    use common::render_semantic_tokens;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    let legend_types = get_legend_types(&init_resp).await;
+
+    server.open("mb_var.php", "<?php\n$café = 1;\n").await;
+
+    let resp = server.semantic_tokens_full("mb_var.php").await;
+    let out = render_semantic_tokens(&resp, &legend_types);
+    expect![[r#"
+        1:0 len=5 type=variable mods=0b0
+        1:8 len=1 type=number mods=0b0"#]]
+    .assert_eq(&out);
+}
