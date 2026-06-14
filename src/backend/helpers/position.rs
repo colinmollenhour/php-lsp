@@ -102,7 +102,14 @@ pub(crate) fn symbol_kind_at(source: &str, position: Position, word: &str) -> Op
 
     // Check for `::`
     if char_idx >= 2 && chars[char_idx - 1] == ':' && chars[char_idx - 2] == ':' {
-        return Some(SymbolKind::Method);
+        // A `::` followed immediately by `(` is a static method call.  Without
+        // `(` the identifier is a class constant access — constants are accessed
+        // without parentheses in PHP (`Class::CONST`).
+        return if next_is_call {
+            Some(SymbolKind::Method)
+        } else {
+            Some(SymbolKind::Constant)
+        };
     }
 
     // If the word starts with an uppercase letter it is likely a class/interface/enum name.

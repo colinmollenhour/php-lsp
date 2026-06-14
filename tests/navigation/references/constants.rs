@@ -274,3 +274,48 @@ echo HttpMethods::GET_TIMEOUT;
     )
     .await;
 }
+
+#[tokio::test]
+async fn constant_class_from_access_site() {
+    // Cursor on a class constant ACCESS site must produce the same results as
+    // cursor on the declaration — declaration + all usages.
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+class Flags {
+    const VERBOSE = 1;
+    //    ^^^^^^^ def
+    const DEBUG = 2;
+}
+
+$mode = Flags::VER$0BOSE;
+//             ^^^^^^^ ref
+if ($mode & Flags::VERBOSE) {}
+//                 ^^^^^^^ ref
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn constant_self_from_access_site() {
+    // Cursor on `self::CONST` usage inside the same class must find declaration
+    // and all usages (both `self::` and `ClassName::` forms).
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+class Config {
+    const MAX = 100;
+    //    ^^^ def
+
+    public function check(int $v): bool {
+        return $v <= self::MA$0X;
+        //                 ^^^ ref
+    }
+}
+$ok = Config::MAX;
+//            ^^^ ref
+"#,
+    )
+    .await;
+}

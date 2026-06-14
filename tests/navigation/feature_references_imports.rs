@@ -67,13 +67,14 @@ class OldService {}
 #[tokio::test]
 async fn references_distinguishes_class_constant_access() {
     let mut s = TestServer::new().await;
-    // Cursor on a static constant access — no refs resolve from this site.
     s.check_references_annotated(
         r#"<?php
 class Status {
     const ACTIVE = 1;
+    //    ^^^^^^ def
 }
 $x = Status::AC$0TIVE;
+//           ^^^^^^ ref
 "#,
     )
     .await;

@@ -8,11 +8,11 @@ pub use common::render::{
     assert_selection_range_invariant,
 };
 pub use common::{
-    TestServer, canonicalize_workspace_edit, lines_of, render_completion, render_document_symbols,
-    render_hover, render_inlay_hints, render_locations, render_resolved_code_action,
-    render_resolved_code_lens, render_resolved_completion_item, render_resolved_document_link,
-    render_resolved_inlay_hint, render_resolved_workspace_symbol, render_semantic_tokens,
-    render_workspace_symbols,
+    TestServer, canonicalize_workspace_edit, lines_of, render_completion,
+    render_completion_ordered, render_document_symbols, render_hover, render_inlay_hints,
+    render_locations, render_resolved_code_action, render_resolved_code_lens,
+    render_resolved_completion_item, render_resolved_document_link, render_resolved_inlay_hint,
+    render_resolved_workspace_symbol, render_semantic_tokens, render_workspace_symbols,
 };
 
 #[path = "editing/feature_code_action_extract_constant.rs"]

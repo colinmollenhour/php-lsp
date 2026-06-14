@@ -153,7 +153,8 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
             && m.name == self.word
         {
             let name_str = m.name.or_error();
-            let start = str_offset(self.source, name_str).unwrap_or(0);
+            let start = str_offset_in_range(self.source, member.span, name_str)
+                .unwrap_or(member.span.start);
             self.out.push(Span {
                 start,
                 end: start + name_str.len() as u32,

@@ -4772,3 +4772,179 @@ $remote$0
         "cross-file variable must not appear in completions, got:\n{out}"
     );
 }
+
+/// Trigger-character `>` (after `->`) must return ONLY instance members of the
+/// resolved receiver class, not the full keyword/builtin list.
+#[tokio::test]
+async fn completion_arrow_trigger_char_returns_instance_members_only() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+class Printer {
+    public function print(): void {}
+    public string $output = '';
+}
+$p = new Printer();
+$p->$0
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let uri = s.uri(&c.path);
+    let resp = s
+        .client()
+        .request(
+            "textDocument/completion",
+            serde_json::json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": c.line, "character": c.character },
+                "context": { "triggerKind": 2, "triggerCharacter": ">" },
+            }),
+        )
+        .await;
+    let out = render_completion(&resp);
+    // Only the instance members of Printer must appear — no keywords or builtins.
+    expect![[r#"
+        Property    $output
+        Method      print"#]]
+    .assert_eq(&out);
+}
+
+/// Trigger-character `:` (after `::`) must return ONLY the static members of
+/// the resolved class — no keywords or builtins leak through.
+#[tokio::test]
+async fn completion_static_trigger_char_returns_static_members_only() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+class Store {
+    public static function save(): void {}
+    public static int $count = 0;
+    const VERSION = '1.0';
+}
+Store::$0
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let uri = s.uri(&c.path);
+    let resp = s
+        .client()
+        .request(
+            "textDocument/completion",
+            serde_json::json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": c.line, "character": c.character },
+                "context": { "triggerKind": 2, "triggerCharacter": ":" },
+            }),
+        )
+        .await;
+    let out = render_completion_ordered(&resp);
+    // Only static members of Store: static method, static property, constant.
+    // Keywords and builtins must NOT appear.
+    // render_completion_ordered sorts by label; `$count` < `VERSION` < `save` (ASCII order).
+    expect![[r#"
+        Property    $count
+        Constant    VERSION
+        Method      save"#]]
+    .assert_eq(&out);
+}
+
+/// Trigger-character `$` must return ONLY superglobals and local variables —
+/// not keywords or builtins.
+#[tokio::test]
+async fn completion_dollar_trigger_char_returns_variables_only() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function process(string $input): void {
+    $result = '';
+    $$0
+}
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let uri = s.uri(&c.path);
+    let resp = s
+        .client()
+        .request(
+            "textDocument/completion",
+            serde_json::json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": c.line, "character": c.character },
+                "context": { "triggerKind": 2, "triggerCharacter": "$" },
+            }),
+        )
+        .await;
+    let items: Vec<_> = match &resp["result"] {
+        v if v.is_array() => v.as_array().unwrap().to_vec(),
+        v if v["items"].is_array() => v["items"].as_array().unwrap().to_vec(),
+        _ => vec![],
+    };
+    let returned_labels: Vec<&str> = items.iter().filter_map(|i| i["label"].as_str()).collect();
+    // Must contain superglobals and function parameters.
+    // Note: body-local variables (e.g. `$result = ''`) are not scanned by the
+    // trigger-$ path — only params and superglobals are returned.
+    assert!(
+        returned_labels.contains(&"$_GET"),
+        "expected $_GET in trigger-$ completions, got: {returned_labels:?}"
+    );
+    assert!(
+        returned_labels.contains(&"$input"),
+        "expected $input in trigger-$ completions, got: {returned_labels:?}"
+    );
+    // Must NOT contain keywords or builtins.
+    assert!(
+        !returned_labels.contains(&"function"),
+        "keyword 'function' must not appear in trigger-$ completions, got: {returned_labels:?}"
+    );
+    assert!(
+        !returned_labels.contains(&"strlen"),
+        "builtin 'strlen' must not appear in trigger-$ completions, got: {returned_labels:?}"
+    );
+}
+
+/// Trigger-character `(` must return named-argument labels when cursor is
+/// immediately after the opening paren of a function call.
+#[tokio::test]
+async fn completion_open_paren_trigger_char_returns_named_args() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+function createUser(string $name, int $age, bool $active): void {}
+createUser($0
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let uri = s.uri(&c.path);
+    let resp = s
+        .client()
+        .request(
+            "textDocument/completion",
+            serde_json::json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": c.line, "character": c.character },
+                "context": { "triggerKind": 2, "triggerCharacter": "(" },
+            }),
+        )
+        .await;
+    let out = render_completion(&resp);
+    // All three parameter names must appear as named-argument completions.
+    // PHP named args use `name:` syntax (no `$` prefix).
+    // render_completion sorts by label (no sortText set), so alphabetical order.
+    expect![[r#"
+        Variable    active:
+        Variable    age:
+        Variable    name:"#]]
+    .assert_eq(&out);
+}

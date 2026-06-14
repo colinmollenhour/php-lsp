@@ -411,6 +411,21 @@ fn resolve_reference_symbol(
             (const_name, Some(SymbolKind::Constant))
         } else {
             let k = symbol_kind_at(source, position, &word);
+            // For constant access sites (`ClassName::CONST`, `self::CONST`),
+            // extract the owning class so the constant walker is scoped to
+            // the right class rather than falling back to the global-constant
+            // path (which would look for a top-level constant named `CONST`).
+            if matches!(k, Some(SymbolKind::Constant))
+                && let Some(raw) = class_before_double_colon(source, position)
+            {
+                constant_owner = Some(match raw.as_str() {
+                    "self" | "static" => {
+                        crate::types::type_map::enclosing_class_at(doc.source(), doc, position)
+                            .unwrap_or(raw)
+                    }
+                    _ => raw,
+                });
+            }
             (word, k)
         }
     } else {
@@ -418,6 +433,47 @@ fn resolve_reference_symbol(
         (word, k)
     };
     (word, kind, constant_owner)
+}
+
+/// Extract the class name (or pseudo-keyword) immediately to the left of `::` at
+/// the cursor position. Returns `None` when the cursor is not on an identifier
+/// preceded by `::`.
+///
+/// Used to populate `constant_owner` for constant access sites so that
+/// `Status::ACTIVE` (cursor on `ACTIVE`) scopes the constant walker to `Status`
+/// rather than treating `ACTIVE` as a global constant.
+fn class_before_double_colon(source: &str, position: Position) -> Option<String> {
+    let line = source.lines().nth(position.line as usize)?;
+    let chars: Vec<char> = line.chars().collect();
+    let col = position.character as usize;
+
+    let mut utf16_col = 0usize;
+    let mut char_idx = 0usize;
+    for ch in &chars {
+        if utf16_col >= col {
+            break;
+        }
+        utf16_col += ch.len_utf16();
+        char_idx += 1;
+    }
+
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    while char_idx > 0 && is_word(chars[char_idx - 1]) {
+        char_idx -= 1;
+    }
+
+    if char_idx < 2 || chars[char_idx - 1] != ':' || chars[char_idx - 2] != ':' {
+        return None;
+    }
+
+    let class_end = char_idx - 2;
+    let mut class_start = class_end;
+    while class_start > 0 && (is_word(chars[class_start - 1]) || chars[class_start - 1] == '\\') {
+        class_start -= 1;
+    }
+
+    let name: String = chars[class_start..class_end].iter().collect();
+    if name.is_empty() { None } else { Some(name) }
 }
 
 /// Off-`self` variant of `Backend::compute_dependent_publishes`. Needed
