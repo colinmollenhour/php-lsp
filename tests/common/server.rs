@@ -1563,7 +1563,34 @@ impl TestServer {
     /// transformed file, not just the diffs.
     pub async fn check_code_action_apply(&mut self, src: &str, title: &str) -> String {
         let opened = self.open_fixture(src).await;
-        let original_content = opened.fixture.files[0].text.clone();
+
+        // Use the cursor/range file as the target, falling back to files[0].
+        let (cursor_path, original_content) = if let Some(r) = opened.fixture.range.as_ref() {
+            let path = r.path.clone();
+            let text = opened
+                .fixture
+                .files
+                .iter()
+                .find(|f| f.path == path)
+                .map(|f| f.text.clone())
+                .unwrap_or_default();
+            (path, text)
+        } else if let Some(c) = opened.fixture.cursor.as_ref() {
+            let path = c.path.clone();
+            let text = opened
+                .fixture
+                .files
+                .iter()
+                .find(|f| f.path == path)
+                .map(|f| f.text.clone())
+                .unwrap_or_default();
+            (path, text)
+        } else {
+            (
+                opened.fixture.files[0].path.clone(),
+                opened.fixture.files[0].text.clone(),
+            )
+        };
 
         let resp = if let Some(r) = opened.fixture.range.clone() {
             self.code_action_at(&r).await
@@ -1595,7 +1622,13 @@ impl TestServer {
             return "<no changes in edit>".to_string();
         };
 
-        let Some(text_edits) = changes.values().next().and_then(|e| e.as_array()) else {
+        // For multi-file edits, prefer the edits targeting the cursor file.
+        let cursor_uri = format!("file://{cursor_path}");
+        let text_edits = changes
+            .get(&cursor_uri)
+            .or_else(|| changes.values().next())
+            .and_then(|e| e.as_array());
+        let Some(text_edits) = text_edits else {
             return "<no text edits>".to_string();
         };
 
@@ -1617,11 +1650,23 @@ impl TestServer {
         let lines: Vec<&str> = original_content.lines().collect();
         let mut result = original_content.clone();
 
+        // LSP positions are UTF-16 code units; convert to byte offsets for Rust slicing.
+        fn utf16_col_to_byte(line: &str, utf16_col: usize) -> usize {
+            let mut count = 0usize;
+            for (byte_idx, ch) in line.char_indices() {
+                if count >= utf16_col {
+                    return byte_idx;
+                }
+                count += ch.len_utf16();
+            }
+            line.len()
+        }
+
         for ((start_line, start_char, end_line, end_char), new_text) in edits {
             let mut byte_start = 0;
             for (i, line) in lines.iter().enumerate() {
                 if i == start_line {
-                    byte_start += start_char;
+                    byte_start += utf16_col_to_byte(line, start_char);
                     break;
                 }
                 byte_start += line.len() + 1;
@@ -1630,7 +1675,7 @@ impl TestServer {
             let mut byte_end = 0;
             for (i, line) in lines.iter().enumerate() {
                 if i == end_line {
-                    byte_end += end_char;
+                    byte_end += utf16_col_to_byte(line, end_char);
                     break;
                 }
                 byte_end += line.len() + 1;
