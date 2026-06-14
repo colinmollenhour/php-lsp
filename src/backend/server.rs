@@ -360,16 +360,30 @@ impl LanguageServer for Backend {
 
         // Persist the FileIndex to the disk cache so that a server restart
         // can skip re-parsing this file even for edits that happened between
-        // workspace scans.
-        if let (Some(text), Some(root)) = (
+        // workspace scans. Use the same stat-based key as the workspace scan
+        // so the entry is found on the next cold start.
+        if let (Some(text), Some(root), Ok(path)) = (
             self.get_open_text(&uri),
             self.root_paths.load().first().cloned(),
-        ) {
+            uri.to_file_path(),
+        ) && let Ok(meta) = tokio::fs::metadata(&path).await
+        {
+            let mtime_secs = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let size = meta.len();
             tokio::task::spawn_blocking(move || {
                 let Some(cache) = crate::index::cache::WorkspaceCache::new(&root) else {
                     return;
                 };
-                let key = crate::index::cache::WorkspaceCache::key_for(uri.as_str(), &text);
+                let key = crate::index::cache::WorkspaceCache::key_for_stat(
+                    uri.as_str(),
+                    mtime_secs,
+                    size,
+                );
                 let doc = parse_document_no_diags(&text);
                 let index = crate::index::file_index::FileIndex::extract(&doc);
                 let _ = cache.write(&key, &index);
