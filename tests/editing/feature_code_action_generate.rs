@@ -85,7 +85,34 @@ class A$0ccount$0 {
             "Generate 2 getters/setters",
         )
         .await;
-    expect!["<action not found: Generate 2 getters/setters>"].assert_eq(&out);
+    expect![[r#"
+        <?php
+        class Account {
+            private string $email = '';
+            private int $balance = 0;
+            public function getEmail(): string
+            {
+                return $this->email;
+            }
+
+            public function setEmail(string $email): void
+            {
+                $this->email = $email;
+            }
+
+            public function getBalance(): int
+            {
+                return $this->balance;
+            }
+
+            public function setBalance(int $balance): void
+            {
+                $this->balance = $balance;
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -102,7 +129,23 @@ class C$0onfig$0 {
             "Generate getter/setter",
         )
         .await;
-    expect!["<action not found: Generate getter/setter>"].assert_eq(&out);
+    expect![[r#"
+        <?php
+        class Config {
+            private string $apiKey = '';
+            public function getApiKey(): string
+            {
+                return $this->apiKey;
+            }
+
+            public function setApiKey(string $apiKey): void
+            {
+                $this->apiKey = $apiKey;
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -187,6 +230,21 @@ class S$0ettings$0 {
             "Generate getter/setter",
         )
         .await;
-    // Should properly handle bool type and create is-prefixed getter
-    expect!["<action not found: Generate getter/setter>"].assert_eq(&out);
+    expect![[r#"
+        <?php
+        class Settings {
+            private bool $isEnabled = false;
+            public function getIsEnabled(): bool
+            {
+                return $this->isEnabled;
+            }
+
+            public function setIsEnabled(bool $isEnabled): void
+            {
+                $this->isEnabled = $isEnabled;
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
 }

@@ -123,7 +123,18 @@ fn collect_getters_setters<'a>(
                     let cap = capitalize(&p.name);
 
                     let getter = format!("get{cap}");
-                    if !existing.contains(&getter) {
+                    let has_getter = existing.contains(&getter);
+                    let setter = format!("set{cap}");
+                    let has_setter = existing.contains(&setter);
+
+                    if has_getter && has_setter {
+                        continue;
+                    }
+
+                    // Count properties needing at least one accessor, not individual methods.
+                    count += 1;
+
+                    if !has_getter {
                         let ret = p
                             .type_str
                             .as_deref()
@@ -133,11 +144,9 @@ fn collect_getters_setters<'a>(
                             "    public function {getter}(){ret}\n    {{\n        return $this->{};\n    }}\n\n",
                             p.name
                         ));
-                        count += 1;
                     }
 
-                    let setter = format!("set{cap}");
-                    if !existing.contains(&setter) {
+                    if !has_setter {
                         let param = match &p.type_str {
                             Some(t) => format!("{t} ${}", p.name),
                             None => format!("${}", p.name),
@@ -146,7 +155,6 @@ fn collect_getters_setters<'a>(
                             "    public function {setter}({param}): void\n    {{\n        $this->{n} = ${n};\n    }}\n\n",
                             n = p.name
                         ));
-                        count += 1;
                     }
                 }
 

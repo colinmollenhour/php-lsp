@@ -20,7 +20,7 @@ class U$0ser$0 {
         )
         .await;
     expect![[r#"
-        refactor         Generate 4 getters/setters
+        refactor         Generate 2 getters/setters
         refactor         Generate constructor
         refactor.extract Extract variable [edit]"#]]
     .assert_eq(&out);
