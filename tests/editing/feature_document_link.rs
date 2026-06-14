@@ -284,3 +284,44 @@ async fn document_link_resolve_is_idempotent() {
         "calling resolve twice must return identical results (idempotent)"
     );
 }
+
+#[tokio::test]
+async fn document_link_docblock_see_http_url_produces_link() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "see.php",
+            "<?php\n/**\n * @see https://example.com/docs\n */\nfunction bar() {}\n",
+        )
+        .await;
+    let resp = server.document_link("see.php").await;
+    assert!(resp["error"].is_null(), "error: {resp:?}");
+    expect!["2:8-32 target=https://example.com/docs"]
+        .assert_eq(&render_document_links(&resp["result"]));
+}
+
+#[tokio::test]
+async fn document_link_position_correct_after_multibyte_char() {
+    // "é" (U+00E9) is 2 UTF-8 bytes but 1 UTF-16 code unit.
+    // The URL must start at the correct UTF-16 column, not the byte offset.
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "mb.php",
+            "<?php\n/** é @link https://example.com */\nfunction f() {}\n",
+        )
+        .await;
+    let resp = server.document_link("mb.php").await;
+    assert!(resp["error"].is_null(), "error: {resp:?}");
+    let links = resp["result"].as_array().expect("expected link array");
+    assert_eq!(links.len(), 1, "expected exactly one link");
+    let range = &links[0]["range"];
+    let url = "https://example.com";
+    let start_col = range["start"]["character"].as_u64().unwrap();
+    let end_col = range["end"]["character"].as_u64().unwrap();
+    assert_eq!(
+        end_col - start_col,
+        url.len() as u64,
+        "link width must match URL length in UTF-16 units (ASCII URL, so same as char count)"
+    );
+}
