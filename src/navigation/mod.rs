@@ -4,5 +4,7 @@ pub mod definition;
 pub mod implementation;
 pub mod moniker;
 pub mod references;
+pub mod symbols;
 pub mod type_definition;
 pub mod type_hierarchy;
+pub mod walk;

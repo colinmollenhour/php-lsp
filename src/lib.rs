@@ -54,19 +54,14 @@ pub mod completion;
 pub mod editing;
 pub mod hover;
 pub mod navigation;
-pub mod symbols;
 
 // ── Salsa query layer ────────────────────────────────────────────────────────
 pub mod db;
 
 // ── Server entry point & cross-cutting infrastructure ────────────────────────
 pub mod backend;
-mod file_rename; // workspace `use`-import edits on file rename/delete
-pub mod panic_guard;
 #[cfg(test)]
 mod test_utils;
-mod use_import; //  FQN lookup + `use` statement insertion
-pub mod walk; //    AST reference-span walkers
 
 // Re-exports for benchmark crates that use the flat `php_lsp::X` paths.
 pub use analysis::semantic_diagnostics;
@@ -79,5 +74,6 @@ pub use navigation::call_hierarchy;
 pub use navigation::definition;
 pub use navigation::implementation;
 pub use navigation::references;
+pub use navigation::symbols;
 pub use types::symbol_map;
 pub use types::type_map;

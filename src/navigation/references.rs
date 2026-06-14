@@ -9,14 +9,14 @@ use php_ast::{
 use rayon::prelude::*;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
-use crate::document::ast::{ParsedDoc, str_offset_in_range};
-use crate::text::{fqn_short_name, utf16_code_units};
-use crate::walk::{
+use super::walk::{
     all_class_ref_names_in_stmts, class_refs_in_stmts, constant_refs_in_stmts,
     fqn_new_class_refs_in_stmts, function_refs_in_stmts, global_constant_refs_in_stmts,
     method_refs_in_stmts, new_refs_in_stmts, property_refs_in_stmts, refs_in_stmts,
     refs_in_stmts_with_use,
 };
+use crate::document::ast::{ParsedDoc, str_offset_in_range};
+use crate::text::{fqn_short_name, utf16_code_units};
 
 /// What kind of symbol the cursor is on.  Used to dispatch to the
 /// appropriate semantic walker so that, e.g., searching for `get` as a

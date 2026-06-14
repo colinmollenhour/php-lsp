@@ -5,8 +5,8 @@ use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
 use crate::document::ast::ParsedDoc;
 use crate::navigation::references::find_references_with_use;
+use crate::navigation::walk::{collect_var_refs_in_scope, property_refs_in_stmts};
 use crate::text::utf16_code_units;
-use crate::walk::{collect_var_refs_in_scope, property_refs_in_stmts};
 
 /// Compute a WorkspaceEdit that renames every occurrence of `word` to `new_name`
 /// across all open documents (including the declaration site).

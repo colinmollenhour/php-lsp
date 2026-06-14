@@ -16,11 +16,13 @@ use php_ast::{
     StmtKind,
 };
 
+use super::panic_guard::{guard_async, guard_async_result};
 use crate::completion::{CompletionCtx, filtered_completions_at};
 use crate::document::ast::{ParsedDoc, str_offset};
 use crate::document::document_store::DocumentStore;
 use crate::document::open_files::{OpenFiles, compute_open_file_diagnostics};
-use crate::file_rename::{use_edits_for_delete, use_edits_for_rename};
+use crate::editing::file_rename::{use_edits_for_delete, use_edits_for_rename};
+use crate::editing::use_import::{build_use_import_edit, find_fqn_for_class};
 use crate::hover::{
     class_hover_from_index, docs_for_symbol_from_index, hover_info_with_maps,
     signature_for_symbol_from_index,
@@ -29,12 +31,10 @@ use crate::index::workspace_scan::{scan_workspace, send_refresh_requests};
 use crate::lang::autoload::Psr4Map;
 use crate::lang::config::LspConfig;
 use crate::lang::phpstorm_meta::PhpStormMeta;
-use crate::panic_guard::{guard_async, guard_async_result};
-use crate::symbols::{
+use crate::navigation::symbols::{
     document_symbols, resolve_workspace_symbol, workspace_symbols_from_workspace,
 };
 use crate::text::{fqn_short_name, word_at_position};
-use crate::use_import::{build_use_import_edit, find_fqn_for_class};
 
 use crate::actions::extract_action::extract_variable_actions;
 use crate::actions::extract_constant_action::extract_constant_actions;

@@ -577,6 +577,7 @@ fn compute_diagnostic_result_id(diagnostics: &[Diagnostic], uri: &str) -> String
 }
 
 mod helpers;
+pub mod panic_guard;
 mod server;
 #[cfg(test)]
 mod tests;
