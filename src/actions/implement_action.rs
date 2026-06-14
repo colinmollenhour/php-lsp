@@ -197,7 +197,7 @@ fn abstract_methods_of(
 
 /// Like `collect_abstract_methods` but matches the fully-qualified name
 /// `namespace\ClassName` by tracking the current namespace prefix while
-/// recursing into `StmtKind::Namespace` blocks.
+/// recursing into `StmtKind::Namespace` blocks (both braced and unbraced).
 fn collect_abstract_methods_fqn(
     stmts: &[Stmt<'_, '_>],
     fqn: &str,
@@ -205,15 +205,18 @@ fn collect_abstract_methods_fqn(
 ) -> Option<Vec<MethodStub>> {
     // The expected short name is the last segment of the FQN.
     let short = fqn_short_name(fqn);
+    // For unbraced namespaces (`namespace Foo;`) the active namespace changes
+    // mid-statement-list; track it mutably as we iterate.
+    let mut active_ns = current_ns.to_string();
 
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Interface(i) if i.name == short => {
                 // Verify the namespace matches.
-                let declared_fqn = if current_ns.is_empty() {
+                let declared_fqn = if active_ns.is_empty() {
                     i.name.to_string()
                 } else {
-                    format!("{}\\{}", current_ns, &i.name.to_string())
+                    format!("{}\\{}", active_ns, &i.name.to_string())
                 };
                 if fqn_eq(fqn, &declared_fqn) {
                     let stubs = i
@@ -244,10 +247,10 @@ fn collect_abstract_methods_fqn(
                 if c.name.as_ref().map(|n| n.to_string()) == Some(short.to_string())
                     && c.modifiers.is_abstract =>
             {
-                let declared_fqn = if current_ns.is_empty() {
+                let declared_fqn = if active_ns.is_empty() {
                     short.to_string()
                 } else {
-                    format!("{}\\{}", current_ns, short)
+                    format!("{}\\{}", active_ns, short)
                 };
                 if fqn_eq(fqn, &declared_fqn) {
                     let stubs = c
@@ -279,16 +282,25 @@ fn collect_abstract_methods_fqn(
                 }
             }
             StmtKind::Namespace(ns) => {
-                if let NamespaceBody::Braced(inner) = &ns.body {
-                    let ns_name = ns.name.as_ref().map(|n| n.to_string_repr().into_owned());
-                    let child_ns = match &ns_name {
-                        Some(n) if !current_ns.is_empty() => format!("{}\\{}", current_ns, n),
-                        Some(n) => n.clone(),
-                        None => current_ns.to_string(),
-                    };
-                    if let Some(stubs) = collect_abstract_methods_fqn(&inner.stmts, fqn, &child_ns)
-                    {
-                        return Some(stubs);
+                let ns_name = ns.name.as_ref().map(|n| n.to_string_repr().into_owned());
+                match &ns.body {
+                    NamespaceBody::Braced(inner) => {
+                        let child_ns = match &ns_name {
+                            Some(n) if !active_ns.is_empty() => {
+                                format!("{}\\{}", active_ns, n)
+                            }
+                            Some(n) => n.clone(),
+                            None => active_ns.clone(),
+                        };
+                        if let Some(stubs) =
+                            collect_abstract_methods_fqn(&inner.stmts, fqn, &child_ns)
+                        {
+                            return Some(stubs);
+                        }
+                    }
+                    NamespaceBody::Simple => {
+                        // Unbraced form: all subsequent statements are in this namespace.
+                        active_ns = ns_name.unwrap_or_default();
                     }
                 }
             }

@@ -241,3 +241,122 @@ class $0Circle$0 extends Shape {}
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn implement_interface_resolved_through_use_import() {
+    // Interface lives in a separate file under a braced namespace; the class
+    // imports it with `use`. The action must look up the correct interface.
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"//- /Contracts/Renderable.php
+<?php
+namespace App\Contracts;
+interface Renderable {
+    public function render(): string;
+}
+
+//- /View.php
+<?php
+use App\Contracts\Renderable;
+class $0View$0 implements Renderable {}
+"#,
+            "Implement missing method",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        use App\Contracts\Renderable;
+        class View implements Renderable {
+            public function render(): string
+            {
+                throw new \RuntimeException('Not implemented');
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implement_interface_same_short_name_disambiguated_by_use_import() {
+    // Two interfaces share the short name `Logger`; only the one referenced by
+    // the `use` statement should have its methods stubbed.
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"//- /Other/Logger.php
+<?php
+namespace Other;
+interface Logger {
+    public function wrong(): void;
+}
+
+//- /App/Logging/Logger.php
+<?php
+namespace App\Logging;
+interface Logger {
+    public function log(string $msg): void;
+}
+
+//- /FileLogger.php
+<?php
+use App\Logging\Logger;
+class $0FileLogger$0 implements Logger {}
+"#,
+            "Implement missing method",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        use App\Logging\Logger;
+        class FileLogger implements Logger {
+            public function log(string $msg): void
+            {
+                throw new \RuntimeException('Not implemented');
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn implement_abstract_class_resolved_through_use_import() {
+    // Abstract class lives in a separate file under an unbraced namespace;
+    // the concrete class imports it with `use`. Verifies the unbraced-namespace
+    // fix in collect_abstract_methods_fqn covers abstract classes too.
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"//- /Base/Handler.php
+<?php
+namespace Base;
+abstract class Handler {
+    abstract public function handle(string $request): string;
+}
+
+//- /Http/MyHandler.php
+<?php
+use Base\Handler;
+class $0MyHandler$0 extends Handler {}
+"#,
+            "Implement missing method",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        use Base\Handler;
+        class MyHandler extends Handler {
+            public function handle(string $request): string
+            {
+                throw new \RuntimeException('Not implemented');
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
+}
