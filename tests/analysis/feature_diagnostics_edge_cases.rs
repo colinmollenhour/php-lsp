@@ -716,3 +716,17 @@ function test(mixed $v): void {
     )
     .await;
 }
+
+#[tokio::test]
+async fn syntax_error_produces_error_diagnostic() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let notif = s.open("syntax_err.php", "<?php\nclass {\n").await;
+    let diags = notif["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array");
+    assert!(
+        diags.iter().any(|d| d["severity"].as_u64() == Some(1)),
+        "expected at least one error diagnostic for syntax error, got: {diags:?}"
+    );
+}

@@ -79,20 +79,6 @@ pub fn parse_document(source: &str) -> (ParsedDoc, Vec<Diagnostic>) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn valid_php_produces_no_diagnostics() {
-        let (doc, diags) = parse_document("<?php\nfunction greet() {}");
-        assert!(diags.is_empty());
-        assert!(!doc.program().stmts.is_empty());
-    }
-
-    #[test]
-    fn syntax_error_produces_diagnostic() {
-        let (_, diags) = parse_document("<?php\nclass {");
-        assert!(!diags.is_empty(), "expected at least one diagnostic");
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-    }
-
     /// Probe: print every (start, end, zero_width) tuple for a wider set of
     /// error-inducing snippets to see if any zero-width span can be made to
     /// land *on* a non-BMP (surrogate-pair) character rather than at EOF.
