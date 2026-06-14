@@ -176,19 +176,58 @@ fn find_class_scope(lines: &[&str], sel_line: usize) -> Option<(usize, Container
 
 /// Starting at `open_line` (which contains the opening `{`), scan forward and
 /// return the 0-based line index of the matching closing `}`.
+///
+/// Skips `{`/`}` inside strings and comments so that `"hello { world }"` or
+/// `// }` does not prematurely close the depth counter.
 fn find_matching_close(lines: &[&str], open_line: usize) -> Option<usize> {
     let mut depth = 0i32;
+    let mut in_block_comment = false;
     for (i, line) in lines.iter().enumerate().skip(open_line) {
-        for ch in line.chars() {
-            match ch {
-                '{' => depth += 1,
-                '}' => {
+        let bytes = line.as_bytes();
+        let mut j = 0;
+        while j < bytes.len() {
+            if in_block_comment {
+                if j + 1 < bytes.len() && bytes[j] == b'*' && bytes[j + 1] == b'/' {
+                    in_block_comment = false;
+                    j += 2;
+                } else {
+                    j += 1;
+                }
+                continue;
+            }
+            match bytes[j] {
+                b'"' | b'\'' => {
+                    let quote = bytes[j];
+                    j += 1;
+                    while j < bytes.len() {
+                        if bytes[j] == b'\\' {
+                            j += 2; // skip escaped char (ASCII-safe: non-first UTF-8 bytes cannot be b'\\')
+                        } else if bytes[j] == quote {
+                            j += 1;
+                            break;
+                        } else {
+                            j += 1;
+                        }
+                    }
+                }
+                b'/' if j + 1 < bytes.len() && bytes[j + 1] == b'/' => break, // // comment
+                b'#' => break,                                                // # comment
+                b'/' if j + 1 < bytes.len() && bytes[j + 1] == b'*' => {
+                    in_block_comment = true;
+                    j += 2;
+                }
+                b'{' => {
+                    depth += 1;
+                    j += 1;
+                }
+                b'}' => {
                     depth -= 1;
                     if depth == 0 {
                         return Some(i);
                     }
+                    j += 1;
                 }
-                _ => {}
+                _ => j += 1,
             }
         }
     }

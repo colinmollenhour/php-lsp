@@ -264,3 +264,65 @@ class Symbols {
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn extract_constant_class_scope_when_method_body_has_brace_in_string() {
+    // Regression: `find_matching_close` used to count `{` / `}` inside string
+    // literals as structural braces, so `"hello { world }"` caused it to return
+    // the wrong closing line and fall back to file scope instead of class scope.
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class Formatter {
+    public function wrap(): string {
+        $template = "{ content }";
+        return $0"output"$0;
+    }
+}
+"#,
+            "Extract constant",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        class Formatter {
+            private const OUTPUT = "output";
+            public function wrap(): string {
+                $template = "{ content }";
+                return self::OUTPUT;
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn extract_constant_class_scope_when_method_has_line_comment_with_brace() {
+    // Regression: `}` inside a `//` comment must not decrement the brace depth.
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class Builder {
+    public function build(): string {
+        // end of block: }
+        return $0"result"$0;
+    }
+}
+"#,
+            "Extract constant",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        class Builder {
+            private const RESULT = "result";
+            public function build(): string {
+                // end of block: }
+                return self::RESULT;
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}
