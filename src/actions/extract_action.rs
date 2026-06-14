@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
-use crate::text::utf16_offset_to_byte;
+use crate::text::selected_text_range;
 
 /// When the selection is non-empty and appears to be an expression, offer to
 /// extract it into a local variable.  The generated variable name is `$extracted`
@@ -16,7 +16,7 @@ pub fn extract_variable_actions(source: &str, range: Range, uri: &Url) -> Vec<Co
     if range.start == range.end {
         return vec![];
     }
-    let selected = selected_text(source, range);
+    let selected = selected_text_range(source, range);
     if selected.is_empty() || selected.trim().is_empty() {
         return vec![];
     }
@@ -74,40 +74,6 @@ pub fn extract_variable_actions(source: &str, range: Range, uri: &Url) -> Vec<Co
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn selected_text(source: &str, range: Range) -> String {
-    let lines: Vec<&str> = source.lines().collect();
-    if range.start.line == range.end.line {
-        let line = match lines.get(range.start.line as usize) {
-            Some(l) => l,
-            None => return String::new(),
-        };
-        let start = utf16_offset_to_byte(line, range.start.character as usize);
-        let end = utf16_offset_to_byte(line, range.end.character as usize);
-        line[start..end].to_string()
-    } else {
-        let mut result = String::new();
-        for i in range.start.line..=range.end.line {
-            let line = match lines.get(i as usize) {
-                Some(l) => *l,
-                None => break,
-            };
-            if i == range.start.line {
-                let start = utf16_offset_to_byte(line, range.start.character as usize);
-                result.push_str(&line[start..]);
-            } else if i == range.end.line {
-                let end = utf16_offset_to_byte(line, range.end.character as usize);
-                result.push_str(&line[..end]);
-            } else {
-                result.push_str(line);
-            }
-            if i < range.end.line {
-                result.push('\n');
-            }
-        }
-        result
-    }
-}
 
 fn line_indent(source: &str, line: u32) -> String {
     source
