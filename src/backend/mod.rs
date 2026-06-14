@@ -576,6 +576,7 @@ fn compute_diagnostic_result_id(diagnostics: &[Diagnostic], uri: &str) -> String
     format!("v1:{:x}", hasher.finish())
 }
 
+mod handlers;
 mod helpers;
 pub mod panic_guard;
 mod server;

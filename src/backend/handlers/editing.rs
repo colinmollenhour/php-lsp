@@ -1,0 +1,150 @@
+use std::sync::Arc;
+
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::*;
+
+use crate::actions::extract_action::extract_variable_actions;
+use crate::actions::extract_constant_action::extract_constant_actions;
+use crate::actions::extract_method_action::extract_method_actions;
+use crate::actions::inline_action::inline_variable_actions;
+use crate::editing::organize_imports::organize_imports_action;
+use crate::editing::use_import::{build_use_import_edit, find_fqn_for_class};
+
+use super::super::Backend;
+use super::super::helpers::{DEFERRED_ACTION_TAGS, defer_actions};
+
+impl Backend {
+    pub(crate) async fn handle_code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> Result<Option<CodeActionResponse>> {
+        let uri = &params.text_document.uri;
+        let source = self.get_open_text(uri).unwrap_or_default();
+        let doc = match self.get_doc(uri) {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+        let other_docs = self.docs.other_docs(uri, &self.open_urls());
+
+        let diag_cfg = self.config.load().diagnostics.clone();
+        let docs_sem = Arc::clone(&self.docs);
+        let uri_sem = uri.clone();
+        let diag_cfg_sem = diag_cfg.clone();
+        let sem_diags = tokio::task::spawn_blocking(move || {
+            docs_sem
+                .get_semantic_issues_salsa(&uri_sem)
+                .map(|issues| {
+                    crate::semantic_diagnostics::issues_to_diagnostics(
+                        &issues,
+                        &uri_sem,
+                        &diag_cfg_sem,
+                    )
+                })
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default();
+
+        let mut actions: Vec<CodeActionOrCommand> = Vec::new();
+        for diag in &sem_diags {
+            if diag.code != Some(NumberOrString::String("UndefinedClass".to_string())) {
+                continue;
+            }
+            if diag.range.start.line < params.range.start.line
+                || diag.range.start.line > params.range.end.line
+            {
+                continue;
+            }
+            let class_name = diag
+                .message
+                .strip_prefix("Class ")
+                .and_then(|s| s.strip_suffix(" does not exist"))
+                .unwrap_or("")
+                .trim();
+            if class_name.is_empty() {
+                continue;
+            }
+            for (_other_uri, other_doc) in &other_docs {
+                if let Some(fqn) = find_fqn_for_class(other_doc, class_name) {
+                    let edit = build_use_import_edit(&source, uri, &fqn);
+                    let action = CodeAction {
+                        title: format!("Add use {fqn}"),
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        edit: Some(edit),
+                        diagnostics: Some(vec![diag.clone()]),
+                        ..Default::default()
+                    };
+                    actions.push(CodeActionOrCommand::CodeAction(action));
+                    break;
+                }
+            }
+        }
+
+        for tag in DEFERRED_ACTION_TAGS {
+            actions.extend(defer_actions(
+                self.generate_deferred_actions(tag, &source, &doc, params.range, uri),
+                tag,
+                uri,
+                params.range,
+            ));
+        }
+
+        actions.extend(extract_variable_actions(&source, params.range, uri));
+        actions.extend(extract_method_actions(&source, &doc, params.range, uri));
+        actions.extend(extract_constant_actions(&source, params.range, uri));
+        actions.extend(inline_variable_actions(&source, params.range, uri));
+        if let Some(action) = organize_imports_action(&source, uri) {
+            actions.push(action);
+        }
+
+        Ok(if actions.is_empty() {
+            None
+        } else {
+            Some(actions)
+        })
+    }
+
+    pub(crate) async fn handle_code_action_resolve(&self, item: CodeAction) -> Result<CodeAction> {
+        let data = match &item.data {
+            Some(d) => d.clone(),
+            None => return Ok(item),
+        };
+        let kind_tag = match data.get("php_lsp_resolve").and_then(|v| v.as_str()) {
+            Some(k) => k.to_string(),
+            None => return Ok(item),
+        };
+        let uri: Url = match data
+            .get("uri")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Url::parse(s).ok())
+        {
+            Some(u) => u,
+            None => return Ok(item),
+        };
+        let range: Range = match data
+            .get("range")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+        {
+            Some(r) => r,
+            None => return Ok(item),
+        };
+
+        let source = self.get_open_text(&uri).unwrap_or_default();
+        let doc = match self.get_doc(&uri) {
+            Some(d) => d,
+            None => return Ok(item),
+        };
+
+        let candidates = self.generate_deferred_actions(&kind_tag, &source, &doc, range, &uri);
+
+        for candidate in candidates {
+            if let CodeActionOrCommand::CodeAction(ca) = candidate
+                && ca.title == item.title
+            {
+                return Ok(ca);
+            }
+        }
+
+        Ok(item)
+    }
+}
