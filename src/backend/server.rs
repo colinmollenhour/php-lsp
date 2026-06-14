@@ -362,27 +362,38 @@ impl LanguageServer for Backend {
         // can skip re-parsing this file even for edits that happened between
         // workspace scans. Use the same stat-based key as the workspace scan
         // so the entry is found on the next cold start.
-        if let (Some(text), Some(root), Ok(path)) = (
-            self.get_open_text(&uri),
-            self.root_paths.load().first().cloned(),
-            uri.to_file_path(),
-        ) && let Ok(meta) = tokio::fs::metadata(&path).await
+        //
+        // Both the stat and the content are read from disk inside the blocking
+        // task so they come from the same on-disk snapshot. Using the editor
+        // buffer (open_files text) instead would risk writing an index derived
+        // from unsaved edits typed after the save but before this task runs,
+        // producing a cache entry where the key (disk stat) and the value
+        // (index of newer buffer content) describe different file versions.
+        if let (Some(root), Ok(path)) =
+            (self.root_paths.load().first().cloned(), uri.to_file_path())
         {
-            let mtime_secs = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let size = meta.len();
             tokio::task::spawn_blocking(move || {
                 let Some(cache) = crate::index::cache::WorkspaceCache::new(&root) else {
                     return;
                 };
+                // Stat before read to match workspace_scan ordering and
+                // minimise the TOCTOU window.
+                let Ok(meta) = std::fs::metadata(&path) else {
+                    return;
+                };
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    return;
+                };
+                let mtime_secs = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
                 let key = crate::index::cache::WorkspaceCache::key_for_stat(
                     uri.as_str(),
                     mtime_secs,
-                    size,
+                    meta.len(),
                 );
                 let doc = parse_document_no_diags(&text);
                 let index = crate::index::file_index::FileIndex::extract(&doc);
