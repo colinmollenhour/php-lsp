@@ -114,6 +114,11 @@ pub struct DocumentStore {
     /// new `AnalysisSession`s are built with `with_cache_dir` so that stub
     /// parsing results survive server restarts.
     session_cache_dir: OnceLock<std::path::PathBuf>,
+    /// URIs of autoload.files entries from composer.json. These define global
+    /// helper functions (e.g. tap, class_uses_recursive in Laravel) that are
+    /// not discoverable by namespace walk. Pre-ingested into the AnalysisSession
+    /// before each file analysis so mir doesn't emit false UndefinedFunction.
+    autoload_uris: std::sync::RwLock<Vec<Url>>,
 }
 
 impl Default for DocumentStore {
@@ -144,6 +149,7 @@ impl DocumentStore {
             psr4: Arc::new(ArcSwap::from_pointee(Psr4Map::empty())),
             analysis_session: Mutex::new(None),
             session_cache_dir: OnceLock::new(),
+            autoload_uris: std::sync::RwLock::new(Vec::new()),
         }
     }
 
@@ -152,6 +158,16 @@ impl DocumentStore {
     /// subsequent calls are silently ignored (`OnceLock` semantics).
     pub fn set_session_cache_dir(&self, dir: std::path::PathBuf) {
         let _ = self.session_cache_dir.set(dir);
+    }
+
+    /// Register URIs discovered from composer.json `autoload.files` entries.
+    /// These PHP files define global helper functions (e.g. `tap()` in Laravel)
+    /// that are not class-resolvable via PSR-4. Clears `analysis_cache` so the
+    /// next per-file analysis pre-ingests them into the AnalysisSession before
+    /// running mir's FileAnalyzer.
+    pub fn set_autoload_uris(&self, uris: Vec<Url>) {
+        *self.autoload_uris.write().unwrap() = uris;
+        self.analysis_cache.clear();
     }
 
     /// Get or build the `AnalysisSession` for the given PHP version. Rebuilds
@@ -841,6 +857,19 @@ impl DocumentStore {
             let _s = tracing::debug_span!("session.ingest_file").entered();
             session.ingest_file(file.clone(), source.clone());
         }
+        // Pre-ingest autoload.files helpers (e.g. tap(), class_uses_recursive()
+        // in Laravel) so mir sees their function definitions before analyzing
+        // the current file. ingest_file is idempotent — already-ingested files
+        // are skipped cheaply by the session's internal content cache.
+        {
+            let autoload_uris = self.autoload_uris.read().unwrap().clone();
+            for auri in &autoload_uris {
+                if let Some(atext) = self.text_cache.get(auri).map(|t| Arc::clone(&*t)) {
+                    let afile: Arc<str> = Arc::from(auri.as_str());
+                    session.ingest_file(afile, atext);
+                }
+            }
+        }
         // Pre-load every imported class via PSR-4 so Pass-2 doesn't emit
         // spurious `UndefinedClass` for classes that ARE on disk but haven't
         // been ingested yet. The session's resolver was supplied at
@@ -987,20 +1016,34 @@ impl DocumentStore {
     /// `textDocument/references` for method symbols: only files that textually
     /// mention the method name need to be analyzed, cutting the Pass-2 cost
     /// from O(workspace) to O(candidates).
+    ///
+    /// Uses `BatchFileAnalyzer` so Pass 2 runs in parallel across rayon threads,
+    /// cutting wall time from O(N × per-file) to O(N/cores × per-file).
     pub fn ensure_files_ingested(&self, urls: &[Url]) {
         let php_version = self.workspace_php_version();
         let session = self.analysis_session(php_version);
-        for uri in urls {
-            let Some(doc) = self.get_doc_salsa(uri) else {
-                continue;
-            };
-            let file: Arc<str> = Arc::from(uri.as_str());
-            session.ingest_file(file.clone(), doc.source_arc());
-            let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
-            let owned_program = php_ast::owned::to_owned_program(doc.program());
-            let analyzer = mir_analyzer::FileAnalyzer::new(&session);
-            analyzer.analyze(file, doc.source(), &owned_program, &source_map);
-        }
+
+        // Pass 1: ingest all files (sequential — session serialises writes internally).
+        let parsed_files: Vec<mir_analyzer::ParsedFile> = urls
+            .iter()
+            .filter_map(|uri| {
+                let doc = self.get_doc_salsa(uri)?;
+                let file: Arc<str> = Arc::from(uri.as_str());
+                session.ingest_file(file.clone(), doc.source_arc());
+                let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
+                let owned_program = php_ast::owned::to_owned_program(doc.program());
+                Some(mir_analyzer::ParsedFile::new(
+                    file,
+                    doc.source_arc(),
+                    owned_program,
+                    source_map,
+                ))
+            })
+            .collect();
+
+        // Pass 2: analyze in parallel via rayon — each worker gets its own db clone.
+        let batch = mir_analyzer::BatchFileAnalyzer::new(&session);
+        batch.analyze_batch(parsed_files);
     }
 }
 

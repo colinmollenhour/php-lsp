@@ -70,6 +70,58 @@ pub(crate) async fn scan_workspace(
     // Across ~5 000 total entries that adds up to 100–200 ms of pure scheduler
     // overhead with zero I/O benefit. Moving the walk to spawn_blocking cuts
     // it to a handful of syscalls and eliminates the scheduler tax entirely.
+    // Collect explicit autoload.files entries from composer.json so helper
+    // functions (tap, class_uses_recursive, …) are indexed and don't produce
+    // false-positive UndefinedFunction diagnostics.
+    // Walk up from `root` to find the nearest composer.json (handles the common
+    // case where the LSP workspace root is a sub-directory like `src/`).
+    let autoload_paths: Vec<std::path::PathBuf> = {
+        let composer_dir: Option<std::path::PathBuf> = {
+            let mut dir = root.as_path();
+            let mut found = None;
+            for _ in 0..4 {
+                if dir.join("composer.json").exists() {
+                    found = Some(dir.to_path_buf());
+                    break;
+                }
+                match dir.parent() {
+                    Some(p) => dir = p,
+                    None => break,
+                }
+            }
+            found
+        };
+        if let Some(proj_root) = composer_dir {
+            let text = std::fs::read_to_string(proj_root.join("composer.json")).unwrap_or_default();
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                let mut paths = Vec::new();
+                for key in ["autoload", "autoload-dev"] {
+                    for file in json[key]["files"].as_array().unwrap_or(&vec![]) {
+                        if let Some(rel) = file.as_str() {
+                            let abs = proj_root.join(rel);
+                            if abs.extension().is_some_and(|e| e == "php") && abs.exists() {
+                                paths.push(abs);
+                            }
+                        }
+                    }
+                }
+                paths
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    };
+
+    let autoload_uris: Vec<Url> = autoload_paths
+        .iter()
+        .filter_map(|p| Url::from_file_path(p).ok())
+        .collect();
+    if !autoload_uris.is_empty() {
+        docs.set_autoload_uris(autoload_uris);
+    }
+
     let root2 = root.clone();
     let excl: Vec<String> = exclude_paths.to_vec();
     let incl: Vec<String> = include_paths.to_vec();
@@ -116,6 +168,10 @@ pub(crate) async fn scan_workspace(
     })
     .await
     .unwrap_or_default();
+
+    // Prepend explicit autoload.files so they are always indexed regardless of
+    // whether the directory walk would reach them.
+    let php_paths: Vec<std::path::PathBuf> = autoload_paths.into_iter().chain(php_paths).collect();
 
     // Phase 2a: read files concurrently (I/O-bound).
     // mtime+size are fetched in Phase 2b via synchronous std::fs::metadata()
