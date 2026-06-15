@@ -56,7 +56,7 @@ impl TestClient {
         });
         self.write.write_all(&frame(&msg)).await.unwrap();
         let method_owned = method.to_owned();
-        tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
+        tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
             loop {
                 let resp = read_msg(&mut self.read).await;
                 // If this message is a server→client request (has method + id), reply null
@@ -91,7 +91,7 @@ impl TestClient {
         });
         self.write.write_all(&frame(&msg)).await.unwrap();
         let method_owned = method.to_owned();
-        tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
+        tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
             loop {
                 let resp = read_msg(&mut self.read).await;
                 // If this message is a server→client request (has method + id), reply null
@@ -137,7 +137,7 @@ impl TestClient {
         });
         self.write.write_all(&frame(&cancel)).await.unwrap();
         let method_owned = method.to_owned();
-        tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
+        tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
             loop {
                 let resp = read_msg(&mut self.read).await;
                 if resp.get("method").is_some() {
