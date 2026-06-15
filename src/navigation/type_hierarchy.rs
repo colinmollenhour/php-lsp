@@ -52,23 +52,40 @@ pub fn supertypes_of_from_workspace(
     wi: &crate::db::workspace_index::WorkspaceIndexData,
 ) -> Vec<TypeHierarchyItem> {
     use crate::index::file_index::ClassKind;
-    let mut super_names: Vec<Arc<str>> = Vec::new();
+    // Collect (super_name_as_written, file_index_for_that_class) pairs.
+    let mut super_pairs: Vec<(Arc<str>, Option<&crate::index::file_index::FileIndex>)> = Vec::new();
     if let Some(refs) = wi.classes_by_name.get(&item.name) {
         for r in refs {
             if let Some((_, cls)) = wi.at(*r) {
+                let file_idx = wi.files.get(r.file as usize).map(|(_, idx)| idx.as_ref());
                 if let Some(p) = &cls.parent {
-                    super_names.push(Arc::clone(p));
+                    super_pairs.push((Arc::clone(p), file_idx));
                 }
                 for iface in &cls.implements {
-                    super_names.push(Arc::clone(iface));
+                    super_pairs.push((Arc::clone(iface), file_idx));
                 }
             }
         }
     }
 
     let mut result = Vec::new();
-    for name in super_names {
-        if let Some(refs) = wi.classes_by_name.get(name.as_ref())
+    for (name, file_idx) in super_pairs {
+        // Direct lookup: class is named exactly as written.
+        let canonical = if wi.classes_by_name.contains_key(name.as_ref()) {
+            Some(name.as_ref().to_string())
+        } else {
+            // Resolve through the implementing file's use_imports.
+            file_idx.and_then(|idx| {
+                idx.use_imports
+                    .iter()
+                    .find(|(alias, _)| alias.as_ref() == name.as_ref())
+                    .map(|(_, fqn)| crate::text::fqn_short_name(fqn).to_string())
+            })
+        };
+        let Some(canonical_name) = canonical else {
+            continue;
+        };
+        if let Some(refs) = wi.classes_by_name.get(&canonical_name)
             && let Some((uri, cls)) = refs.first().and_then(|r| wi.at(*r))
         {
             let kind = match cls.kind {

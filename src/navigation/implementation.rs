@@ -111,10 +111,22 @@ pub fn find_implementations_from_workspace(
                         .as_deref()
                         .map(|p| name_matches(p, word, fqn))
                         .unwrap_or(false);
-                    let implements_match = cls
-                        .implements
-                        .iter()
-                        .any(|iface| name_matches(iface.as_ref(), word, fqn));
+                    let implements_match = cls.implements.iter().any(|iface| {
+                        if name_matches(iface.as_ref(), word, fqn) {
+                            return true;
+                        }
+                        // The implements clause may use a use-import alias for `word`.
+                        // e.g. `use A\B\Factory as FactoryContract` + `implements FactoryContract`
+                        // → iface = "FactoryContract", word = "Factory"
+                        if let Some((_, file_idx)) = wi.files.get(r.file as usize) {
+                            file_idx.use_imports.iter().any(|(alias, resolved_fqn)| {
+                                alias.as_ref() == iface.as_ref()
+                                    && crate::text::fqn_short_name(resolved_fqn) == word
+                            })
+                        } else {
+                            false
+                        }
+                    });
                     if extends_match || implements_match {
                         let pos = tower_lsp::lsp_types::Position {
                             line: cls.start_line,
