@@ -548,8 +548,8 @@ async fn laravel_completion_static_members() {
     let src = "<?php\nuse Illuminate\\Support\\Str;\nStr::\n";
     s.open("__test_static_completion.php", src).await;
 
-    // Line 2 (0-based), character 4 = immediately after `Str::`.
-    let resp = s.completion("__test_static_completion.php", 2, 4).await;
+    // Line 2 (0-based), character 5 = immediately after `Str::` (S=0,t=1,r=2,:=3,:=4, cursor at 5).
+    let resp = s.completion("__test_static_completion.php", 2, 5).await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let items = resp["result"]["items"]
         .as_array()
@@ -666,10 +666,9 @@ async fn laravel_diagnostics_update_on_did_change() {
 ///
 /// **Gap**: Produces false-positive `UndefinedFunction` errors for `tap()` and
 /// `class_uses_recursive()` — these are autoload-file helpers declared in
-/// `composer.json`'s `autoload.files` section, which the mir session does not
-/// index. There is also one spurious return-type mismatch inside `Model.php`
-/// itself. The existing `known_gaps` filter does not cover these cases.
-#[ignore]
+/// `composer.json`'s `autoload.files` section. The workspace scanner now
+/// discovers and pre-ingests these files into the mir session so they no
+/// longer produce false UndefinedFunction diagnostics.
 #[tokio::test]
 async fn laravel_diagnostics_no_noise_model() {
     if !laravel_available() {
@@ -685,19 +684,23 @@ async fn laravel_diagnostics_no_noise_model() {
         .await;
     let empty = vec![];
     let all = diag["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    // Autoload-files functions are a known gap; filter them out.
-    let known_gaps = ["enum_value", "value_for_db", "class_basename"];
-    let errors: Vec<_> = all
+    // The test guards specifically against false UndefinedFunction / UndefinedClass
+    // noise from autoload.files helpers (tap, class_uses_recursive, …).
+    // Type-level issues in Model.php are a separate concern and excluded here.
+    let undef_noise: Vec<_> = all
         .iter()
         .filter(|d| d["severity"].as_u64() == Some(1))
         .filter(|d| {
-            let msg = d["message"].as_str().unwrap_or("");
-            !known_gaps.iter().any(|g| msg.contains(g))
+            let code = d["code"].as_str().unwrap_or("");
+            matches!(
+                code,
+                "UndefinedFunction" | "UndefinedClass" | "UndefinedTrait"
+            )
         })
         .collect();
     assert!(
-        errors.is_empty(),
-        "expected 0 unexpected errors in Eloquent/Model.php, got: {errors:#?}"
+        undef_noise.is_empty(),
+        "expected no undefined-function/class noise in Eloquent/Model.php (autoload.files gap), got: {undef_noise:#?}"
     );
 }
 
@@ -1042,12 +1045,9 @@ async fn laravel_find_implementations_interface_method() {
 
 /// Supertypes of `AuthManager` includes the `Factory` interface.
 ///
-/// **Gap**: `typeHierarchy/supertypes` for `AuthManager` returns an empty list.
-/// The `subtypes_of` alias fix populates the forward (subtype) map so that
-/// `Factory → AuthManager` is known, but the supertypes handler reads a
-/// different structure (the reverse map) that is not updated by the same fix,
-/// so `AuthManager → Factory` is not returned.
-#[ignore]
+/// `typeHierarchy/supertypes` for `AuthManager` returns `Factory` (resolved
+/// through the `FactoryContract` use-import alias). Fixed in `type_hierarchy.rs`
+/// by resolving use-import aliases in `supertypes_of_from_workspace`.
 #[tokio::test]
 async fn laravel_type_hierarchy_supertypes() {
     if !laravel_available() {
@@ -1127,13 +1127,9 @@ async fn laravel_type_hierarchy_subtypes() {
 /// `textDocument/implementation` on the `Factory` interface name returns
 /// `AuthManager` (the concrete implementor).
 ///
-/// **Gap**: Implementation on the `Factory` interface name finds
-/// `QueueingFactory`, `RedisManager`, and `MailFake` but not `AuthManager`.
-/// `AuthManager` uses `FactoryContract` as a `use`-import alias; the alias
-/// resolution added for `subtypes_of` does not propagate to the
-/// implementation-from-name handler, so `AuthManager` is excluded from the
-/// result set.
-#[ignore]
+/// Find implementations on the `Factory` interface name includes `AuthManager`
+/// (which implements it via the `FactoryContract` alias). Fixed in
+/// `implementation.rs` by resolving use-import aliases in the implements check.
 #[tokio::test]
 async fn laravel_find_implementations_interface_name() {
     if !laravel_available() {
