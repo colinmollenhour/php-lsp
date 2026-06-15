@@ -32,6 +32,25 @@ impl Backend {
                 && !word.starts_with('$')
             {
                 let analysis = self.cached_analysis_async(uri).await;
+
+                // mir 0.41: ClassReference is recorded on the class token in
+                // static calls (Foo::bar), new expressions, instanceof, and
+                // type hints. When the cursor sits on a class name, jump
+                // directly to the class via PSR-4 using the resolved FQN —
+                // more accurate than the workspace index for aliased names.
+                if let Some(fqn) = analysis.as_deref().and_then(|a| {
+                    let off = crate::text::word_range_at(&source, position)
+                        .map(|r| doc.view().byte_of_position(r.start))?;
+                    let sym = a.symbol_at(off)?;
+                    match &sym.kind {
+                        mir_analyzer::ReferenceKind::ClassReference(fqn) => Some(fqn.to_string()),
+                        _ => None,
+                    }
+                }) && let Some(loc) = self.psr4_goto(&fqn).await
+                {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
+                }
+
                 let resolved_class = analysis.as_deref().and_then(|a| {
                     let off = crate::text::word_range_at(&source, position)
                         .map(|r| doc.view().byte_of_position(r.start))?;

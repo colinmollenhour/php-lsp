@@ -129,6 +129,10 @@ fn issue_passes_filter(issue: &mir_issues::Issue, cfg: &DiagnosticsConfig) -> bo
         | IssueKind::MixedPropertyAssignment { .. }
         | IssueKind::MixedArrayAccess
         | IssueKind::MixedArrayOffset => cfg.mixed_usage,
+        // mir 0.41 Info-severity diagnostics — always shown.
+        IssueKind::DocblockTypeContradiction { .. }
+        | IssueKind::UnevaluatedCode { .. }
+        | IssueKind::IfThisIsMismatch { .. } => true,
         _ => true,
     }
 }
