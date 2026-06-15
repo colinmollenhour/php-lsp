@@ -368,6 +368,72 @@ pub fn docs_for_symbol_from_index(
     None
 }
 
+/// Build a hover for a static method call found by class short name + method name
+/// in the workspace index. Used when the primary mir path cannot resolve a cross-file
+/// static call (e.g. `Str::camel(…)` where `Str` is only known through a `use`-import).
+pub fn method_hover_from_index(
+    class_name: &str,
+    method_name: &str,
+    indexes: &[(
+        tower_lsp::lsp_types::Url,
+        std::sync::Arc<crate::index::file_index::FileIndex>,
+    )],
+) -> Option<Hover> {
+    for (_, idx) in indexes {
+        for cls in &idx.classes {
+            if cls.name.as_ref() != class_name
+                && crate::text::fqn_short_name(cls.fqn.as_ref()) != class_name
+            {
+                continue;
+            }
+            for m in &cls.methods {
+                if m.name.as_ref() != method_name {
+                    continue;
+                }
+                let params_str = m
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let mut s = String::new();
+                        if let Some(t) = &p.type_hint {
+                            s.push_str(&format!("{} ", t));
+                        }
+                        if p.variadic {
+                            s.push_str("...");
+                        }
+                        s.push_str(&format!("${}", p.name));
+                        s
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret = m
+                    .return_type
+                    .as_deref()
+                    .map(|r| format!(": {}", r))
+                    .unwrap_or_default();
+                let sig = format!("{}::{}({}){}", class_name, method_name, params_str, ret);
+                let mut value = wrap_php(&sig);
+                if let Some(raw) = &m.docblock {
+                    let db = crate::lang::docblock::parse_docblock(raw);
+                    let md = db.to_markdown();
+                    if !md.is_empty() {
+                        value.push_str("\n\n---\n\n");
+                        value.push_str(&md);
+                    }
+                }
+                return Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value,
+                    }),
+                    range: None,
+                });
+            }
+        }
+    }
+    None
+}
+
 /// Build a hover for a class/interface/trait/enum found by short name in the workspace index.
 pub fn class_hover_from_index(
     word: &str,

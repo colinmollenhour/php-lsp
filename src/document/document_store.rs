@@ -647,10 +647,10 @@ impl DocumentStore {
             .references_to(symbol)
             .into_iter()
             .map(|(file, range)| {
-                // mir 0.30+ uses 1-based lines and 1-based columns; LSP uses 0-based.
+                // mir uses 1-based lines; 0-based columns (since mir 0.42.0).
                 let line = range.start.line.saturating_sub(1);
-                let col_start = range.start.column.saturating_sub(1);
-                let col_end = range.end.column.saturating_sub(1);
+                let col_start = range.start.column;
+                let col_end = range.end.column;
                 (file, line, col_start, col_end)
             })
             .collect()

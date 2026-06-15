@@ -48,10 +48,7 @@ pub fn extract_receiver_var_before_cursor(line: &str, cursor_col_utf16: usize) -
 }
 
 /// Extract the class name from immediately before `::` at the cursor's column.
-pub(crate) fn extract_static_class_before_cursor(
-    line: &str,
-    cursor_col_utf16: usize,
-) -> Option<String> {
+pub fn extract_static_class_before_cursor(line: &str, cursor_col_utf16: usize) -> Option<String> {
     let chars: Vec<char> = line.chars().collect();
 
     let mut utf16 = 0usize;

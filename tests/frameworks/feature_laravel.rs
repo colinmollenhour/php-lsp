@@ -138,11 +138,6 @@ async fn laravel_definition_on_static_call() {
 
 /// GoToDef on `new RequestGuard(…)` navigates to `RequestGuard.php`.
 ///
-/// **Gap**: Currently navigates to line 276 in `AuthManager.php` instead of
-/// `RequestGuard.php`. The `new` expression resolver follows the wrong path and
-/// resolves to a method in `AuthManager` rather than the `RequestGuard` class
-/// declaration.
-#[ignore]
 #[tokio::test]
 async fn laravel_definition_on_new_expression() {
     if !laravel_available() {
@@ -156,10 +151,10 @@ async fn laravel_definition_on_new_expression() {
     )
     .await;
 
-    // Line 234 (0-based) = `            $guard = new RequestGuard($callback, …);`
+    // Line 235 (0-based) = `            $guard = new RequestGuard($callback, …);`
     // Character 25 = start of "RequestGuard".
     let resp = s
-        .definition("Illuminate/Auth/AuthManager.php", 234, 25)
+        .definition("Illuminate/Auth/AuthManager.php", 235, 25)
         .await;
     let out = render_locations(&resp, &s.uri(""));
     assert!(
@@ -367,10 +362,6 @@ async fn laravel_hover_on_call_site() {
 /// Hover on a static method call (`Str::camel`) shows the camel() signature.
 ///
 /// **Gap**: Hover on `Str::camel($ability)` returns `<no hover>`. The static
-/// method call-site hover handler does not resolve the class from a
-/// `use`-import alias (`use Illuminate\Support\Str`), so it cannot look up
-/// `Str` in the index to find the `camel()` method signature.
-#[ignore]
 #[tokio::test]
 async fn laravel_hover_on_static_call() {
     if !laravel_available() {

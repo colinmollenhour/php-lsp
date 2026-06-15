@@ -24,8 +24,8 @@ use crate::document::open_files::{OpenFiles, compute_open_file_diagnostics};
 use crate::editing::file_rename::{use_edits_for_delete, use_edits_for_rename};
 use crate::editing::use_import::{build_use_import_edit, find_fqn_for_class};
 use crate::hover::{
-    class_hover_from_index, docs_for_symbol_from_index, hover_info_with_maps,
-    signature_for_symbol_from_index,
+    class_hover_from_index, docs_for_symbol_from_index, extract_static_class_before_cursor,
+    hover_info_with_maps, method_hover_from_index, signature_for_symbol_from_index,
 };
 use crate::index::workspace_scan::{scan_workspace, send_refresh_requests};
 use crate::lang::autoload::Psr4Map;
@@ -632,6 +632,21 @@ impl LanguageServer for Backend {
                     && let Some(h) = class_hover_from_index(&resolved, &wi.files)
                 {
                     return Ok(Some(h));
+                }
+                // Try static method hover: `ClassName::method(…)`.
+                if let Some(line_text) = source.lines().nth(position.line as usize)
+                    && let Some(class_token) =
+                        extract_static_class_before_cursor(line_text, position.character as usize)
+                {
+                    if let Some(h) = method_hover_from_index(&class_token, &word, &wi.files) {
+                        return Ok(Some(h));
+                    }
+                    if let Some(resolved_class) =
+                        crate::hover::resolve_use_alias(&doc.program().stmts, &class_token)
+                        && let Some(h) = method_hover_from_index(&resolved_class, &word, &wi.files)
+                    {
+                        return Ok(Some(h));
+                    }
                 }
             }
             Ok(None)
