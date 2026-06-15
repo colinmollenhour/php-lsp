@@ -106,12 +106,17 @@ impl Psr4Map {
     /// `mir_analyzer::Psr4Map` (which handles PSR-4, PSR-0, classmap, vendor
     /// eager files, and `autoload_classmap.php`). Also extracts project PSR-4
     /// entries for the `file_to_fqn` reverse index.
+    ///
+    /// If `root` itself has no `composer.json`, walks up parent directories to
+    /// find one (up to 8 levels). This handles workspaces rooted at a `src/`
+    /// subdirectory where the project's `composer.json` lives one level up.
     pub fn load(root: &Path) -> Self {
+        let composer_root = find_composer_root(root).unwrap_or_else(|| root.to_path_buf());
         let mut inners = Vec::new();
-        if let Ok(map) = mir_analyzer::Psr4Map::from_composer(root) {
+        if let Ok(map) = mir_analyzer::Psr4Map::from_composer(&composer_root) {
             inners.push(Arc::new(map));
         }
-        let project_entries = read_project_psr4_entries(root);
+        let project_entries = read_project_psr4_entries(&composer_root);
         Psr4Map {
             inners,
             project_entries,
@@ -148,6 +153,22 @@ impl Psr4Map {
     pub fn resolve(&self, fqcn: &str) -> Option<PathBuf> {
         self.inners.iter().find_map(|m| m.resolve(fqcn))
     }
+}
+
+/// Walk up from `start` to find the nearest directory containing `composer.json`.
+/// Returns `None` if not found within 8 levels. This handles workspaces rooted
+/// at a `src/` subdirectory where `composer.json` lives in the project root above.
+fn find_composer_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    for _ in 0..8 {
+        if dir.join("composer.json").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+    None
 }
 
 /// Extract PSR-4 project entries from `composer.json` at `root`.
