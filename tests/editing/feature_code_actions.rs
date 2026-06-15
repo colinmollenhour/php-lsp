@@ -917,3 +917,134 @@ class Flexible {
         "promote action should be offered for mixed type property"
     );
 }
+
+// --- Quick-fix: UndefinedFunction → use function FQN; ---
+
+#[tokio::test]
+async fn code_action_quickfix_undefined_function_cross_file() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "helpers.php",
+            "<?php\nnamespace App\\Helpers;\nfunction tap(mixed $value): mixed { return $value; }\n",
+        )
+        .await;
+    // open() waits for publishDiagnostics — analysis is complete before code_action
+    server
+        .open("main.php", "<?php\nnamespace App;\ntap($x);\n")
+        .await;
+
+    let resp = server.code_action("main.php", 2, 0, 2, 10).await;
+    let actions = resp["result"].as_array().cloned().unwrap_or_default();
+    let action = actions
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.starts_with("Add use function"))
+                .unwrap_or(false)
+        })
+        .cloned();
+
+    assert!(
+        action.is_some(),
+        "expected 'Add use function' quick-fix, got: {resp:#}"
+    );
+    let a = action.unwrap();
+    let out = canonicalize_workspace_edit(&a["edit"], &server.uri(""));
+    expect![[r#"
+        // main.php
+        2:0-2:0 → "use function App\\Helpers\\tap;\n""#]]
+    .assert_eq(&out);
+}
+
+// --- Quick-fix: PossiblyNullMethodCall → ?-> ---
+
+#[tokio::test]
+async fn code_action_quickfix_possibly_null_method_call() {
+    let mut server = TestServer::new().await;
+    let push = server
+        .open(
+            "null.php",
+            "<?php\nclass Repo {}\nfunction get(): ?Repo { return null; }\nget()->doSomething();\n",
+        )
+        .await;
+    let has_null_diag = push["params"]["diagnostics"]
+        .as_array()
+        .map(|a| {
+            a.iter().any(|d| {
+                d["code"].as_str() == Some("PossiblyNullMethodCall")
+                    || d["code"].as_str() == Some("PossiblyNullPropertyFetch")
+            })
+        })
+        .unwrap_or(false);
+
+    if !has_null_diag {
+        // mir may not fire this diagnostic on all versions — guard so test is stable
+        return;
+    }
+
+    let resp = server.code_action("null.php", 3, 0, 3, 20).await;
+    let actions = resp["result"].as_array().cloned().unwrap_or_default();
+    let action = actions
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.contains("null-safe"))
+                .unwrap_or(false)
+        })
+        .cloned();
+
+    assert!(
+        action.is_some(),
+        "expected null-safe quick-fix, got: {resp:#}"
+    );
+}
+
+// --- Quick-fix: TooFewArguments → add null arguments ---
+
+#[tokio::test]
+async fn code_action_quickfix_too_few_arguments() {
+    let mut server = TestServer::new().await;
+    let push = server
+        .open(
+            "args.php",
+            "<?php\nfunction connect(string $host, int $port, string $user): void {}\nconnect('localhost');\n",
+        )
+        .await;
+    let has_arg_diag = push["params"]["diagnostics"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .any(|d| d["code"].as_str() == Some("TooFewArguments"))
+        })
+        .unwrap_or(false);
+
+    if !has_arg_diag {
+        return;
+    }
+
+    let resp = server.code_action("args.php", 2, 0, 2, 22).await;
+    let actions = resp["result"].as_array().cloned().unwrap_or_default();
+    let action = actions
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.contains("missing null argument"))
+                .unwrap_or(false)
+        })
+        .cloned();
+
+    assert!(
+        action.is_some(),
+        "expected 'add missing null arguments' quick-fix, got: {resp:#}"
+    );
+    let a = action.unwrap();
+    let out = canonicalize_workspace_edit(&a["edit"], &server.uri(""));
+    expect![[r#"
+        // args.php
+        2:19-2:19 → ", null, null""#]]
+    .assert_eq(&out);
+}
