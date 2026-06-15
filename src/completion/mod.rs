@@ -474,6 +474,36 @@ pub fn filtered_completions_at(
             vec![]
         }
         _ => {
+            // Static access context: ClassName::member (invoked without trigger char).
+            // Strip any identifier chars being typed as the member prefix.
+            if let (Some(src), Some(pos)) = (source, position) {
+                let line = src.lines().nth(pos.line as usize).unwrap_or("");
+                let col = utf16_offset_to_byte(line, pos.character as usize);
+                let before = &line[..col];
+                let pre_colon = before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
+                if pre_colon.ends_with("::") {
+                    let colon_end_char = pre_colon.encode_utf16().count() as u32;
+                    let colon_pos = tower_lsp::lsp_types::Position {
+                        line: pos.line,
+                        character: colon_end_char,
+                    };
+                    if let Some(class_name) =
+                        resolve_static_receiver(src, doc, other_docs, colon_pos)
+                    {
+                        let items = all_static_members(
+                            &class_name,
+                            doc,
+                            other_docs,
+                            ctx.find_class_doc,
+                            ctx.session.as_deref(),
+                        );
+                        if !items.is_empty() {
+                            return items;
+                        }
+                    }
+                }
+            }
+
             // Detect $obj->member context (invoked completion without trigger char).
             // Returns only the receiver class's instance members so unrelated class
             // methods don't pollute the list.
