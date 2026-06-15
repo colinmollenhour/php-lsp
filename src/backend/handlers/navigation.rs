@@ -132,6 +132,20 @@ impl Backend {
                 }
             }
 
+            // Resolve `use Foo\Bar as Alias` → navigate to Foo\Bar.
+            // Handles cursor on the alias name in `implements Alias` or `extends Alias`
+            // where the alias was introduced by a `use … as Alias` statement in this file.
+            if let Some(word) = word_at_position(&source, position)
+                && !word.contains('\\')
+            {
+                let imports = crate::navigation::references::collect_class_imports(&doc);
+                if let Some(fqn) = imports.get(&word as &str)
+                    && let Some(loc) = self.psr4_goto(fqn).await
+                {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
+                }
+            }
+
             Ok(None)
         })
         .await

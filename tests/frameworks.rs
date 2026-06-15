@@ -12,6 +12,8 @@ pub use common::{
     render_workspace_symbols,
 };
 
+#[path = "frameworks/feature_laravel.rs"]
+mod feature_laravel;
 #[path = "frameworks/feature_laravel_gaps.rs"]
 mod feature_laravel_gaps;
 #[path = "frameworks/feature_laravel_references.rs"]
