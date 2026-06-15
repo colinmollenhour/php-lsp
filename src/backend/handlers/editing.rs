@@ -9,8 +9,8 @@ use crate::actions::extract_method_action::extract_method_actions;
 use crate::actions::inline_action::inline_variable_actions;
 use crate::editing::organize_imports::organize_imports_action;
 use crate::editing::use_import::{
-    build_add_null_args_edit, build_nullable_arrow_edit, build_use_function_import_edit,
-    build_use_import_edit, find_fqn_for_class, find_fqn_for_function,
+    build_use_function_import_edit, build_use_import_edit, find_fqn_for_class,
+    find_fqn_for_function,
 };
 
 use super::super::Backend;
@@ -107,101 +107,6 @@ impl Backend {
                 let edit = build_use_function_import_edit(&source, uri, &fqn);
                 let action = CodeAction {
                     title: format!("Add use function {fqn}"),
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    edit: Some(edit),
-                    diagnostics: Some(vec![diag.clone()]),
-                    ..Default::default()
-                };
-                actions.push(CodeActionOrCommand::CodeAction(action));
-            }
-        }
-
-        // PossiblyNullPropertyFetch / PossiblyNullMethodCall → replace -> with ?->
-        for diag in &sem_diags {
-            let code = diag.code.as_ref().and_then(|c| match c {
-                NumberOrString::String(s) => Some(s.as_str()),
-                _ => None,
-            });
-            if !matches!(
-                code,
-                Some("PossiblyNullPropertyFetch") | Some("PossiblyNullMethodCall")
-            ) {
-                continue;
-            }
-            if diag.range.start.line < params.range.start.line
-                || diag.range.start.line > params.range.end.line
-            {
-                continue;
-            }
-            let line_text = source
-                .lines()
-                .nth(diag.range.start.line as usize)
-                .unwrap_or_default();
-            let col = diag.range.start.character as usize;
-            // Diagnostic may point at the method/property name, not at `->`.
-            // Find the last `->` at or before the diagnostic character.
-            let arrow_col = line_text[..col.min(line_text.len())]
-                .rfind("->")
-                .or_else(|| {
-                    line_text[col.min(line_text.len())..]
-                        .find("->")
-                        .map(|i| i + col)
-                });
-            if let Some(arrow) = arrow_col {
-                let arrow_range = tower_lsp::lsp_types::Range {
-                    start: Position {
-                        line: diag.range.start.line,
-                        character: arrow as u32,
-                    },
-                    end: Position {
-                        line: diag.range.start.line,
-                        character: arrow as u32 + 2,
-                    },
-                };
-                let edit = build_nullable_arrow_edit(uri, arrow_range, &source);
-                if edit.changes.is_some() {
-                    let action = CodeAction {
-                        title: "Use null-safe operator `?->`".to_string(),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        edit: Some(edit),
-                        diagnostics: Some(vec![diag.clone()]),
-                        ..Default::default()
-                    };
-                    actions.push(CodeActionOrCommand::CodeAction(action));
-                }
-            }
-        }
-
-        // TooFewArguments → add null arguments
-        for diag in &sem_diags {
-            if diag.code != Some(NumberOrString::String("TooFewArguments".to_string())) {
-                continue;
-            }
-            if diag.range.start.line < params.range.start.line
-                || diag.range.start.line > params.range.end.line
-            {
-                continue;
-            }
-            // Parse "Too few arguments for fn_name(): expected N, got M"
-            let missing = diag
-                .message
-                .find("expected ")
-                .and_then(|i| {
-                    let after = &diag.message[i + "expected ".len()..];
-                    let expected: usize = after.split(',').next()?.trim().parse().ok()?;
-                    let got: usize = after
-                        .find("got ")
-                        .and_then(|j| after[j + 4..].trim().parse().ok())?;
-                    expected.checked_sub(got)
-                })
-                .unwrap_or(0);
-            if missing == 0 {
-                continue;
-            }
-            if let Some(edit) = build_add_null_args_edit(&source, uri, diag.range, missing) {
-                let plural = if missing == 1 { "" } else { "s" };
-                let action = CodeAction {
-                    title: format!("Add {missing} missing null argument{plural}"),
                     kind: Some(CodeActionKind::QUICKFIX),
                     edit: Some(edit),
                     diagnostics: Some(vec![diag.clone()]),
