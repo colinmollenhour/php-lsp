@@ -116,6 +116,7 @@ fn bench_hover(c: &mut Criterion) {
                 POS_METHOD,
                 &[],
                 &[],
+                None,
             ))
         });
     });
@@ -128,6 +129,7 @@ fn bench_hover(c: &mut Criterion) {
                 POS_MEMBER,
                 &[],
                 &[],
+                None,
             ))
         });
     });
@@ -142,6 +144,7 @@ fn bench_hover(c: &mut Criterion) {
                 POS_SERVICE_TYPE,
                 &other_docs,
                 &other_maps,
+                None,
             ))
         });
     });
@@ -154,6 +157,7 @@ fn bench_hover(c: &mut Criterion) {
                 POS_SERVICE_CTOR,
                 &other_docs,
                 &other_maps,
+                None,
             ))
         });
     });
@@ -169,6 +173,7 @@ fn bench_hover(c: &mut Criterion) {
                     POS_SERVICE_TYPE,
                     &[],
                     maps,
+                    None,
                 ))
             });
         });
@@ -256,6 +261,7 @@ fn bench_completion(c: &mut Criterion) {
         find_class_doc: None,
         analysis: None,
         type_map: None,
+        session: None,
     };
 
     c.bench_function("completion/cross_file_arrow", |b| {
@@ -448,6 +454,7 @@ fn bench_completion_laravel(c: &mut Criterion) {
         find_class_doc: None,
         analysis: None,
         type_map: None,
+        session: None,
     };
     group.bench_function("laravel_framework", |b| {
         b.iter(|| {
@@ -471,6 +478,7 @@ fn bench_completion_laravel(c: &mut Criterion) {
         find_class_doc: Some(&find_fn),
         analysis: None,
         type_map: None,
+        session: None,
     };
     group.bench_function("laravel_framework_indexed", |b| {
         b.iter(|| {
@@ -499,6 +507,7 @@ fn bench_completion_laravel(c: &mut Criterion) {
         find_class_doc: Some(&find_fn),
         analysis: None,
         type_map: Some(&get_warm_tm),
+        session: None,
     };
     group.bench_function("laravel_framework_indexed_cached_typemap", |b| {
         b.iter(|| {
@@ -529,6 +538,7 @@ fn bench_completion_laravel(c: &mut Criterion) {
         find_class_doc: None,
         analysis: None,
         type_map: None,
+        session: None,
     };
     group.bench_function("laravel_builder_linear", |b| {
         b.iter(|| {
@@ -550,6 +560,7 @@ fn bench_completion_laravel(c: &mut Criterion) {
         find_class_doc: Some(&find_fn),
         analysis: None,
         type_map: None,
+        session: None,
     };
     group.bench_function("laravel_builder_indexed", |b| {
         b.iter(|| {
