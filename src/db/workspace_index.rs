@@ -131,6 +131,19 @@ fn build_maps(files: &[(Url, Arc<FileIndex>)]) -> BuildMapsResult {
             }
             for iface in &cls.implements {
                 subtypes_of.entry(Arc::clone(iface)).or_default().push(cr);
+                // If this implements name is a use-import alias, also index by
+                // the short name of the resolved FQN so cursor-on-interface-name
+                // lookups work regardless of how the implementor named the interface.
+                if let Some((_, fqn)) = idx
+                    .use_imports
+                    .iter()
+                    .find(|(alias, _)| alias.as_ref() == iface.as_ref())
+                {
+                    let short = crate::text::fqn_short_name(fqn);
+                    if short != iface.as_ref() {
+                        subtypes_of.entry(Arc::from(short)).or_default().push(cr);
+                    }
+                }
             }
             for trt in &cls.traits {
                 subtypes_of.entry(Arc::clone(trt)).or_default().push(cr);

@@ -15,7 +15,7 @@
 /// crate-root glossary in `lib.rs`.
 use std::sync::Arc;
 
-use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
+use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind, UseKind};
 
 use crate::document::ast::{ParsedDoc, format_type_hint};
 use crate::lang::docblock::parse_docblock;
@@ -26,6 +26,11 @@ pub struct FileIndex {
     pub functions: Vec<FunctionDef>,
     pub classes: Vec<ClassDef>,
     pub constants: Vec<Box<str>>,
+    /// Class-import aliases from `use Foo\Bar as Alias` statements.
+    /// Maps alias (or short name when no alias) → fully-qualified name.
+    /// Used by the workspace index to resolve `implements Alias` to its canonical
+    /// short name so `subtypes_of` is keyed consistently.
+    pub use_imports: Vec<(Box<str>, Box<str>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -523,6 +528,19 @@ fn collect_stmts(
             StmtKind::Const(consts) => {
                 for c in consts.iter() {
                     index.constants.push(Box::from(c.name.or_error()));
+                }
+            }
+
+            StmtKind::Use(u) if u.kind == UseKind::Normal => {
+                for item in u.uses.iter() {
+                    let fqn: Box<str> = item.name.to_string_repr().as_ref().into();
+                    let short = crate::text::fqn_short_name(&fqn).to_string();
+                    let alias: Box<str> = item
+                        .alias
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| short.clone())
+                        .into();
+                    index.use_imports.push((alias, fqn));
                 }
             }
 

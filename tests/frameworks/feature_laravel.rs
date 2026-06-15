@@ -755,8 +755,9 @@ async fn laravel_rename_class_declaration() {
 /// `Factory::guard()` is an interface method; implementations should include
 /// `AuthManager::guard()` from the concrete class.
 ///
-/// Currently broken — returns 0 implementations.
-/// **Gap**: cross-file implementation search not returning results for interface methods.
+/// AuthManager writes `implements FactoryContract` where `FactoryContract` is a
+/// use-import alias for `Illuminate\Contracts\Auth\Factory`. The workspace index
+/// resolves the alias so `subtypes_of["Factory"]` includes AuthManager.
 #[ignore]
 #[tokio::test]
 async fn laravel_find_implementations_interface_method() {
@@ -778,10 +779,14 @@ async fn laravel_find_implementations_interface_method() {
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let locs = resp["result"].as_array().unwrap_or(&vec![]).to_vec();
-    // Currently 0 — snapshot documents broken state; update when fixed.
     assert!(
-        locs.is_empty(),
-        "NOTE: find-implementations now returns results — update this test to assert correctness. Got: {locs:#?}"
+        !locs.is_empty(),
+        "expected ≥1 implementation of Factory::guard(), got 0"
+    );
+    let uris: Vec<&str> = locs.iter().filter_map(|l| l["uri"].as_str()).collect();
+    assert!(
+        uris.iter().any(|u| u.contains("AuthManager")),
+        "expected AuthManager::guard() among implementations, got: {uris:?}"
     );
 }
 
