@@ -121,5 +121,26 @@ async fn workspace_diagnostic_circular_inheritance() {
     .assert_eq(&out);
 }
 
+// ── Abstract method enforcement gap ──────────────────────────────────────────
+
+/// A concrete class that extends an abstract class without implementing all
+/// abstract methods produces an `UnimplementedAbstractMethod` diagnostic.
+#[tokio::test]
+async fn abstract_method_missing_implementation_fires_diagnostic() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_diagnostics(
+        r#"<?php
+abstract class BaseController {
+    abstract public function handle(): void;
+}
+
+  class DashboardController extends BaseController {}
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: Class DashboardController must implement abstract method handle()
+"#,
+    )
+    .await;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // REGRESSION TESTS - Verify bugs are fixed and don't regress

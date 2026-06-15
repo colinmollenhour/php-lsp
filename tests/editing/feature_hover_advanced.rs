@@ -766,4 +766,62 @@ class Base {
     );
 }
 
+// ── Eloquent / @method hover gaps ────────────────────────────────────────────
+
+/// Eloquent model attributes are derived at runtime from the database schema.
+/// Hovering over a magic-accessed property (`$user->name`) shows the return
+/// type of `__get` (`mixed`) rather than the column type, because column types
+/// are not available to static analysis without a schema-to-stub pipeline.
+#[tokio::test]
+async fn hover_eloquent_magic_get_shows_mixed() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_hover(
+            r#"<?php
+class Model {
+    public function __get(string $key): mixed { return null; }
+}
+
+class User extends Model {
+    protected string $table = 'users';
+}
+
+$user = new User();
+$n = $user->nam$0e;
+"#,
+        )
+        .await;
+    // `name` resolves through __get which returns mixed; column type is unknown.
+    expect![[r#"
+        ```php
+        (property) User::$name: mixed
+        ```"#]]
+    .assert_eq(&out);
+}
+
+/// Hovering over a call to a method declared only via a `@method` docblock tag
+/// returns nothing because the hover path walks real AST members only.
+/// Fixing this requires reading `doc_methods` from FileIndex in the hover handler.
+#[tokio::test]
+async fn hover_doc_method_tag_returns_nothing() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_hover(
+            r#"<?php
+/**
+ * @method User find(int $id)
+ * @method static Builder where(string $col, mixed $val)
+ */
+class QueryBuilder {}
+
+function run(QueryBuilder $qb): void {
+    $qb->fin$0d(1);
+}
+"#,
+        )
+        .await;
+    // `find` is declared only via @method — hover currently shows nothing.
+    expect!["<no hover>"].assert_eq(&out);
+}
+
 // ── 2.4 PHP attribute hover ───────────────────────────────────────────────────

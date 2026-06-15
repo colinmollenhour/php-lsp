@@ -1650,3 +1650,99 @@ $c->hel$0lo();
     // B wins the insteadof conflict; definition must point to B::hello on line 5.
     expect!["main.php:5:20-5:25"].assert_eq(&out);
 }
+
+// ── Facade / service-container gaps ──────────────────────────────────────────
+
+/// A real method on a class resolves normally even when the class mimics a
+/// Facade pattern (defines getFacadeAccessor). The gap is `__callStatic`
+/// forwarding — see the test below.
+#[tokio::test]
+async fn facade_real_method_resolves() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_definition(
+            r#"<?php
+class Auth {
+    public static function user(): mixed { return null; }
+}
+
+$u = Auth::us$0er();
+"#,
+        )
+        .await;
+    expect!["main.php:2:27-2:31"].assert_eq(&out);
+}
+
+/// A `__callStatic`-forwarded method (the Facade pattern) cannot be resolved
+/// because the target is determined at runtime via getFacadeAccessor and the
+/// service container. Definition returns nothing.
+#[tokio::test]
+async fn facade_callstatic_forwarded_method_returns_none() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_definition(
+            r#"<?php
+class AuthFacade {
+    protected static function getFacadeAccessor(): string { return 'auth'; }
+    public static function __callStatic(string $method, array $args): mixed { return null; }
+}
+
+$u = AuthFacade::log$0in('admin@example.com', 'secret');
+"#,
+        )
+        .await;
+    // `login` is not defined on AuthFacade — the static call resolves nothing.
+    expect!["<none>"].assert_eq(&out);
+}
+
+/// `app(Foo::class)` navigates to the class directly because the cursor lands
+/// on `Foo`, not on the `app()` function itself.  Runtime container binding
+/// is not resolved — the best the LSP can do is jump to the class declaration.
+#[tokio::test]
+async fn service_container_app_navigates_to_class() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_definition(
+            r#"<?php
+class UserRepository {
+    public function find(int $id): mixed { return null; }
+}
+
+function bootstrap(): void {
+    $repo = app(UserRep$0ository::class);
+}
+"#,
+        )
+        .await;
+    // Cursor is on the class name token; definition resolves to the class declaration.
+    expect!["main.php:1:6-1:20"].assert_eq(&out);
+}
+
+/// Anonymous class implementors are not included in find-implementations results
+/// because the walker only visits `StmtKind::Class` (named classes).
+/// Named implementors are still found correctly.
+#[tokio::test]
+async fn implementation_anonymous_class_excluded() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"<?php
+interface Renderable$0 {
+    public function render(): string;
+}
+
+// Anonymous implementor — currently invisible to find-implementations.
+$view = new class implements Renderable {
+    public function render(): string { return '<div/>'; }
+};
+
+// Named implementor — this one IS found.
+class HtmlView implements Renderable {
+    public function render(): string { return '<p/>'; }
+}
+"#,
+        )
+        .await;
+    // Only the named implementor is returned; the anonymous one is silently skipped.
+    expect!["main.php:11:6-11:14"].assert_eq(&out);
+}
