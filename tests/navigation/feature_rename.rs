@@ -442,27 +442,27 @@ echo $foo->coun$0t;
     .await;
 }
 
-/// Property rename from declaration site is not supported - must rename from access site.
-/// This documents a current limitation: property_refs_in_stmts only finds access sites.
+/// Renaming from a property declaration site should update the declaration and
+/// all access sites, just like renaming from an access site.
 #[tokio::test]
-async fn rename_property_from_declaration_site_not_supported() {
+async fn rename_property_from_declaration_site() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
+    s.check_rename_annotated(
+        r#"<?php
 class Foo {
     public int $coun$0t;
+    //          ^^^^^ rename
 }
 $foo = new Foo();
 $foo->count++;
+//    ^^^^^ rename
 echo $foo->count;
+//         ^^^^^ rename
 "#,
-            "total",
-        )
-        .await;
-    // Current implementation limitation: must rename from access site, not declaration
-    expect!["<no `changes` map in {}>"].assert_eq(&out);
+        "total",
+    )
+    .await;
 }
 
 /// Renaming must respect static properties and not confuse them with instance properties.
@@ -548,36 +548,7 @@ function outer() {
     .await;
 }
 
-// --- Documented Limitations ---
-
-/// **LIMITATION**: Property rename only works from access sites (->prop, ?->prop),
-/// NOT from property declarations. This is by design - the `property_refs_in_stmts`
-/// function only finds property access expressions, not declarations.
-/// Workaround: Position cursor on a property access site, not the declaration.
-#[tokio::test]
-async fn rename_limitation_property_from_declaration_site() {
-    let mut s = TestServer::new().await;
-    s.validate_syntax(false);
-    let out = s
-        .check_rename(
-            r#"<?php
-class Foo {
-    public int $coun$0t;
-}
-$foo = new Foo();
-$foo->count++;
-echo $foo->count;
-"#,
-            "total",
-        )
-        .await;
-    // Property rename from declaration site is not supported
-    // Expected: no changes because the implementation can't find the property via declaration
-    expect!["<no `changes` map in {}>"].assert_eq(&out);
-}
-
-/// **LIMITATION**: Property rename from declaration fails, but rename from
-/// access site succeeds. This test demonstrates the workaround.
+/// Rename from an access site also updates the declaration and all other accesses.
 #[tokio::test]
 async fn rename_property_from_access_site_works() {
     let mut s = TestServer::new().await;
@@ -623,24 +594,30 @@ function process(callable $callback$0): void {
     .assert_eq(&out);
 }
 
-/// **LIMITATION**: Superglobals ($_GET, $_POST, etc.) can technically be renamed,
-/// but doing so breaks PHP functionality. This test documents that the feature
-/// doesn't prevent renaming superglobals (unlike some IDEs that protect them).
+/// Superglobals ($_GET, $_POST, etc.) are part of the PHP runtime; renaming
+/// them breaks code, so `prepare_rename` returns null to disable the action.
 #[tokio::test]
-async fn rename_allows_superglobal_rename() {
+async fn rename_superglobal_is_blocked_by_prepare_rename() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    s.check_rename_annotated(
-        r#"<?php
-if (isset($_GET$0['id'])) {
-//        ^^^^^ rename
-    echo $_GET['id'];
-    //   ^^^^^ rename
-}
-"#,
-        "$params",
-    )
-    .await;
+    for superglobal in &[
+        "$_GET",
+        "$_POST",
+        "$_REQUEST",
+        "$_FILES",
+        "$_COOKIE",
+        "$_SESSION",
+        "$_SERVER",
+        "$_ENV",
+        "$GLOBALS",
+    ] {
+        let src = format!("<?php\necho {superglobal}$0['key'];\n");
+        let out = s.check_prepare_rename(&src).await;
+        assert_eq!(
+            out, "<not renameable>",
+            "prepare_rename should block {superglobal}"
+        );
+    }
 }
 
 // --- Regression tests for bugs fixed in walk.rs and rename.rs ---
@@ -922,6 +899,60 @@ $p = new Parser();
         "Reporter",
     )
     .await;
+}
+
+/// Renaming a promoted constructor parameter from its declaration site should
+/// update the declaration and all property access sites.
+#[tokio::test]
+async fn rename_promoted_property_from_declaration_site() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_rename(
+            r#"<?php
+class Point {
+    public function __construct(
+        public readonly float $la$0t,
+        public readonly float $lng,
+    ) {}
+    public function label(): string { return (string) $this->lat; }
+}
+"#,
+            "latitude",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        3:31-3:34 → "latitude"
+        6:61-6:64 → "latitude""#]]
+    .assert_eq(&out);
+}
+
+/// Renaming a property from a trait declaration site should work identically
+/// to renaming from a class declaration site.
+#[tokio::test]
+async fn rename_property_from_trait_declaration_site() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_rename(
+            r#"<?php
+trait HasTimestamps {
+    public ?\DateTimeImmutable $create$0dAt;
+}
+class Post {
+    use HasTimestamps;
+    public function touch(): void { $this->createdAt = new \DateTimeImmutable(); }
+}
+"#,
+            "createdAtUtc",
+        )
+        .await;
+    expect![[r#"
+        // main.php
+        2:32-2:41 → "createdAtUtc"
+        6:43-6:52 → "createdAtUtc""#]]
+    .assert_eq(&out);
 }
 
 // ── clone-with (PHP 8.5) ────────────────────────────────────────────────────

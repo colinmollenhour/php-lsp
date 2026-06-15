@@ -918,6 +918,93 @@ class Flexible {
     );
 }
 
+/// Implement missing methods when the interface is defined in a separate file
+/// (background-indexed, not open). The action must resolve across the whole
+/// workspace, not just open files.
+#[tokio::test]
+async fn code_action_resolve_implement_cross_file_interface() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "Printable.php",
+            "<?php\ninterface Printable { public function print(): void; public function getLabel(): string; }\n",
+        )
+        .await;
+    server
+        .open(
+            "Report.php",
+            "<?php\nclass Report implements Printable {}\n",
+        )
+        .await;
+
+    let resp = server.code_action("Report.php", 1, 0, 1, 37).await;
+    let action = resp["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.starts_with("Implement"))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .expect("implement missing methods action should be offered for cross-file interface");
+
+    assert!(action["edit"].is_null(), "action must be deferred");
+
+    let resolved = server.code_action_resolve(action).await;
+    assert!(resolved["error"].is_null());
+    let out = canonicalize_workspace_edit(&resolved["result"]["edit"], &server.uri(""));
+    expect![[r#"
+        // Report.php
+        1:35-1:35 → "\n    public function print(): void\n    {\n        throw new \\RuntimeException('Not implemented');\n    }\n\n    public function getLabel(): string\n    {\n        throw new \\RuntimeException('Not implemented');\n    }\n\n""#]]
+    .assert_eq(&out);
+}
+
+/// Implement missing methods when the interface is in a namespaced file and
+/// the class uses a `use` import. Namespace resolution must be FQN-aware.
+#[tokio::test]
+async fn code_action_resolve_implement_namespaced_cross_file_interface() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "Contracts/Serializable.php",
+            "<?php\nnamespace App\\Contracts;\ninterface Serializable { public function serialize(): string; }\n",
+        )
+        .await;
+    server
+        .open(
+            "Models/User.php",
+            "<?php\nnamespace App\\Models;\nuse App\\Contracts\\Serializable;\nclass User implements Serializable {}\n",
+        )
+        .await;
+
+    let resp = server.code_action("Models/User.php", 3, 0, 3, 34).await;
+    let action = resp["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.starts_with("Implement"))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .expect("implement missing methods should work with namespaced cross-file interface");
+
+    assert!(action["edit"].is_null(), "action must be deferred");
+
+    let resolved = server.code_action_resolve(action).await;
+    assert!(resolved["error"].is_null());
+    let out = canonicalize_workspace_edit(&resolved["result"]["edit"], &server.uri(""));
+    expect![[r#"
+        // Models/User.php
+        3:36-3:36 → "\n    public function serialize(): string\n    {\n        throw new \\RuntimeException('Not implemented');\n    }\n\n""#]]
+    .assert_eq(&out);
+}
+
 // --- Quick-fix: UndefinedFunction → use function FQN; ---
 
 #[tokio::test]

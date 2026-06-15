@@ -134,9 +134,7 @@ impl Backend {
                 implement_missing_actions(
                     source,
                     doc,
-                    &self
-                        .docs
-                        .doc_with_others(uri, Arc::clone(doc), &self.open_urls()),
+                    &self.docs.all_docs_for_scan(),
                     range,
                     uri,
                     &imports,

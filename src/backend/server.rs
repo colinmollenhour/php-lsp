@@ -551,6 +551,19 @@ impl LanguageServer for Backend {
                 Some(d) => d,
                 None => return Ok(None),
             };
+            // Cursor on a property declaration (`public int $x`) or a promoted
+            // constructor parameter (`private string $x`) — both act as property
+            // declarations and must use the cross-file property rename path.
+            let prop_name = cursor_is_on_property_decl(&source, &doc.program().stmts, position)
+                .or_else(|| promoted_property_at_cursor(&source, &doc.program().stmts, position));
+            if let Some(prop_name) = prop_name {
+                let all_docs = self.docs.all_docs_for_scan();
+                return Ok(Some(rename_property(
+                    &prop_name,
+                    &params.new_name,
+                    &all_docs,
+                )));
+            }
             Ok(Some(rename_variable(
                 &word,
                 &params.new_name,

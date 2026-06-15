@@ -49,6 +49,11 @@ pub fn prepare_rename(source: &str, position: Position) -> Option<Range> {
     if is_php_keyword(&word) {
         return None;
     }
+    // PHP superglobals ($_GET, $_POST, etc.) are part of the language runtime;
+    // renaming them breaks code, so we disable the action.
+    if is_superglobal(&word) {
+        return None;
+    }
     let line = source.lines().nth(position.line as usize)?;
     let col = position.character as usize;
     let chars: Vec<char> = line.chars().collect();
@@ -168,6 +173,21 @@ fn is_php_keyword(word: &str) -> bool {
             | "while"
             | "xor"
             | "yield"
+    )
+}
+
+fn is_superglobal(word: &str) -> bool {
+    matches!(
+        word,
+        "$_GET"
+            | "$_POST"
+            | "$_REQUEST"
+            | "$_FILES"
+            | "$_COOKIE"
+            | "$_SESSION"
+            | "$_SERVER"
+            | "$_ENV"
+            | "$GLOBALS"
     )
 }
 
