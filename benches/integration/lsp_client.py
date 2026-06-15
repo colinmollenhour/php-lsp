@@ -151,6 +151,38 @@ def req_definition(req_id: int, uri: str, line: int, character: int) -> dict:
     }
 
 
+def req_completion(req_id: int, uri: str, line: int, character: int, trigger: str | None = None) -> dict:
+    ctx = {"triggerKind": 1}
+    if trigger:
+        ctx = {"triggerKind": 2, "triggerCharacter": trigger}
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "method": "textDocument/completion",
+        "params": {
+            "textDocument": {"uri": uri},
+            "position": {"line": line, "character": character},
+            "context": ctx,
+        },
+    }
+
+
+def req_code_actions(req_id: int, uri: str, line: int, character: int) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": line, "character": 0},
+                "end": {"line": line, "character": character},
+            },
+            "context": {"diagnostics": []},
+        },
+    }
+
+
 def req_references(req_id: int, uri: str, line: int, character: int) -> dict:
     return {
         "jsonrpc": "2.0",
@@ -322,7 +354,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--lsp-method",
-        choices=["hover", "definition", "references", "diagnostics"],
+        choices=["hover", "definition", "references", "diagnostics", "completion", "code_actions"],
         default="hover",
         help=(
             "LSP request method to benchmark (default: hover). "
@@ -354,6 +386,27 @@ def main() -> None:
         default=None,
         help="Write server stderr (tracing spans) to this file instead of discarding it",
     )
+    parser.add_argument(
+        "--workspace-root",
+        default=None,
+        help=(
+            "Override the LSP workspace root URI (default: parent directory of --fixture). "
+            "Use this when the fixture lives inside a larger project so the server indexes "
+            "the full workspace rather than just the file's directory."
+        ),
+    )
+    parser.add_argument(
+        "--line",
+        type=int,
+        default=None,
+        help="LSP line (0-based) to use for the benchmark position (default: 109)",
+    )
+    parser.add_argument(
+        "--character",
+        type=int,
+        default=None,
+        help="LSP character (0-based) to use for the benchmark position (default: 19)",
+    )
     args = parser.parse_args()
 
     init_options: dict | None = None
@@ -362,17 +415,17 @@ def main() -> None:
 
     fixture_path = os.path.abspath(args.fixture)
     fixture_uri = "file://" + fixture_path
-    root_uri = "file://" + os.path.dirname(fixture_path)
+    if args.workspace_root:
+        root_uri = "file://" + os.path.abspath(args.workspace_root)
+    else:
+        root_uri = "file://" + os.path.dirname(fixture_path)
 
     with open(fixture_path, encoding="utf-8") as fh:
         fixture_text = fh.read()
 
-    # Pin the position to a known symbol in medium_class.php:
-    #   line 110 (LSP line 109), char 19 → `getTitle`.
-    # Falls back gracefully if the fixture is shorter than expected.
     lines = fixture_text.splitlines()
-    bench_line = min(109, len(lines) - 1)
-    bench_char = 19
+    bench_line = args.line if args.line is not None else min(109, len(lines) - 1)
+    bench_char = args.character if args.character is not None else 19
 
     lsp_method = args.lsp_method
 
@@ -381,6 +434,10 @@ def main() -> None:
             return req_hover(req_id, fixture_uri, bench_line, bench_char)
         elif lsp_method == "definition":
             return req_definition(req_id, fixture_uri, bench_line, bench_char)
+        elif lsp_method == "completion":
+            return req_completion(req_id, fixture_uri, bench_line, bench_char, ">")
+        elif lsp_method == "code_actions":
+            return req_code_actions(req_id, fixture_uri, bench_line, bench_char)
         else:
             return req_references(req_id, fixture_uri, bench_line, bench_char)
 
