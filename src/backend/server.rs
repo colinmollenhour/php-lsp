@@ -58,6 +58,7 @@ use crate::navigation::definition::{
 };
 use crate::navigation::implementation::{
     find_implementations, find_implementations_from_workspace,
+    find_method_implementations_from_workspace,
 };
 use crate::navigation::moniker::moniker_at;
 use crate::navigation::references::{
@@ -934,11 +935,20 @@ impl LanguageServer for Backend {
         // First pass: open-file ParsedDocs give accurate character positions.
         let open_docs = self.docs.docs_for(&self.open_urls());
         let mut locs = find_implementations(&word, fqn, &open_docs);
+        // Second pass: workspace aggregate's `subtypes_of` reverse map.
+        let wi = self.workspace_index_async().await;
         if locs.is_empty() {
-            // Second pass: background files via the salsa-memoized workspace
-            // aggregate's `subtypes_of` reverse map (line-only positions).
-            let wi = self.workspace_index_async().await;
             locs = find_implementations_from_workspace(&word, fqn, &wi);
+        }
+        // Third pass: treat word as a method name inside its declaring
+        // class/interface — returns concrete overrides in every subtype.
+        // Handles cursor on an interface method like `Factory::guard()`.
+        if locs.is_empty()
+            && let Some(doc) = self.get_doc(uri)
+            && let Some(enclosing) =
+                crate::types::type_map::enclosing_class_at(&source, &doc, position)
+        {
+            locs = find_method_implementations_from_workspace(&word, &enclosing, &wi);
         }
         if locs.is_empty() {
             Ok(None)

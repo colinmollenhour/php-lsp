@@ -50,6 +50,44 @@ pub fn find_implementations(
     locations
 }
 
+/// Find all concrete implementations of a METHOD across the subtypes of its
+/// declaring class/interface.
+///
+/// When the cursor sits on a method name inside an interface or abstract class,
+/// this returns the same-named method in every class that extends or implements
+/// the declaring type. Uses the workspace aggregate's `subtypes_of` reverse map
+/// for an O(subtypes) lookup instead of a full corpus walk.
+pub fn find_method_implementations_from_workspace(
+    method_name: &str,
+    declaring_class: &str,
+    wi: &crate::db::workspace_index::WorkspaceIndexData,
+) -> Vec<tower_lsp::lsp_types::Location> {
+    let mut locations = Vec::new();
+    if let Some(refs) = wi.subtypes_of.get(declaring_class) {
+        for &class_ref in refs {
+            if let Some((uri, cls)) = wi.at(class_ref)
+                && let Some(method) = cls
+                    .methods
+                    .iter()
+                    .find(|m| m.name.as_ref() == method_name && !m.is_abstract)
+            {
+                locations.push(tower_lsp::lsp_types::Location {
+                    uri: uri.clone(),
+                    range: crate::text::zero_width_range(method.start_line),
+                });
+            }
+        }
+    }
+    locations.sort_by(|a, b| {
+        a.uri
+            .as_str()
+            .cmp(b.uri.as_str())
+            .then(a.range.start.line.cmp(&b.range.start.line))
+    });
+    locations.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+    locations
+}
+
 /// Phase J — Find implementations via the salsa-memoized workspace aggregate.
 /// Uses the pre-built `subtypes_of[word]` reverse map for O(matches) lookups,
 /// with an additional pass over the FQN's `subtypes_of` entry when the caller

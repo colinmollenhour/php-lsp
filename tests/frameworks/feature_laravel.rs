@@ -206,11 +206,7 @@ async fn laravel_hover_method_shows_signature_and_doc() {
     );
 }
 
-/// Hover on a property declaration shows its type.
-/// Currently broken — property hover returns empty.
-///
-/// **Gap**: property hover not implemented; tracked to prevent silent regression.
-/// When fixed, update the snapshot to assert the actual type is shown.
+/// Hover on a property declaration shows its type and docblock.
 #[ignore]
 #[tokio::test]
 async fn laravel_hover_property_declaration() {
@@ -229,8 +225,17 @@ async fn laravel_hover_property_declaration() {
     // Character 14 = "$guards".
     let resp = s.hover("Illuminate/Auth/AuthManager.php", 40, 14).await;
     let out = render_hover(&resp);
-    // Currently returns empty — snapshot documents broken state.
-    expect!["<no hover>"].assert_eq(&out);
+    expect![[r#"
+        ```php
+        (property) protected AuthManager::$guards
+        ```
+
+        ---
+
+        The array of created "drivers".
+
+        **@var** `array`"#]]
+    .assert_eq(&out);
 }
 
 /// Hover on an interface name at an `implements` clause shows the interface.

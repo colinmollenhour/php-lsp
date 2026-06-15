@@ -347,6 +347,42 @@ fn hover_at_core(
         }
     }
 
+    // Property declaration hover: cursor on `$prop` inside a class body.
+    // The mir path only fires for property ACCESSES; this covers the declaration
+    // line itself where no access symbol exists.
+    if word.starts_with('$')
+        && let Some(class_name) = crate::types::type_map::enclosing_class_at(source, doc, position)
+        && let prop_name = word.trim_start_matches('$')
+        && let Some((modifiers, type_str, db)) = find_property_info(doc, &class_name, prop_name)
+    {
+        let sig = format!(
+            "(property) {}{}::${}{}",
+            modifiers,
+            class_name,
+            prop_name,
+            if type_str.is_empty() {
+                String::new()
+            } else {
+                format!(": {type_str}")
+            }
+        );
+        let mut value = wrap_php(&sig);
+        if let Some(doc_block) = db {
+            let md = doc_block.to_markdown();
+            if !md.is_empty() {
+                value.push_str("\n\n---\n\n");
+                value.push_str(&md);
+            }
+        }
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: hover_range,
+        });
+    }
+
     if !word.starts_with('$')
         && let Some(sym) = analysis.and_then(|a| {
             let off =
