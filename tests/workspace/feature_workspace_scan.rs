@@ -932,3 +932,45 @@ async fn workspace_symbols_substring_match() {
 // correctly (the server calls `self.client.configuration()` internally,
 // bypassing the mock).  The concatenation behavior is still covered by
 // `include_paths_from_php_lsp_json` + editor init options.
+
+/// Regression: a single unreadable (non-UTF-8) file under the workspace must
+/// NOT truncate indexing. The Phase 2a read-collection loop previously used
+/// `while let Some(Ok(Some(_))) = read_set.join_next()`, which stopped at the
+/// first failed read — so one binary/non-UTF-8 file (common in `vendor/`)
+/// dropped every file whose read completed after it.
+///
+/// Determinism: a 3-byte non-UTF-8 file reads in a single syscall and so always
+/// finishes before the multi-megabyte valid file. With the bug, the bad file's
+/// completion stops the loop before the big file is collected, so `BigKlass`
+/// disappears from the index; with the fix it is always present.
+#[serial_test::serial]
+#[tokio::test]
+async fn unreadable_file_does_not_truncate_workspace_index() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("src");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Tiny non-UTF-8 ".php" file: read fails fast and wins the completion race.
+    std::fs::write(dir.join("Binary.php"), [0xFF, 0xFE, 0x00]).unwrap();
+
+    // A large valid file whose read reliably completes AFTER the tiny bad file.
+    let big_padding = "// ".to_string() + &"x".repeat(8 * 1024 * 1024);
+    std::fs::write(
+        dir.join("BigKlass.php"),
+        format!("<?php\nnamespace App;\n{big_padding}\nclass BigKlass {{}}\n"),
+    )
+    .unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+
+    let resp = s.workspace_symbols("BigKlass").await;
+    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        symbols
+            .iter()
+            .any(|sym| sym["name"].as_str() == Some("BigKlass")),
+        "BigKlass must be indexed despite the unreadable file truncating Phase 2a; got: {symbols:?}"
+    );
+}

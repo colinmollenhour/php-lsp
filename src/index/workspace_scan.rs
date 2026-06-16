@@ -191,9 +191,17 @@ pub(crate) async fn scan_workspace(
         });
     }
 
+    // Drain every spawned read. A `while let Some(Ok(Some(_)))` here would stop
+    // the loop the moment one task resolves to `Ok(None)` (a file that failed to
+    // read, e.g. non-UTF-8) or `Err` (a join error), silently dropping every
+    // not-yet-collected file — so a single unreadable file (common under
+    // `vendor/`) could truncate the whole index. Match each result instead and
+    // skip only the failures.
     let mut file_contents: Vec<(Url, String)> = Vec::new();
-    while let Some(Ok(Some(pair))) = read_set.join_next().await {
-        file_contents.push(pair);
+    while let Some(res) = read_set.join_next().await {
+        if let Ok(Some(pair)) = res {
+            file_contents.push(pair);
+        }
     }
 
     // Phase 2b: parse and index files in parallel (CPU-bound).
