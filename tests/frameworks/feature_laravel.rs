@@ -524,9 +524,8 @@ async fn laravel_completion_this_members() {
 ///
 /// **Gap**: `Str::` currently returns PHP keywords/globals instead of `Str`
 /// class methods. Static member completion does not resolve the class from a
-/// `use`-import alias (`use Illuminate\Support\Str`), so the completer cannot
-/// look up the correct class in the index.
-#[ignore]
+/// `use`-import alias (`use Illuminate\Support\Str`), resolved by expanding the
+/// alias to its FQCN and extracting the short class name for the workspace index lookup.
 #[tokio::test]
 async fn laravel_completion_static_members() {
     if !laravel_available() {

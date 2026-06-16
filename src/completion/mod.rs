@@ -406,7 +406,8 @@ pub fn filtered_completions_at(
         Some(":") => {
             // Static access: ClassName:: / self:: / static:: / parent::
             if let (Some(src), Some(pos)) = (source, position)
-                && let Some(class_name) = resolve_static_receiver(src, doc, other_docs, pos)
+                && let Some(class_name) =
+                    resolve_static_receiver(src, doc, other_docs, pos, imports)
             {
                 let items = all_static_members(
                     &class_name,
@@ -488,7 +489,7 @@ pub fn filtered_completions_at(
                         character: colon_end_char,
                     };
                     if let Some(class_name) =
-                        resolve_static_receiver(src, doc, other_docs, colon_pos)
+                        resolve_static_receiver(src, doc, other_docs, colon_pos, imports)
                     {
                         let items = all_static_members(
                             &class_name,

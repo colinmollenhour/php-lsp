@@ -226,6 +226,60 @@ Reg::$0
 }
 
 #[tokio::test]
+async fn completion_double_colon_static_via_use_import_alias() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"//- /Str.php
+<?php
+namespace Illuminate\Support;
+class Str {
+    public static function camel(string $value): string {}
+    public static function lower(string $value): string {}
+}
+
+//- /main.php
+<?php
+use Illuminate\Support\Str;
+Str::$0
+"#,
+        )
+        .await;
+    expect![[r#"
+        Method      camel
+        Method      lower"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn completion_double_colon_static_via_use_import_as_alias() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"//- /Str.php
+<?php
+namespace Illuminate\Support;
+class Str {
+    public static function camel(string $value): string {}
+    public static function lower(string $value): string {}
+}
+
+//- /main.php
+<?php
+use Illuminate\Support\Str as StringHelper;
+StringHelper::$0
+"#,
+        )
+        .await;
+    expect![[r#"
+        Method      camel
+        Method      lower"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
 async fn completion_namespace_prefix() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);

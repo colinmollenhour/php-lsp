@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use mir_analyzer::AnalysisSession;
@@ -196,11 +197,18 @@ fn all_members(
 }
 
 /// Resolve `ClassName::` or the aliases `self::`, `static::`, `parent::`.
+///
+/// `imports` is the file's `use`-import map (`alias → FQCN`). When the name
+/// before `::` is an import alias (including `as`-renamed aliases such as
+/// `use Foo\Bar as Baz`), the short class name extracted from the FQCN is
+/// returned so that `all_static_members` can find the class in the workspace
+/// index by its canonical short name.
 pub(super) fn resolve_static_receiver(
     source: &str,
     doc: &ParsedDoc,
     other_docs: &[Arc<ParsedDoc>],
     position: Position,
+    imports: &HashMap<String, String>,
 ) -> Option<String> {
     let line = source.lines().nth(position.line as usize)?;
     let col = utf16_offset_to_byte(line, position.character as usize);
@@ -230,7 +238,21 @@ pub(super) fn resolve_static_receiver(
             }
             None
         }
-        _ => Some(name),
+        _ => {
+            // If the name contains a backslash it's already a FQN — extract its
+            // short component directly (e.g. `\Illuminate\Support\Str::` → `Str`).
+            if name.contains('\\') {
+                return Some(fqn_short_name(&name).to_owned());
+            }
+            // Otherwise try to expand a `use`-import alias. This handles both
+            // the unaliased case (`use Foo\Bar\Str` → alias `Str` = short name `Str`)
+            // and the `as`-aliased case (`use Foo\Bar\Str as Helper` → alias `Helper`
+            // maps to FQN `Foo\Bar\Str`, short name `Str`).
+            if let Some(fqcn) = imports.get(&name) {
+                return Some(fqn_short_name(fqcn).to_owned());
+            }
+            Some(name)
+        }
     }
 }
 
