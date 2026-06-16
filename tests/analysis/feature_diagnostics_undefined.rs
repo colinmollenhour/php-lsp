@@ -455,3 +455,47 @@ async fn use_imported_interface_in_implements_not_flagged_as_undefined_class() {
           <clean>"#]]
     .assert_eq(&out);
 }
+
+// ── Audit report §5: false UndefinedMethod on trait-aliased methods ─────────
+
+/// CONTROL: a plain (un-aliased) trait method call produces no diagnostics.
+#[tokio::test]
+async fn trait_method_call_no_false_undefined_method() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+trait BaseInit {
+    public function init(int $x): void {}
+}
+class Query {
+    use BaseInit;
+    public function __construct() {
+        $this->init(1);
+    }
+}
+"#,
+    )
+    .await;
+}
+
+/// BUG (report §5): a trait-aliased method call must not be flagged
+/// `UndefinedMethod` — the alias introduces a real method.
+#[tokio::test]
+#[ignore = "KNOWN BUG (audit report §5): trait alias not tracked -> false UndefinedMethod"]
+async fn trait_aliased_method_call_no_false_undefined_method_bug() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+trait BaseInit {
+    public function __construct(int $x) {}
+}
+class Query {
+    use BaseInit { __construct as __constructBase; }
+    public function __construct() {
+        $this->__constructBase(1);
+    }
+}
+"#,
+    )
+    .await;
+}

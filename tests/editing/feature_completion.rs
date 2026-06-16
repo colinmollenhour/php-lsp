@@ -4387,3 +4387,89 @@ createUser($0
         Variable    name:"#]]
     .assert_eq(&out);
 }
+
+// ── Audit report §1: member/static completion via the workspace index ───────
+// Re-verification of the audit's "namespaced completion is broken" finding.
+// Checked through the hardest path — the receiver's class is an indexed
+// (not-open) file inside a `namespace` — and it WORKS once the index is ready.
+// The live failure was an index-not-ready artifact of §3 (on the 36k-file repo
+// the scan never completes, so completion ran against a partial index). These
+// guard the namespace-aware index path against regression.
+
+/// CONTROL: member completion, class resolved from the index, global namespace.
+#[tokio::test]
+async fn completion_member_from_index_global_namespace() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Logger.php"),
+        "<?php\nclass Logger {\n    public function debug(): void {}\n    public function info(): void {}\n}\n",
+    )
+    .unwrap();
+    let caller = "<?php\n$log = new Logger();\n$log->debug();\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "debug();", 0);
+    let resp = s.completion("caller.php", line, ch).await;
+    let out = render_completion_ordered(&resp);
+    expect![[r#"
+        Method      debug
+        Method      info"#]]
+    .assert_eq(&out);
+}
+
+/// Member completion when the class is index-only inside `namespace App;`.
+#[tokio::test]
+async fn completion_member_from_index_namespaced() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Logger.php"),
+        "<?php\nnamespace App;\nclass Logger {\n    public function debug(): void {}\n    public function info(): void {}\n}\n",
+    )
+    .unwrap();
+    let caller = "<?php\nnamespace App;\n$log = new Logger();\n$log->debug();\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "debug();", 0);
+    let resp = s.completion("caller.php", line, ch).await;
+    let out = render_completion_ordered(&resp);
+    expect![[r#"
+        Method      debug
+        Method      info"#]]
+    .assert_eq(&out);
+}
+
+/// Static completion when the class is index-only inside `namespace App;`.
+#[tokio::test]
+async fn completion_static_from_index_namespaced() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Reg.php"),
+        "<?php\nnamespace App;\nclass Reg {\n    public static function get(): void {}\n    public static function set(): void {}\n}\n",
+    )
+    .unwrap();
+    let caller = "<?php\nnamespace App;\nReg::get();\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "get();", 0);
+    let resp = s.completion("caller.php", line, ch).await;
+    let out = render_completion_ordered(&resp);
+    expect![[r#"
+        Method      get
+        Method      set"#]]
+    .assert_eq(&out);
+}

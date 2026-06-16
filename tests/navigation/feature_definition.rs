@@ -1746,3 +1746,186 @@ class HtmlView implements Renderable {
     // Only the named implementor is returned; the anonymous one is silently skipped.
     expect!["main.php:11:6-11:14"].assert_eq(&out);
 }
+
+// ── Audit report §2/§4/§5: inheritance, vendor autoload, trait aliases ──────
+// §2 (extends/implements def+hover) verified WORKING once the index is ready
+// (the live failure was an index-not-ready artifact of §3). §4 (PSR-0 vendor)
+// and §5 (trait-aliased methods) are genuine bugs: their `*_bug` tests assert
+// the correct target and are `#[ignore]`d until fixed.
+
+/// §2: definition on the interface in an `implements` clause (index-only).
+#[tokio::test]
+async fn definition_on_implements_target_from_index() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Shape.php"),
+        "<?php\nnamespace App;\ninterface Shape {}\n",
+    )
+    .unwrap();
+    let caller = "<?php\nnamespace App;\nclass Circle implements Shape {}\n";
+    std::fs::write(tmp.path().join("Circle.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("Circle.php", caller).await;
+
+    let (_, line, ch) = s.locate("Circle.php", "Shape {}", 0);
+    let resp = s.definition("Circle.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Shape.php:2:10-2:15"].assert_eq(&out);
+}
+
+/// §2: definition on the parent class in an `extends` clause (index-only).
+#[tokio::test]
+async fn definition_on_extends_target_from_index() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Base.php"),
+        "<?php\nnamespace App;\nclass Base {}\n",
+    )
+    .unwrap();
+    let caller = "<?php\nnamespace App;\nclass Derived extends Base {}\n";
+    std::fs::write(tmp.path().join("Derived.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("Derived.php", caller).await;
+
+    let (_, line, ch) = s.locate("Derived.php", "Base {}", 0);
+    let resp = s.definition("Derived.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["Base.php:2:6-2:10"].assert_eq(&out);
+}
+
+/// §2: hover on the interface in an `implements` clause (index-only).
+#[tokio::test]
+async fn hover_on_implements_target_from_index() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Shape.php"),
+        "<?php\nnamespace App;\ninterface Shape {}\n",
+    )
+    .unwrap();
+    let caller = "<?php\nnamespace App;\nclass Circle implements Shape {}\n";
+    std::fs::write(tmp.path().join("Circle.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("Circle.php", caller).await;
+
+    let (_, line, ch) = s.locate("Circle.php", "Shape {}", 0);
+    let resp = s.hover("Circle.php", line, ch).await;
+    let out = render_hover(&resp);
+    assert!(
+        out.contains("Shape"),
+        "hover on the implements-clause interface should mention it, got: {out:?}"
+    );
+}
+
+/// §4 CONTROL: a PSR-4 vendor class resolves from the index.
+#[tokio::test]
+async fn definition_psr4_vendor_class() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("vendor/acme/lib/src")).unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"Acme\\":"vendor/acme/lib/src/"}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("vendor/acme/lib/src/Client.php"),
+        "<?php\nnamespace Acme;\nclass Client {}\n",
+    )
+    .unwrap();
+    let caller = "<?php\nuse Acme\\Client;\n$c = new Client();\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "Client();", 0);
+    let resp = s.definition("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["vendor/acme/lib/src/Client.php:2:6-2:12"].assert_eq(&out);
+}
+
+/// §4 BUG: a PSR-0 vendor class is not indexed (vendor indexer is PSR-4-only),
+/// so go-to-definition returns `<none>`.
+#[tokio::test]
+#[ignore = "KNOWN BUG (audit report §4): PSR-0 vendor packages are not indexed"]
+async fn definition_psr0_vendor_class_bug() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("vendor/acme/lib/src/Acme")).unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-0":{"Acme_":"vendor/acme/lib/src/"}}}"#,
+    )
+    .unwrap();
+    // PSR-0: class `Acme_Client` maps to vendor/acme/lib/src/Acme/Client.php
+    std::fs::write(
+        tmp.path().join("vendor/acme/lib/src/Acme/Client.php"),
+        "<?php\nclass Acme_Client {}\n",
+    )
+    .unwrap();
+    let caller = "<?php\n$c = new Acme_Client();\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "Acme_Client();", 0);
+    let resp = s.definition("caller.php", line, ch).await;
+    let out = common::render_locations(&resp, &s.uri(""));
+    expect!["vendor/acme/lib/src/Acme/Client.php:1:6-1:16"].assert_eq(&out);
+}
+
+/// §5 CONTROL: definition on a plain (un-aliased) trait method resolves.
+#[tokio::test]
+async fn definition_on_trait_method_unaliased() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_definition(
+            r#"<?php
+trait BaseInit {
+    public function init(int $x): void {}
+}
+class Query {
+    use BaseInit;
+    public function run(): void {
+        $this->in$0it(1);
+    }
+}
+"#,
+        )
+        .await;
+    expect!["main.php:2:20-2:24"].assert_eq(&out);
+}
+
+/// §5 BUG: definition on a trait-aliased method call must resolve to the
+/// aliased trait method; currently returns `<none>`.
+#[tokio::test]
+#[ignore = "KNOWN BUG (audit report §5): trait-aliased method is unresolved"]
+async fn definition_on_trait_aliased_method_bug() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_definition(
+            r#"<?php
+trait BaseInit {
+    public function __construct(int $x) {}
+}
+class Query {
+    use BaseInit { __construct as __constructBase; }
+    public function __construct() {
+        $this->__construct$0Base(1);
+    }
+}
+"#,
+        )
+        .await;
+    expect!["main.php:2:20-2:31"].assert_eq(&out);
+}
