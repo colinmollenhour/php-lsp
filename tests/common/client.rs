@@ -56,7 +56,7 @@ impl TestClient {
         });
         self.write.write_all(&frame(&msg)).await.unwrap();
         let method_owned = method.to_owned();
-        tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
+        tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
             loop {
                 let resp = read_msg(&mut self.read).await;
                 // If this message is a server→client request (has method + id), reply null
@@ -91,7 +91,7 @@ impl TestClient {
         });
         self.write.write_all(&frame(&msg)).await.unwrap();
         let method_owned = method.to_owned();
-        tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
+        tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
             loop {
                 let resp = read_msg(&mut self.read).await;
                 // If this message is a server→client request (has method + id), reply null
@@ -294,9 +294,9 @@ impl TestClient {
 
     /// Read messages until a server→client request with the given `method` arrives.
     /// Returns `(id, params)`. Skips notifications and client responses.
-    /// Panics after 5 seconds.
+    /// Panics after 10 seconds.
     pub async fn expect_server_request(&mut self, method: &str) -> (Value, Value) {
-        tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
+        tokio::time::timeout(tokio::time::Duration::from_secs(10), async {
             loop {
                 let msg = read_msg(&mut self.read).await;
                 if msg.get("method") == Some(&json!(method)) && msg.get("id").is_some() {

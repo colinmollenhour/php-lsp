@@ -9,6 +9,7 @@ use super::*;
 
 use expect_test::expect;
 use serde_json::{Value, json};
+use serial_test::serial;
 
 // ---------- fake phpunit ----------
 
@@ -167,6 +168,7 @@ async fn run_test_phpunit_not_found_with_file_uri_offers_open_file() {
 
 /// A passing test suite produces an INFO message whose text starts with "✓".
 #[cfg(unix)]
+#[serial]
 #[tokio::test]
 async fn run_test_phpunit_success_shows_info_message() {
     let tmp = tempfile::tempdir().unwrap();
@@ -189,6 +191,7 @@ async fn run_test_phpunit_success_shows_info_message() {
 /// A failing test suite produces an ERROR message with "✗" and additionally
 /// offers "Open File" when a URI was provided.
 #[cfg(unix)]
+#[serial]
 #[tokio::test]
 async fn run_test_phpunit_failure_shows_error_with_open_file() {
     let tmp = tempfile::tempdir().unwrap();
@@ -212,6 +215,7 @@ async fn run_test_phpunit_failure_shows_error_with_open_file() {
 /// Choosing "Run Again" re-runs phpunit and shows the result as a plain
 /// `window/showMessage` notification (not another request).
 #[cfg(unix)]
+#[serial]
 #[tokio::test]
 async fn run_test_run_again_reruns_test() {
     let tmp = tempfile::tempdir().unwrap();
@@ -238,6 +242,7 @@ async fn run_test_run_again_reruns_test() {
 /// Choosing "Open File" triggers a `window/showDocument` server request
 /// pointing at the URI that was originally provided.
 #[cfg(unix)]
+#[serial]
 #[tokio::test]
 async fn run_test_open_file_shows_document() {
     let tmp = tempfile::tempdir().unwrap();
@@ -276,6 +281,7 @@ async fn run_test_open_file_shows_document() {
 /// On success (exit 0), "Open File" is NOT offered even when a file URI was
 /// provided — the conditional is `!success && file_uri.is_some()`.
 #[cfg(unix)]
+#[serial]
 #[tokio::test]
 async fn run_test_success_with_file_uri_does_not_offer_open_file() {
     let tmp = tempfile::tempdir().unwrap();
