@@ -177,6 +177,162 @@ impl Backend {
         })
     }
 
+    /// Walk the PSR-4 class hierarchy starting from `class_fqn` to find the
+    /// definition of `method_name`. Follows the PHP method-resolution order
+    /// (traits → parent) through vendor files that were excluded from the
+    /// eager workspace scan. Files are lazily ingested into the document store
+    /// on first visit; their `FileIndex` is cached in `vendor_index_cache` so
+    /// repeated navigation to the same vendor class is cheap.
+    pub(super) async fn psr4_method_goto(
+        &self,
+        class_fqn: &str,
+        method_name: &str,
+    ) -> Option<Location> {
+        use crate::index::file_index::FileIndex;
+        use crate::navigation::definition::{find_declaration_range, find_method_range_in_class};
+        use crate::text::zero_width_range;
+        use std::collections::{HashSet, VecDeque};
+
+        let mut queue: VecDeque<String> = VecDeque::from([class_fqn.to_owned()]);
+        let mut visited: HashSet<String> = HashSet::new();
+
+        while let Some(fqn) = queue.pop_front() {
+            if !visited.insert(fqn.clone()) {
+                continue;
+            }
+
+            let path = match self.psr4.load().resolve(&fqn) {
+                Some(p) => p,
+                None => continue,
+            };
+            let uri = match Url::from_file_path(&path) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+
+            // Lazy-load into the workspace so get_doc_salsa works below.
+            if self.docs.get_doc_salsa(&uri).is_none() {
+                let text = match tokio::fs::read_to_string(&path).await {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                self.ingest_if_not_open(uri.clone(), &text);
+            }
+
+            let doc = match self.docs.get_doc_salsa(&uri) {
+                Some(d) => d,
+                None => continue,
+            };
+
+            // Use a cached FileIndex when available to avoid re-extracting.
+            let index = self.docs.get_vendor_index(&uri).unwrap_or_else(|| {
+                let idx = Arc::new(FileIndex::extract(&doc));
+                self.docs.cache_vendor_index(uri.clone(), Arc::clone(&idx));
+                idx
+            });
+
+            let short = crate::text::fqn_short_name(&fqn);
+
+            for cls in &index.classes {
+                if cls.name.as_ref() != short {
+                    continue;
+                }
+
+                for m in &cls.methods {
+                    if m.name.as_ref() == method_name {
+                        let range = find_method_range_in_class(&doc, short, method_name)
+                            .or_else(|| find_declaration_range(doc.source(), &doc, method_name))
+                            .unwrap_or_else(|| zero_width_range(m.start_line));
+                        return Some(Location { uri, range });
+                    }
+                }
+                for dm in &cls.doc_methods {
+                    if dm.name.as_ref() == method_name {
+                        return Some(Location {
+                            uri,
+                            range: zero_width_range(dm.start_line),
+                        });
+                    }
+                }
+
+                // Queue parent chain in PHP MRO order: traits → mixins → parent.
+                for trt in &cls.traits {
+                    queue.push_back(resolve_name_to_fqn(trt.as_ref(), &index));
+                }
+                for mx in &cls.mixins {
+                    queue.push_back(resolve_name_to_fqn(mx.as_ref(), &index));
+                }
+                if let Some(parent) = &cls.parent {
+                    queue.push_back(resolve_name_to_fqn(parent.as_ref(), &index));
+                }
+            }
+        }
+        None
+    }
+
+    /// Pre-load via PSR-4 any direct supertypes of `item_name` that are not yet
+    /// present in the workspace index, so the next call to `workspace_index_async`
+    /// will include them. Only one level is loaded (direct parents / interfaces);
+    /// the type-hierarchy feature only ever requests one level at a time.
+    /// Returns `true` when at least one new file was ingested.
+    pub(super) async fn ensure_direct_supertypes_loaded(
+        &self,
+        item_name: &str,
+        wi: &crate::db::workspace_index::WorkspaceIndexData,
+    ) -> bool {
+        let refs = match wi.classes_by_name.get(item_name) {
+            Some(r) => r.clone(),
+            None => return false,
+        };
+
+        let mut ingested = false;
+        for r in &refs {
+            let Some((_, cls)) = wi.at(*r) else {
+                continue;
+            };
+            let file_idx = wi.files.get(r.file as usize).map(|(_, idx)| idx.as_ref());
+
+            let mut super_names: Vec<String> = Vec::new();
+            if let Some(p) = &cls.parent {
+                super_names.push(p.as_ref().to_owned());
+            }
+            for iface in &cls.implements {
+                super_names.push(iface.as_ref().to_owned());
+            }
+
+            for name in super_names {
+                let short = crate::text::fqn_short_name(&name);
+                if wi.classes_by_name.contains_key(short) {
+                    continue;
+                }
+                // Resolve short name to FQN via the implementing file's use_imports.
+                let fqn = if let Some(idx) = file_idx {
+                    resolve_name_to_fqn(&name, idx)
+                } else {
+                    name.clone()
+                };
+                let path = match self.psr4.load().resolve(&fqn) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let uri = match Url::from_file_path(&path) {
+                    Ok(u) => u,
+                    Err(_) => continue,
+                };
+                if self.docs.get_doc_salsa(&uri).is_some() {
+                    continue;
+                }
+                let text = match tokio::fs::read_to_string(&path).await {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                self.ingest_if_not_open(uri, &text);
+                ingested = true;
+            }
+        }
+        ingested
+    }
+
     /// Request the client to apply a workspace edit.
     /// Returns true if the edit was successfully applied, false otherwise.
     pub async fn apply_workspace_edit(&self, edit: WorkspaceEdit) -> bool {
@@ -187,4 +343,26 @@ impl Backend {
             .map(|result| result.applied)
             .unwrap_or(false)
     }
+}
+
+/// Resolve a potentially-short class `name` to a fully-qualified name by
+/// looking it up in `index.use_imports` and `index.namespace`. Used when
+/// walking a vendor class hierarchy where parent names are stored as written
+/// in the source (e.g. `"AbstractController"` rather than the full FQN).
+fn resolve_name_to_fqn(name: &str, index: &crate::index::file_index::FileIndex) -> String {
+    // Already qualified — strip leading backslash and return.
+    if name.contains('\\') {
+        return name.trim_start_matches('\\').to_owned();
+    }
+    // Resolve through `use` imports (e.g. `use Symfony\...\AbstractController`).
+    for (alias, fqn) in &index.use_imports {
+        if alias.as_ref() == name {
+            return fqn.as_ref().trim_start_matches('\\').to_owned();
+        }
+    }
+    // Apply the current namespace as the last resort.
+    if let Some(ns) = &index.namespace {
+        return format!("{}\\{}", ns.trim_start_matches('\\'), name);
+    }
+    name.to_owned()
 }

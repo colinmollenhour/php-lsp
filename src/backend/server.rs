@@ -1060,7 +1060,17 @@ impl LanguageServer for Backend {
         params: TypeHierarchySupertypesParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
         // Phase J: resolve parents via the aggregate's `classes_by_name` map.
+        // Pre-load any direct vendor supertypes via PSR-4 so they appear in the
+        // workspace index before the lookup runs.
         let wi = self.workspace_index_async().await;
+        let loaded_new = self
+            .ensure_direct_supertypes_loaded(&params.item.name, &wi)
+            .await;
+        let wi = if loaded_new {
+            self.workspace_index_async().await
+        } else {
+            wi
+        };
         let result = supertypes_of_from_workspace(&params.item, &wi);
         Ok(if result.is_empty() {
             None

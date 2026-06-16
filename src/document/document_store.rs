@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use arc_swap::ArcSwap;
@@ -85,7 +85,22 @@ pub struct DocumentStore {
     /// re-run (for diagnostics) and then re-derived in a weaker form (for
     /// position queries). Bounded by the set of analyzed files (open files plus
     /// their open dependents); explicitly evicted in [`DocumentStore::remove`].
-    analysis_cache: DashMap<Url, (Arc<str>, Arc<mir_analyzer::FileAnalysis>)>,
+    /// Per-file mir analysis cache. Entry is `(source_arc, decl_ver, analysis)`.
+    /// A cache hit requires both the source pointer to match the live text AND
+    /// `decl_ver` to equal the current `decl_version` counter — the latter
+    /// ensures that a body-only edit to file A doesn't silently serve a stale
+    /// analysis for file B whose cached entry predates a declaration change in
+    /// an unrelated file C.
+    analysis_cache: DashMap<Url, (Arc<str>, u64, Arc<mir_analyzer::FileAnalysis>)>,
+    /// Monotonically increasing counter bumped whenever any file's `FileIndex`
+    /// (declaration-level info) changes. Cache entries that embed an older
+    /// version are considered stale and are recomputed on the next request.
+    decl_version: AtomicU64,
+    /// Last-seen `FileIndex` per URI. Used to decide whether a re-analysis
+    /// produced a declaration-level change (→ bump `decl_version`) or was a
+    /// body-only edit (→ leave `decl_version` unchanged so other files' cached
+    /// analyses remain valid).
+    decl_fingerprints: DashMap<Url, Arc<FileIndex>>,
     /// Cross-request cache for the whole-doc completion [`crate::types::type_map::TypeMap`]
     /// (`TypeMap::from_doc_with_meta`). Unlike `analysis_cache`, validity is
     /// purely per-file (the map reads only this doc plus PHPStorm meta), so the
@@ -119,6 +134,12 @@ pub struct DocumentStore {
     /// not discoverable by namespace walk. Pre-ingested into the AnalysisSession
     /// before each file analysis so mir doesn't emit false UndefinedFunction.
     autoload_uris: std::sync::RwLock<Vec<Url>>,
+    /// On-demand `FileIndex` store for vendor files loaded lazily via PSR-4
+    /// navigation. Vendor is excluded from the eager workspace scan, so files
+    /// ingested by `psr4_method_goto` are not in the salsa workspace_index;
+    /// this map fills that gap for hierarchy traversal. Populated by
+    /// `cache_vendor_index`; reads via `get_vendor_index`.
+    vendor_index_cache: DashMap<Url, Arc<FileIndex>>,
 }
 
 impl Default for DocumentStore {
@@ -143,6 +164,8 @@ impl DocumentStore {
             text_cache: DashMap::new(),
             parsed_cache: DashMap::new(),
             analysis_cache: DashMap::new(),
+            decl_version: AtomicU64::new(0),
+            decl_fingerprints: DashMap::new(),
             type_map_cache: DashMap::new(),
             workspace_files_dirty: AtomicBool::new(true),
             workspace,
@@ -150,6 +173,7 @@ impl DocumentStore {
             analysis_session: Mutex::new(None),
             session_cache_dir: OnceLock::new(),
             autoload_uris: std::sync::RwLock::new(Vec::new()),
+            vendor_index_cache: DashMap::new(),
         }
     }
 
@@ -263,13 +287,14 @@ impl DocumentStore {
             }
             drop(host);
             self.text_cache.insert(uri.clone(), text_arc);
-            // A content change to ANY file can invalidate cross-file analysis
-            // (mir resolves types/issues against other files). `cached_analysis`
-            // is validated only on a file's own `source_arc`, so a dependency
-            // edit wouldn't otherwise refresh an unchanged dependent's cached
-            // entry — drop the whole cache. Bounded by open files; recompute is
-            // ~6ms warm. Matches the salsa revision bump `set_text` just made.
-            self.analysis_cache.clear();
+            // Evict only this file's analysis. Declaration-level changes (which
+            // invalidate other files' cached analyses) are detected lazily in
+            // `cached_analysis` by comparing the new `FileIndex` against the
+            // stored fingerprint; if changed, `decl_version` is bumped and other
+            // files' cache entries (which carry the old version) become stale.
+            // Body-only edits leave `decl_version` unchanged so sibling files
+            // are served from cache without re-analysis.
+            self.analysis_cache.remove(uri);
         } else {
             let is_vendor = uri.as_str().contains("/vendor/");
             let ft = {
@@ -288,9 +313,13 @@ impl DocumentStore {
             self.file_texts.insert(uri.clone(), ft);
             self.text_cache.insert(uri.clone(), text_arc);
             self.workspace_files_dirty.store(true, Ordering::Release);
-            // A newly-ingested file may resolve references that were previously
-            // unresolved in already-analyzed files; invalidate cross-file caches.
-            self.analysis_cache.clear();
+            // A newly-ingested file may resolve previously-unresolved references
+            // in other files. Cross-file invalidation happens lazily: the first
+            // `cached_analysis` call for this file sees no fingerprint (old_fp =
+            // None), treats it as a declaration change, and bumps `decl_version`,
+            // making every other file's cache entry stale at that point.
+            // No eager clear needed — other files' entries are still valid until
+            // this file's declarations are first observed.
         }
     }
 
@@ -433,6 +462,7 @@ impl DocumentStore {
         self.text_cache.remove(uri);
         self.parsed_cache.remove(uri);
         self.analysis_cache.remove(uri);
+        self.decl_fingerprints.remove(uri);
         self.type_map_cache.remove(uri);
         // Also evict the file from the `AnalysisSession`'s internal state so
         // workspace symbol queries don't keep returning the deleted file's
@@ -835,7 +865,8 @@ impl DocumentStore {
         let doc = self.get_doc_salsa(uri)?;
         let source = doc.source_arc();
         let entry = self.analysis_cache.get(uri)?;
-        Arc::ptr_eq(&entry.0, &source).then(|| Arc::clone(&entry.1))
+        let cur_ver = self.decl_version.load(Ordering::Acquire);
+        (Arc::ptr_eq(&entry.0, &source) && entry.1 == cur_ver).then(|| Arc::clone(&entry.2))
     }
 
     #[tracing::instrument(skip_all)]
@@ -844,10 +875,12 @@ impl DocumentStore {
         let doc = self.get_doc_salsa(uri)?;
         let source = doc.source_arc();
 
+        let cur_ver = self.decl_version.load(Ordering::Acquire);
         if let Some(entry) = self.analysis_cache.get(uri)
             && Arc::ptr_eq(&entry.0, &source)
+            && entry.1 == cur_ver
         {
-            return Some(Arc::clone(&entry.1));
+            return Some(Arc::clone(&entry.2));
         }
 
         let php_version = self.with_host(|h| self.workspace.php_version(h.db()));
@@ -894,8 +927,27 @@ impl DocumentStore {
             let analyzer = mir_analyzer::FileAnalyzer::new(&session);
             Arc::new(analyzer.analyze(file.clone(), doc.source(), &owned_program, &source_map))
         };
+        // Compare the new FileIndex against the stored fingerprint. If
+        // declarations changed (or this is the first analysis), bump
+        // `decl_version` so other files' cache entries become stale. Body-only
+        // edits leave the counter unchanged, allowing sibling files to be
+        // served from cache on the next request.
+        let new_index = self.get_index_salsa(uri);
+        let old_fp = self.decl_fingerprints.get(uri).map(|e| Arc::clone(&*e));
+        let decl_changed = match (&old_fp, &new_index) {
+            (Some(old), Some(new)) => **old != **new,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        if decl_changed {
+            if let Some(idx) = new_index {
+                self.decl_fingerprints.insert(uri.clone(), idx);
+            }
+            self.decl_version.fetch_add(1, Ordering::Release);
+        }
+        let ver = self.decl_version.load(Ordering::Acquire);
         self.analysis_cache
-            .insert(uri.clone(), (source, Arc::clone(&analysis)));
+            .insert(uri.clone(), (source, ver, Arc::clone(&analysis)));
         Some(analysis)
     }
 
@@ -935,6 +987,18 @@ impl DocumentStore {
     /// Compact symbol index for every mirrored file.
     pub fn all_indexes(&self) -> Vec<(Url, Arc<FileIndex>)> {
         self.get_workspace_index_salsa().files.clone()
+    }
+
+    /// Store a lazily-loaded vendor `FileIndex` in the session cache.
+    /// Only call this for files that are not part of the normal workspace scan
+    /// (i.e. vendor files loaded on-demand by PSR-4 navigation).
+    pub fn cache_vendor_index(&self, uri: Url, index: Arc<FileIndex>) {
+        self.vendor_index_cache.insert(uri, index);
+    }
+
+    /// Retrieve a previously cached vendor `FileIndex`.
+    pub fn get_vendor_index(&self, uri: &Url) -> Option<Arc<FileIndex>> {
+        self.vendor_index_cache.get(uri).map(|e| Arc::clone(&*e))
     }
 
     /// Same as `all_indexes` but excludes `uri`.
@@ -1509,5 +1573,67 @@ mod tests {
                 "{u} should not have re-parsed because of an unrelated edit"
             );
         }
+    }
+
+    /// Incremental analysis cache: a body-only edit to file A (no declaration
+    /// changes) must not bump `decl_version`, so file B's cached analysis
+    /// survives. A declaration edit MUST bump the version so B's entry goes
+    /// stale.
+    #[test]
+    fn body_only_edit_does_not_invalidate_sibling_analysis_cache() {
+        let store = DocumentStore::new();
+        let ua = uri("/ic_a.php");
+        let ub = uri("/ic_b.php");
+
+        // Analyze both files to establish their fingerprints.
+        open(
+            &store,
+            ua.clone(),
+            "<?php\nfunction a() { return 1; }".to_string(),
+        );
+        open(
+            &store,
+            ub.clone(),
+            "<?php\nfunction b() { return 2; }".to_string(),
+        );
+        let _ = store.cached_analysis(&ua).unwrap();
+        let analysis_b_first = store.cached_analysis(&ub).unwrap();
+        let ver_after_warm = store.decl_version.load(Ordering::Acquire);
+
+        // Body-only edit to A: same function name, different body → FileIndex unchanged.
+        store.mirror_text(&ua, "<?php\nfunction a() { return 999; }");
+        let _ = store.cached_analysis(&ua);
+        let ver_after_body_edit = store.decl_version.load(Ordering::Acquire);
+        assert_eq!(
+            ver_after_warm, ver_after_body_edit,
+            "body-only edit must not bump decl_version"
+        );
+
+        // B's cached entry should still be valid (ptr-eq source AND same version).
+        let analysis_b_second = store.cached_analysis_if_fresh(&ub);
+        assert!(
+            analysis_b_second.is_some(),
+            "B's analysis should hit cache after body-only edit to A"
+        );
+        assert!(
+            Arc::ptr_eq(&analysis_b_first, &analysis_b_second.unwrap()),
+            "B's analysis should be the identical Arc (no re-analysis)"
+        );
+
+        // Declaration edit to A: rename the function → FileIndex changes.
+        store.mirror_text(&ua, "<?php\nfunction a_renamed() { return 999; }");
+        let _ = store.cached_analysis(&ua);
+        let ver_after_decl_edit = store.decl_version.load(Ordering::Acquire);
+        assert!(
+            ver_after_decl_edit > ver_after_body_edit,
+            "declaration edit must bump decl_version (was {ver_after_body_edit}, now {ver_after_decl_edit})"
+        );
+
+        // B's entry is now stale — cached_analysis_if_fresh must return None.
+        let analysis_b_stale = store.cached_analysis_if_fresh(&ub);
+        assert!(
+            analysis_b_stale.is_none(),
+            "B's analysis should be stale after A's declaration changed"
+        );
     }
 }

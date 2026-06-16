@@ -51,19 +51,22 @@ impl Backend {
                     return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
                 }
 
-                let resolved_class = analysis.as_deref().and_then(|a| {
+                // Keep both the short name (workspace-index lookup) and the full
+                // FQN Arc (PSR-4 vendor fallback). Arc<str> clone is an atomic
+                // increment — no heap allocation on the hot path.
+                let resolved_method_target = analysis.as_deref().and_then(|a| {
                     let off = crate::text::word_range_at(&source, position)
                         .map(|r| doc.view().byte_of_position(r.start))?;
                     let sym = a.symbol_at(off)?;
                     match &sym.kind {
                         mir_analyzer::ReferenceKind::MethodCall { class, .. }
                         | mir_analyzer::ReferenceKind::StaticCall { class, .. } => {
-                            Some(fqn_short_name(class).to_string())
+                            Some((fqn_short_name(class).to_string(), Arc::clone(class)))
                         }
                         _ => None,
                     }
                 });
-                if let Some(cls) = resolved_class {
+                if let Some((cls, class_fqn_arc)) = resolved_method_target {
                     let all_indexes = self.docs.all_indexes();
                     if let Some(loc) = find_method_in_class_hierarchy(&cls, &word, &all_indexes) {
                         let refined = self
@@ -79,6 +82,12 @@ impl Backend {
                             })
                             .unwrap_or(loc);
                         return Ok(Some(GotoDefinitionResponse::Scalar(refined)));
+                    }
+                    // Fallback: walk the PSR-4 vendor hierarchy for the resolved class.
+                    // trim_start_matches is a pointer offset (no allocation).
+                    let class_fqn = class_fqn_arc.trim_start_matches('\\');
+                    if let Some(loc) = self.psr4_method_goto(class_fqn, &word).await {
+                        return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
                     }
                 }
             }
@@ -120,6 +129,20 @@ impl Backend {
                             })
                             .unwrap_or(loc);
                         return Ok(Some(GotoDefinitionResponse::Scalar(refined)));
+                    }
+                    // Fallback: resolve the class FQN via the workspace index and
+                    // walk the PSR-4 vendor hierarchy starting from there.
+                    let class_fqn = all_indexes
+                        .iter()
+                        .find_map(|(_, idx)| {
+                            idx.classes
+                                .iter()
+                                .find(|c| c.name.as_ref() == first_cls.as_str())
+                                .map(|c| c.fqn.trim_start_matches('\\').to_owned())
+                        })
+                        .unwrap_or_else(|| first_cls.clone());
+                    if let Some(loc) = self.psr4_method_goto(&class_fqn, &word).await {
+                        return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
                     }
                 }
             }
