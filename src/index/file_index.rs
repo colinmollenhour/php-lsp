@@ -15,7 +15,9 @@
 /// crate-root glossary in `lib.rs`.
 use std::sync::Arc;
 
-use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind, UseKind};
+use php_ast::{
+    ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind, TraitAdaptationKind, UseKind,
+};
 
 use crate::document::ast::{ParsedDoc, format_type_hint};
 use crate::lang::docblock::parse_docblock;
@@ -78,6 +80,19 @@ pub struct ClassDef {
     pub doc_methods: Vec<DocMethodEntry>,
     /// Classes/traits pulled in via `@mixin ClassName` docblock tags.
     pub mixins: Vec<Arc<str>>,
+    /// Method aliases introduced by `use Trait { method as alias; }` in this class.
+    pub trait_method_aliases: Vec<TraitMethodAlias>,
+}
+
+/// A trait method alias introduced by `use Trait { method as alias; }`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TraitMethodAlias {
+    /// The new name assigned by the alias clause.
+    pub alias: Box<str>,
+    /// The original method name in the trait.
+    pub original: Box<str>,
+    /// The specific trait the alias targets, if spelled out (`Trait::method as alias`).
+    pub trait_name: Option<Box<str>>,
 }
 
 /// A method declared only via a `@method` docblock tag (no real body).
@@ -239,6 +254,7 @@ fn collect_stmts(
                     name_char: name_char(class_name_str),
                     doc_methods: Vec::new(),
                     mixins: Vec::new(),
+                    trait_method_aliases: Vec::new(),
                 };
 
                 for member in c.body.members.iter() {
@@ -305,6 +321,23 @@ fn collect_stmts(
                                     .traits
                                     .push(Arc::from(t.to_string_repr().as_ref()));
                             }
+                            for adaptation in tu.adaptations.iter() {
+                                if let TraitAdaptationKind::Alias {
+                                    method,
+                                    new_name: Some(new_name),
+                                    trait_name,
+                                    ..
+                                } = &adaptation.kind
+                                {
+                                    class_def.trait_method_aliases.push(TraitMethodAlias {
+                                        alias: Box::from(new_name.to_string_repr().as_ref()),
+                                        original: Box::from(method.to_string_repr().as_ref()),
+                                        trait_name: trait_name
+                                            .as_ref()
+                                            .map(|n| Box::from(n.to_string_repr().as_ref())),
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -359,6 +392,7 @@ fn collect_stmts(
                     name_char: name_char(i_name),
                     doc_methods: Vec::new(),
                     mixins: Vec::new(),
+                    trait_method_aliases: Vec::new(),
                 };
 
                 for member in i.body.members.iter() {
@@ -412,6 +446,7 @@ fn collect_stmts(
                     name_char: name_char(t_name),
                     doc_methods: Vec::new(),
                     mixins: Vec::new(),
+                    trait_method_aliases: Vec::new(),
                 };
 
                 for member in t.body.members.iter() {
@@ -458,6 +493,23 @@ fn collect_stmts(
                                     .traits
                                     .push(Arc::from(tr.to_string_repr().as_ref()));
                             }
+                            for adaptation in tu.adaptations.iter() {
+                                if let TraitAdaptationKind::Alias {
+                                    method,
+                                    new_name: Some(new_name),
+                                    trait_name,
+                                    ..
+                                } = &adaptation.kind
+                                {
+                                    trait_def.trait_method_aliases.push(TraitMethodAlias {
+                                        alias: Box::from(new_name.to_string_repr().as_ref()),
+                                        original: Box::from(method.to_string_repr().as_ref()),
+                                        trait_name: trait_name
+                                            .as_ref()
+                                            .map(|n| Box::from(n.to_string_repr().as_ref())),
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -489,6 +541,7 @@ fn collect_stmts(
                     name_char: name_char(e_name),
                     doc_methods: Vec::new(),
                     mixins: Vec::new(),
+                    trait_method_aliases: Vec::new(),
                 };
 
                 for member in e.body.members.iter() {

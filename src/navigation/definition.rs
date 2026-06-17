@@ -169,13 +169,36 @@ pub fn find_method_in_class_hierarchy(
                 }
                 for m in &cls.methods {
                     if m.name.as_ref() == method_name {
-                        return Some(zero_width_location(uri, m.start_line));
+                        return Some(precise_method_location(
+                            uri,
+                            m.start_line,
+                            m.name_char,
+                            m.name.len(),
+                        ));
                     }
                 }
                 // `@method` docblock declarations — navigates to the tag line.
                 for dm in &cls.doc_methods {
                     if dm.name.as_ref() == method_name {
                         return Some(zero_width_location(uri, dm.start_line));
+                    }
+                }
+                // Trait alias: `use Trait { original as alias }` — redirect the
+                // search to the original method name in the aliased trait.
+                for alias in &cls.trait_method_aliases {
+                    if alias.alias.as_ref() == method_name {
+                        let orig = alias.original.as_ref();
+                        let search_in: Vec<&str> = match &alias.trait_name {
+                            Some(t) => vec![t.as_ref()],
+                            None => cls.traits.iter().map(|t| t.as_ref()).collect(),
+                        };
+                        for trt_name in search_in {
+                            if let Some(loc) =
+                                find_method_in_class_hierarchy(trt_name, orig, indexes)
+                            {
+                                return Some(loc);
+                            }
+                        }
                     }
                 }
                 // Traits first (PHP MRO), then `@mixin` targets, then parent.
@@ -192,6 +215,21 @@ pub fn find_method_in_class_hierarchy(
         }
     }
     None
+}
+
+fn precise_method_location(uri: &Url, line: u32, name_char: u32, name_len: usize) -> Location {
+    let start = Position {
+        line,
+        character: name_char,
+    };
+    let end = Position {
+        line,
+        character: name_char + name_len as u32,
+    };
+    Location {
+        uri: uri.clone(),
+        range: Range { start, end },
+    }
 }
 
 /// Find the name range of method `method_name` declared directly on
