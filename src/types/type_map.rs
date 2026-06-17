@@ -425,6 +425,13 @@ fn collect_types_expr(
                 {
                     map.insert(format!("${}", var_name.as_str()), inferred);
                 }
+                // First-class callable syntax (`strlen(...)`, `$obj->method(...)`)
+                // produces a `Closure` instance (PHP 8.1+).  Register the variable
+                // as Closure so hover and member-completion recognise it.
+                if let ExprKind::CallableCreate(_) = &assign.value.kind {
+                    map.entry(format!("${}", var_name.as_str()))
+                        .or_insert_with(|| "Closure".to_string());
+                }
             }
             collect_types_expr(source, assign.value, map, meta, cursor_byte, doc);
         }
