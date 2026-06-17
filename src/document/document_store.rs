@@ -1111,20 +1111,6 @@ impl DocumentStore {
     }
 }
 
-/// Run `file_refs` for every workspace file in parallel.
-///
-/// `db` clones are cheap (they share the same `Arc<Zalsa>` memo store), so
-/// results computed on any clone are immediately visible to all others at the
-/// same revision.  After this returns, the sequential loop inside `symbol_refs`
-/// only does cheap memo lookups instead of running `StatementsAnalyzer` on
-/// every file one-by-one.
-///
-/// Per-task `salsa::Cancelled` is caught and swallowed.  If the revision was
-/// bumped, the main thread's next salsa call inside `symbol_refs` will raise
-/// `Cancelled` too and `snapshot_query` retries the whole operation from
-/// scratch.  If the revision was not bumped, any file whose task was cancelled
-/// before completion simply has no memo entry and `symbol_refs`'s sequential
-/// loop recomputes it.
 // `warm_file_refs_parallel` removed: the analyzer-side reference index is
 // now owned by `AnalysisSession` and warmed by `ingest_file`. This salsa-side
 // helper has no counterpart in the new architecture.

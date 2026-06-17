@@ -105,12 +105,12 @@ pub fn render_text_edits(resp: &Value) -> String {
         // Escape newlines for visibility in snapshots
         let escaped = text.replace('\n', "\\n").replace('\r', "\\r");
         out.push_str(&format!(
-            "{}:{}-{}:{} → {}\n",
+            "{}:{}-{}:{} → {:?}\n",
             s["line"].as_u64().unwrap_or(0),
             s["character"].as_u64().unwrap_or(0),
             en["line"].as_u64().unwrap_or(0),
             en["character"].as_u64().unwrap_or(0),
-            format!("{:?}", escaped),
+            escaped,
         ));
     }
     out.trim_end_matches('\n').to_owned()
@@ -419,10 +419,10 @@ pub(crate) fn render_signature_help(resp: &Value) -> String {
         let label = sig["label"].as_str().unwrap_or("");
         let marker = if i == active_sig { "▶ " } else { "  " };
         out.push_str(&format!("{marker}{label}"));
-        if i == active_sig {
-            if let Some(p) = active_param {
-                out.push_str(&format!("  @param{p}"));
-            }
+        if i == active_sig
+            && let Some(p) = active_param
+        {
+            out.push_str(&format!("  @param{p}"));
         }
         out.push('\n');
     }
@@ -668,7 +668,7 @@ pub fn assert_linked_editing_ranges_share_text(resp: &Value, source: &str) {
                 start_idx = i;
                 break;
             }
-            col += ch.len_utf16() as usize;
+            col += ch.len_utf16();
             start_idx = i + 1;
         }
         let mut end_idx = start_idx;
@@ -678,7 +678,7 @@ pub fn assert_linked_editing_ranges_share_text(resp: &Value, source: &str) {
                 end_idx = i;
                 break;
             }
-            col += ch.len_utf16() as usize;
+            col += ch.len_utf16();
             end_idx = i + 1;
         }
         Some(chars[start_idx..end_idx].iter().collect())
@@ -968,7 +968,7 @@ pub fn render_semantic_tokens(resp: &Value, legend_types: &[&str]) -> String {
         return "<no tokens>".to_owned();
     }
     let ints: Vec<u64> = data.iter().map(|v| v.as_u64().unwrap_or(0)).collect();
-    if ints.len() % 5 != 0 {
+    if !ints.len().is_multiple_of(5) {
         return format!("<malformed data: {} ints, not a multiple of 5>", ints.len());
     }
     let mut rows = Vec::new();
@@ -988,12 +988,15 @@ pub fn render_semantic_tokens(resp: &Value, legend_types: &[&str]) -> String {
 
 // ---------- annotation-based assertion helpers ----------
 
+/// A navigation annotation: `(path, (start_line, start_char, end_line, end_char), tag)`.
+pub(crate) type NavAnnotation = (String, (u32, u32, u32, u32), String);
+
 /// Collect `// ^^^ <tag>` annotations across every fixture file, filtered by
 /// the set of accepted tags. Each returned tuple is `(path, range, tag)`.
 pub(crate) fn collect_navigation_annotations(
     fx: &super::fixture::Fixture,
     accept: &[&str],
-) -> Vec<(String, (u32, u32, u32, u32), String)> {
+) -> Vec<NavAnnotation> {
     let mut out = Vec::new();
     for file in &fx.files {
         for anno in &file.annotations {
@@ -1058,9 +1061,11 @@ fn validate_span(
         let text = &line[start_char..end_char];
 
         // Span should start with a symbol (letter, underscore, or digit)
-        if !text.chars().next().map_or(false, |c| {
-            c.is_alphabetic() || c == '_' || c.is_ascii_digit()
-        }) {
+        if !text
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_' || c.is_ascii_digit())
+        {
             return Some(format!(
                 "span [{}:{}] on line {} points to invalid start: {:?} (expected symbol)\nline: {}",
                 start_char, end_char, start_line, text, line
@@ -1073,7 +1078,7 @@ fn validate_span(
 
 pub(crate) fn assert_locations_match(
     resp: &Value,
-    expected: &[(String, (u32, u32, u32, u32), String)],
+    expected: &[NavAnnotation],
     root_uri: &str,
     label: &str,
 ) {
@@ -1168,7 +1173,7 @@ fn annotation_within_range(expected: &(u32, u32, u32, u32), actual: &(u32, u32, 
 
 pub(crate) fn assert_highlights_match(
     resp: &Value,
-    expected: &[(String, (u32, u32, u32, u32), String)],
+    expected: &[NavAnnotation],
     cursor_path: &str,
     label: &str,
 ) {
@@ -1213,15 +1218,15 @@ pub(crate) fn assert_highlights_match(
                     "write" => Some(3), // DocumentHighlightKind::WRITE
                     _ => None,          // "ref" or other tags don't enforce kind
                 };
-                if let Some(ek) = expected_kind {
-                    if actual[i].4 != Some(ek) {
-                        kind_mismatches.push((
-                            format!("{ep}:{:?}", er),
-                            tag.clone(),
-                            expected_kind,
-                            actual[i].4,
-                        ));
-                    }
+                if let Some(ek) = expected_kind
+                    && actual[i].4 != Some(ek)
+                {
+                    kind_mismatches.push((
+                        format!("{ep}:{:?}", er),
+                        tag.clone(),
+                        expected_kind,
+                        actual[i].4,
+                    ));
                 }
             }
             None => missing.push((ep.clone(), *er, tag.clone())),

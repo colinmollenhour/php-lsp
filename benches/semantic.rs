@@ -2,20 +2,20 @@
 //! that powers semantic diagnostics.
 //!
 //! Covers three regimes:
-//!   - `single_file`      — fresh AnalysisSession per iter (cold analyze cost)
-//!   - `edit_loop`        — persistent session, repeated analyze on the same
-//!                          file (models per-keystroke re-analyze cost on a
-//!                          small workspace)
-//!   - `laravel_scale`    — full Laravel ingested into the session once, then
-//!                          one representative file re-analyzed (models
-//!                          per-keystroke cost in a realistic large workspace)
+//! - `single_file` — fresh AnalysisSession per iter (cold analyze cost)
+//! - `edit_loop` — persistent session, repeated analyze on the same file
+//!   (models per-keystroke re-analyze cost on a small workspace)
+//! - `laravel_scale` — full Laravel ingested into the session once, then one
+//!   representative file re-analyzed (models per-keystroke cost in a realistic
+//!   large workspace)
 //!
 //! The Laravel-scale bench is auto-skipped when the fixture is absent.
 //! Run `scripts/setup_laravel_fixture.sh` to enable it.
 
 use std::sync::Arc;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use tower_lsp::lsp_types::Url;
 
 use php_lsp::ast::ParsedDoc;
@@ -37,6 +37,8 @@ fn all_enabled() -> DiagnosticsConfig {
         deprecated_calls: true,
         duplicate_declarations: true,
         unused_symbols: false,
+        missing_types: false,
+        mixed_usage: false,
     }
 }
 

@@ -349,7 +349,7 @@ fn laravel_docs() -> Option<OtherDocs> {
     let docs: OtherDocs = walkdir::WalkDir::new(&fixture_dir)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "php"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "php"))
         .filter_map(|e| {
             let url = Url::from_file_path(e.path()).ok()?;
             let src = std::fs::read_to_string(e.path()).ok()?;
@@ -866,7 +866,7 @@ fn laravel_sources() -> Option<Vec<(Url, String)>> {
     let sources: Vec<(Url, String)> = walkdir::WalkDir::new(&fixture_dir)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "php"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "php"))
         .filter_map(|e| {
             let url = Url::from_file_path(e.path()).ok()?;
             let src = std::fs::read_to_string(e.path()).ok()?;

@@ -19,7 +19,7 @@ async fn completion_resolve_adds_documentation_to_function() {
     let items: Vec<_> = resp["result"]
         .as_array()
         .or_else(|| resp["result"]["items"].as_array())
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     let item = items.iter().find(|i| {
@@ -52,7 +52,7 @@ async fn completion_resolve_idempotent_when_resolved() {
     let items: Vec<_> = resp["result"]
         .as_array()
         .or_else(|| resp["result"]["items"].as_array())
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     if !items.is_empty() {
@@ -91,7 +91,7 @@ class Math {
     };
     let actions: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     let extract_action = actions.iter().find(|a| {
@@ -146,7 +146,7 @@ function $0greet() {
     };
     let actions: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     let mut snapshots: Vec<String> = Vec::new();
@@ -188,7 +188,7 @@ class TestCase {
     let resp = s.code_lens("test.php").await;
     let lenses: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     let mut results = Vec::new();
@@ -232,7 +232,7 @@ class Service {
     let resp = s.code_lens("service.php").await;
     let lenses: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     for lens in lenses {
@@ -260,7 +260,7 @@ async fn document_link_resolve_returns_target() {
     let resp = s.document_link("links.php").await;
     let links: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     let mut results = Vec::new();
@@ -292,7 +292,7 @@ async fn document_link_resolve_handles_http_links() {
     let resp = s.document_link("doc.php").await;
     let links: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     for link in links {
@@ -331,7 +331,7 @@ $0process("Alice", 30);$0
     };
     let hints: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     let mut snapshots: Vec<String> = Vec::new();
@@ -379,7 +379,7 @@ function $0getName(string $first, string $last): string {}
     };
     let hints: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     for hint in hints {
@@ -414,7 +414,7 @@ class Database {}
     let resp = s.workspace_symbols("Database").await;
     let symbols: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     if !symbols.is_empty() {
@@ -448,7 +448,7 @@ function tested() {}
     let resp = s.workspace_symbols("test").await;
     let symbols: Vec<_> = resp["result"]
         .as_array()
-        .map(|a| a.iter().cloned().collect())
+        .map(|a| a.to_vec())
         .unwrap_or_default();
 
     assert!(!symbols.is_empty(), "should find symbols matching 'test'");

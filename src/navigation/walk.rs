@@ -1286,7 +1286,7 @@ mod tests {
         refs_in_stmts(src, &doc.program().stmts, "run", &mut out);
         let texts = spans_to_strs(src, &out);
         // method decl name + method call name both appear
-        assert!(texts.iter().any(|&t| t == "run"));
+        assert!(texts.contains(&"run"));
     }
 
     #[test]

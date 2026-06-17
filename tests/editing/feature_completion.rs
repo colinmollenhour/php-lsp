@@ -3104,10 +3104,12 @@ async fn completion_include_path_insert_text_includes_prefix() {
     let boot_item = items
         .iter()
         .find(|i| i["label"].as_str() == Some("Boot.php"))
-        .expect(&format!(
-            "Boot.php must be in completions for require './src/$0. Got items: {:#?}",
-            items
-        ));
+        .unwrap_or_else(|| {
+            panic!(
+                "Boot.php must be in completions for require './src/$0. Got items: {:#?}",
+                items
+            )
+        });
     assert_eq!(
         boot_item["insertText"].as_str(),
         Some("./src/Boot.php"),
@@ -3147,10 +3149,12 @@ async fn completion_include_path_folder_has_folder_kind() {
     let folder_item = items
         .iter()
         .find(|i| i["label"].as_str() == Some("modules") || i["label"].as_str() == Some("modules/"))
-        .expect(&format!(
-            "require '$0 must include 'modules' folder. Got items: {:#?}",
-            items
-        ));
+        .unwrap_or_else(|| {
+            panic!(
+                "require '$0 must include 'modules' folder. Got items: {:#?}",
+                items
+            )
+        });
     assert_eq!(
         folder_item["kind"].as_u64(),
         Some(19),
@@ -4099,7 +4103,7 @@ Registry::$0
     );
 }
 
-/// Variables declared in another file must not appear in completions for the current file.
+// Variables declared in another file must not appear in completions for the current file.
 // === Invoked completion (no trigger char) member access ===
 
 /// `(new Foo())->$0` invoked without a trigger char must return Foo's members,

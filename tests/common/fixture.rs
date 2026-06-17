@@ -168,9 +168,7 @@ fn split_files(src: &str) -> Vec<(String, String)> {
             if let Some(prev) = current.take() {
                 out.push(prev);
             }
-            let path = rest
-                .trim_end_matches(|c: char| c == '\n' || c == '\r')
-                .trim();
+            let path = rest.trim_end_matches(['\n', '\r']).trim();
             current = Some((path.to_owned(), String::new()));
         } else if let Some((_, buf)) = current.as_mut() {
             buf.push_str(line);
@@ -331,7 +329,7 @@ pub fn severity_number(name: &str) -> u64 {
 /// Assert that the server's `publishDiagnostics` payload for one file
 /// contains exactly the annotations parsed from the fixture. Order-
 /// independent: each annotation must match at least one diagnostic on range
-/// + severity, and the diagnostic's `message` must *contain* the expected
+/// and severity, and the diagnostic's `message` must *contain* the expected
 /// message substring. Extra diagnostics not covered by annotations cause a
 /// failure — annotations are a full specification of what we expect.
 #[track_caller]

@@ -106,11 +106,11 @@ impl Client {
                 {
                     return msg;
                 }
-                if msg.get("method").is_some() {
-                    if let Some(id) = msg.get("id") {
-                        let ack = json!({"jsonrpc":"2.0","id":id,"result":null});
-                        self.write.write_all(&frame(&ack)).await.unwrap();
-                    }
+                if msg.get("method").is_some()
+                    && let Some(id) = msg.get("id")
+                {
+                    let ack = json!({"jsonrpc":"2.0","id":id,"result":null});
+                    self.write.write_all(&frame(&ack)).await.unwrap();
                 }
             }
         })
@@ -125,11 +125,11 @@ impl Client {
                 if msg.get("method") == Some(&json!("$/php-lsp/indexReady")) {
                     return;
                 }
-                if msg.get("method").is_some() {
-                    if let Some(id) = msg.get("id") {
-                        let ack = json!({"jsonrpc":"2.0","id":id,"result":null});
-                        self.write.write_all(&frame(&ack)).await.unwrap();
-                    }
+                if msg.get("method").is_some()
+                    && let Some(id) = msg.get("id")
+                {
+                    let ack = json!({"jsonrpc":"2.0","id":id,"result":null});
+                    self.write.write_all(&frame(&ack)).await.unwrap();
                 }
             }
         })
@@ -688,8 +688,8 @@ async fn main() {
             .filter_map(|e| e.ok())
             .find(|e| e.path().extension().is_some_and(|x| x == "php"))
             .map(|e| e.path().to_path_buf());
-        if let Some(target) = target {
-            if let Some(r) = run_scenario(
+        if let Some(target) = target
+            && let Some(r) = run_scenario(
                 "symfony-warm",
                 Some(&symfony_root),
                 &target,
@@ -699,9 +699,8 @@ async fn main() {
                 EDITS_PER_LARGE_SCENARIO,
             )
             .await
-            {
-                results.push(r);
-            }
+        {
+            results.push(r);
         }
     } else {
         eprintln!("tests/fixtures/symfony-demo missing — skipping");

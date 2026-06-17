@@ -15,8 +15,10 @@ pub fn stub_class_members(session: &AnalysisSession, fqcn: &str) -> Option<Class
     session.read(|db| {
         let key = Fqcn::from_str(db, normalized);
         let class_like = find_class_like(db, key)?;
-        let mut members = ClassMembers::default();
-        members.found = true;
+        let mut members = ClassMembers {
+            found: true,
+            ..Default::default()
+        };
         for (name, method) in class_like.own_methods() {
             members.methods.push((name.to_string(), method.is_static));
         }

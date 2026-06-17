@@ -350,7 +350,7 @@ undefined_function();
         );
         let severity = item["severity"].as_u64().unwrap();
         assert!(
-            severity >= 1 && severity <= 4,
+            (1..=4).contains(&severity),
             "severity should be 1-4, got {}",
             severity
         );

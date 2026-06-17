@@ -200,15 +200,15 @@ impl TestClient {
                 }
                 // Server-to-client request (e.g. WorkDoneProgressCreate during
                 // workspace scan): reply null so the server isn't blocked.
-                if msg.get("method").is_some() {
-                    if let Some(id) = msg.get("id") {
-                        let response = json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": null,
-                        });
-                        self.write.write_all(&frame(&response)).await.unwrap();
-                    }
+                if msg.get("method").is_some()
+                    && let Some(id) = msg.get("id")
+                {
+                    let response = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": null,
+                    });
+                    self.write.write_all(&frame(&response)).await.unwrap();
                 }
             }
         })
@@ -237,20 +237,20 @@ impl TestClient {
             while !remaining.is_empty() {
                 let msg = read_msg(&mut self.read).await;
                 if msg.get("method") == Some(&json!("textDocument/publishDiagnostics")) {
-                    if let Some(uri) = msg["params"]["uri"].as_str() {
-                        if remaining.remove(uri) {
-                            collected.insert(uri.to_string(), msg);
-                        }
+                    if let Some(uri) = msg["params"]["uri"].as_str()
+                        && remaining.remove(uri)
+                    {
+                        collected.insert(uri.to_string(), msg);
                     }
-                } else if msg.get("method").is_some() {
-                    if let Some(id) = msg.get("id") {
-                        let response = json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": null,
-                        });
-                        self.write.write_all(&frame(&response)).await.unwrap();
-                    }
+                } else if msg.get("method").is_some()
+                    && let Some(id) = msg.get("id")
+                {
+                    let response = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": null,
+                    });
+                    self.write.write_all(&frame(&response)).await.unwrap();
                 }
             }
         })
@@ -276,15 +276,15 @@ impl TestClient {
                     if let Some(uri) = msg["params"]["uri"].as_str() {
                         uris.push(uri.to_string());
                     }
-                } else if msg.get("method").is_some() {
-                    if let Some(id) = msg.get("id") {
-                        let response = json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": null,
-                        });
-                        self.write.write_all(&frame(&response)).await.unwrap();
-                    }
+                } else if msg.get("method").is_some()
+                    && let Some(id) = msg.get("id")
+                {
+                    let response = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": null,
+                    });
+                    self.write.write_all(&frame(&response)).await.unwrap();
                 }
             }
         })
@@ -329,15 +329,15 @@ impl TestClient {
                 if msg.get("method") == Some(&json!("$/php-lsp/indexReady")) {
                     return;
                 }
-                if msg.get("method").is_some() {
-                    if let Some(id) = msg.get("id") {
-                        let response = json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": null,
-                        });
-                        self.write.write_all(&frame(&response)).await.unwrap();
-                    }
+                if msg.get("method").is_some()
+                    && let Some(id) = msg.get("id")
+                {
+                    let response = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": null,
+                    });
+                    self.write.write_all(&frame(&response)).await.unwrap();
                 }
             }
         })
@@ -354,15 +354,15 @@ impl TestClient {
                 if msg.get("method") == Some(&json!("$/php-lsp/indexReady")) {
                     return;
                 }
-                if msg.get("method").is_some() {
-                    if let Some(id) = msg.get("id") {
-                        let response = json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": null,
-                        });
-                        self.write.write_all(&frame(&response)).await.unwrap();
-                    }
+                if msg.get("method").is_some()
+                    && let Some(id) = msg.get("id")
+                {
+                    let response = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": null,
+                    });
+                    self.write.write_all(&frame(&response)).await.unwrap();
                 }
             }
         })

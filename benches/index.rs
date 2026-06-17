@@ -1,4 +1,5 @@
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use tower_lsp::lsp_types::Url;
 
 use php_lsp::document_store::DocumentStore;
@@ -108,7 +109,7 @@ fn bench_workspace_scan_laravel(c: &mut Criterion) {
     let php_files: Vec<(tower_lsp::lsp_types::Url, String)> = walkdir::WalkDir::new(&fixture_dir)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "php"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "php"))
         .filter_map(|e| {
             let url = tower_lsp::lsp_types::Url::from_file_path(e.path()).ok()?;
             let src = std::fs::read_to_string(e.path()).ok()?;
@@ -217,7 +218,10 @@ fn bench_sync_workspace_clean(c: &mut Criterion) {
             BenchmarkId::from_parameter(format!("{n}_files")),
             &n,
             |b, _| {
-                b.iter(|| black_box(store.sync_workspace_files()));
+                b.iter(|| {
+                    store.sync_workspace_files();
+                    black_box(())
+                });
             },
         );
     }
@@ -256,7 +260,8 @@ fn bench_sync_workspace_dirty(c: &mut Criterion) {
                     // Reset the dirty flag before each call to simulate the
                     // old behaviour where sync always ran the full path.
                     store.mark_workspace_files_dirty();
-                    black_box(store.sync_workspace_files());
+                    store.sync_workspace_files();
+                    black_box(());
                 });
             },
         );
@@ -271,9 +276,9 @@ fn bench_sync_workspace_dirty(c: &mut Criterion) {
 /// this is what a references request looks like the first time it's called
 /// after workspace scan has only stored `FileIndex`, not `ParsedDoc`):
 ///
-/// - `all_docs_for_scan`  (old path): parses *every* file via `get_doc_salsa`.
+/// - `all_docs_for_scan` (old path): parses *every* file via `get_doc_salsa`.
 /// - `candidate_docs_for` (new path): scans `text_cache` by substring, then
-///    parses only the matching candidates.
+///   parses only the matching candidates.
 ///
 /// Three word selectivities:
 /// - `sparse`:  word in ~1% of files  (realistic: a rare method name)
@@ -357,7 +362,7 @@ fn bench_candidate_docs_prefilter_laravel(c: &mut Criterion) {
     let php_files: Vec<(Url, String)> = walkdir::WalkDir::new(&fixture_dir)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "php"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "php"))
         .filter_map(|e| {
             let url = Url::from_file_path(e.path()).ok()?;
             let src = std::fs::read_to_string(e.path()).ok()?;

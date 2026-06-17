@@ -40,7 +40,9 @@ fn validate_lsp_spans(resp: &Value, _file_path: &str, fixture: &Fixture) {
         };
 
         // Extract just the filename from the URI
-        let file_path = uri.and_then(|u| u.split('/').last()).unwrap_or("unknown");
+        let file_path = uri
+            .and_then(|u| u.split('/').next_back())
+            .unwrap_or("unknown");
 
         // Find the file in the fixture
         let source = match fixture.files.iter().find(|f| f.path == file_path) {
@@ -90,7 +92,7 @@ fn validate_lsp_spans(resp: &Value, _file_path: &str, fixture: &Fixture) {
             // A leading `\` is valid: fully-qualified names (`\App\Widget`) are
             // legitimate reference spans. A leading `$` is valid for PHP variables.
             // A leading `&` is valid for by-reference use-clause bindings (`use (&$x)`).
-            if !text.chars().next().map_or(false, |c| {
+            if !text.chars().next().is_some_and(|c| {
                 c.is_alphabetic()
                     || c == '_'
                     || c.is_ascii_digit()
@@ -1645,7 +1647,7 @@ impl TestServer {
             })
             .collect();
 
-        edits.sort_by(|a, b| (b.0.0, b.0.1).cmp(&(a.0.0, a.0.1)));
+        edits.sort_by_key(|e| std::cmp::Reverse((e.0.0, e.0.1)));
 
         let lines: Vec<&str> = original_content.lines().collect();
         let mut result = original_content.clone();

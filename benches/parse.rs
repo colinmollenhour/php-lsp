@@ -1,7 +1,6 @@
-use criterion::{
-    BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
-};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use php_lsp::ast::ParsedDoc;
+use std::hint::black_box;
 
 const FIXTURES: &[(&str, &str)] = &[
     ("small_class", include_str!("fixtures/small_class.php")),

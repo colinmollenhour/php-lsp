@@ -22,10 +22,10 @@ fn cache_root() -> Option<std::path::PathBuf> {
 }
 
 fn wipe_cache() {
-    if let Some(d) = cache_root() {
-        if d.exists() {
-            let _ = std::fs::remove_dir_all(&d);
-        }
+    if let Some(d) = cache_root()
+        && d.exists()
+    {
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
 

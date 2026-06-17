@@ -548,19 +548,19 @@ mod tests {
         let cache = WorkspaceCache::with_dir(cache_dir.path().to_path_buf());
         // Populate cache via stat key.
         file_contents.par_iter().for_each(|(uri, text)| {
-            if let Some(path) = uri.to_file_path().ok() {
-                if let Ok(meta) = std::fs::metadata(&path) {
-                    let mtime = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let key = WorkspaceCache::key_for_stat(uri.as_str(), mtime, meta.len());
-                    let doc = parse_document_no_diags(text);
-                    let idx = crate::index::file_index::FileIndex::extract(&doc);
-                    let _ = cache.write(&key, &idx);
-                }
+            if let Ok(path) = uri.to_file_path()
+                && let Ok(meta) = std::fs::metadata(&path)
+            {
+                let mtime = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let key = WorkspaceCache::key_for_stat(uri.as_str(), mtime, meta.len());
+                let doc = parse_document_no_diags(text);
+                let idx = crate::index::file_index::FileIndex::extract(&doc);
+                let _ = cache.write(&key, &idx);
             }
         });
         let t4 = Instant::now();
@@ -568,7 +568,7 @@ mod tests {
         let cache_read_ns = Arc::new(AtomicU64::new(0));
         let hits = Arc::new(AtomicU64::new(0));
         file_contents.par_iter().for_each(|(uri, _)| {
-            if let Some(path) = uri.to_file_path().ok() {
+            if let Ok(path) = uri.to_file_path() {
                 let ts = Instant::now();
                 let meta = std::fs::metadata(&path).ok();
                 stat_ns.fetch_add(ts.elapsed().as_nanos() as u64, Ordering::Relaxed);

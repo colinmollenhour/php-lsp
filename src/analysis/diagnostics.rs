@@ -77,7 +77,6 @@ pub fn parse_document(source: &str) -> (ParsedDoc, Vec<Diagnostic>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     /// Probe: print every (start, end, zero_width) tuple for a wider set of
     /// error-inducing snippets to see if any zero-width span can be made to

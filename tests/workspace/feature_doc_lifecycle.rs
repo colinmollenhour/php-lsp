@@ -119,11 +119,10 @@ async fn did_save_republishes_diagnostics_for_duplicate_functions() {
 
     let save_notif = server.save("save_dup.php").await;
     assert!(
-        save_notif["params"]["diagnostics"]
+        !save_notif["params"]["diagnostics"]
             .as_array()
             .unwrap()
-            .len()
-            >= 1,
+            .is_empty(),
         "expected >=1 diagnostic after save with duplicate functions: {save_notif:?}"
     );
 }

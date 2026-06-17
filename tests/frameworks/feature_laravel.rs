@@ -784,7 +784,7 @@ async fn laravel_workspace_symbols_class_name() {
     );
     let names: Vec<&str> = items.iter().filter_map(|i| i["name"].as_str()).collect();
     assert!(
-        names.iter().any(|n| *n == "AuthManager"),
+        names.contains(&"AuthManager"),
         "expected 'AuthManager' in results, got: {names:?}"
     );
 }

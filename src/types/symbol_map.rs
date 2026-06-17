@@ -88,6 +88,12 @@ impl SymbolMap {
     pub fn len(&self) -> usize {
         self.entries.len()
     }
+
+    /// Whether the map holds no symbols.
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 /// Parse a doc-comment already attached by the parser and render it as markdown.

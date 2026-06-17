@@ -46,11 +46,11 @@ async fn references_fast_path_final_class_cross_file() {
         .collect();
 
     assert!(
-        uris.iter().any(|u| *u == caller_uri.as_str()),
+        uris.contains(&caller_uri.as_str()),
         "caller.php missing: {uris:?}"
     );
     assert!(
-        !uris.iter().any(|u| *u == ignored_uri.as_str()),
+        !uris.contains(&ignored_uri.as_str()),
         "ignored.php (untyped) must be excluded by fast path: {uris:?}"
     );
 }
