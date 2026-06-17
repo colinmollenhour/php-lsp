@@ -2,6 +2,37 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.11.0] — 2026-06-17
+
+### Features
+
+- **PSR-4 vendor navigation**: Go-to-definition and call-hierarchy now resolve methods through the class hierarchy in `vendor/` files not covered by the workspace scan. A new `psr4_method_goto` helper lazily walks supertypes, caching each `FileIndex` in a `vendor_index_cache` so repeated navigations are cheap.
+- **Incremental analysis cache**: Per-file eviction replaces the previous full `analysis_cache.clear()` on every keystroke. Body-only edits evict only the changed file; declaration changes bump a `decl_version` counter that lazily invalidates sibling files on next access, avoiding unnecessary re-analysis across the workspace.
+- **Static member completion (`::`)**: Completion now detects `::` context and offers static members (methods, constants, enum cases) for the resolved class.
+- **Property-declaration hover and method implement**: Hovering a property declaration surfaces its type, and go-to-implementation resolves methods across files.
+- **Static-method hover via workspace index**: When the primary mir path returns nothing (e.g. `Str::camel()` where `Str.php` is not open), the class token before `::` is resolved through use-aliases and the signature is looked up in `FileIndex`.
+- **`use function` quick-fix**: An `UndefinedFunction` diagnostic for a function defined in a namespaced workspace file now offers a quick-fix that inserts `use function Namespace\fn;`.
+- **Enhanced startup messages and debug mode**: Clearer server startup logging plus an opt-in debug mode.
+
+### Bug Fixes
+
+- **Use-import alias resolution**: Aliased imports (`use ... as ...`) are now resolved consistently across static `::` completion, supertypes/find-implementations, and the `subtypes_of` index.
+- **Cross-file member completion after method chains**: Member completions now resolve after method-chain receivers (`$obj->a()->b()->…`).
+- **Autoload helper false positives**: `autoload.files` helper functions are pre-ingested so they no longer raise false `UndefinedFunction` diagnostics.
+- **Property rename from declaration site**, superglobal guard, and cross-file implement fixes.
+- **`did_save` cache correctness**: The on-disk `FileIndex` cache is written on `did_save`, using the stat key (matching the workspace-scan reader) and reading stat/content from disk rather than from the editor buffer.
+- **Extract-constant edge cases**: String/comment content is skipped during brace matching; naming and multibyte extraction are handled correctly.
+- **References from class-constant access sites** are now resolved.
+- **UTF-16 declaration rename**: Fallback declaration rename uses UTF-16 code-unit counts.
+- **Getter/setter quick-fix title** counts properties, not methods.
+- **PSR-4 composer.json discovery**: Resolution walks up parent directories to find `composer.json` when the workspace root is nested.
+- **Workspace scan robustness**: Phase 2a reads are fully drained so a single unreadable file can no longer truncate the workspace scan.
+- **Removed unsafe quick-fixes**: The nullable-arrow (`?->`) and add-null-args quick-fixes are withdrawn until a safer implementation lands, as they could produce syntactically invalid PHP in edge cases.
+
+### Dependencies
+
+- Upgraded the mir analysis suite from 0.41.0 to **0.44.0** and the PHP parser suite to 0.18.0. mir 0.42 unified column indexing (body-analysis diagnostics are now 0-indexed like collector-stored ones), removing the column bifurcation workarounds; 0.43–0.44 refine analyzer accuracy (sealed-array narrowing via `array_key_exists`, `iterable<K,V>` key propagation, and fewer false positives on dynamic const/property access and non-class-name string literals).
+
 ## [0.10.0] — 2026-06-12
 
 ### Features
