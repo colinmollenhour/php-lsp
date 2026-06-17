@@ -276,11 +276,16 @@ fn hover_at_core(
     }
 
     if word.starts_with('$') {
-        if let Some(ty) = analysis.and_then(|a| {
+        // Resolve mir type once; it may be None (no info), a class type, or a
+        // non-class type (scalar, callable, …).
+        let mir_ty = analysis.and_then(|a| {
             let off =
                 word_range_at(source, position).map(|r| doc.view().byte_of_position(r.start))?;
             crate::types::type_query::type_at_offset(a, off)
-        }) && !crate::types::type_query::class_names(ty).is_empty()
+        });
+
+        // 1. mir knows a class type — highest fidelity, always preferred.
+        if let Some(ty) = mir_ty.filter(|ty| !crate::types::type_query::class_names(ty).is_empty())
         {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -290,11 +295,25 @@ fn hover_at_core(
                 range: hover_range,
             });
         }
+        // 2. TypeMap has a class type — fallback for when mir has no class info
+        //    (e.g. Closure for first-class callables, or when analysis is None).
         if let Some(class_name) = type_map().get(&word) {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
-                    value: format!("`{}` `{}`", word, class_name),
+                    value: format!("`{word}` `{class_name}`"),
+                }),
+                range: hover_range,
+            });
+        }
+        // 3. mir has a specific non-class type (e.g. callable, int, string).
+        //    Use it rather than showing nothing — respects "use mir if available".
+        //    Suppress `mixed` since it means "unknown" and adds no information.
+        if let Some(ty) = mir_ty.filter(|ty| ty.to_string() != "mixed") {
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!("`{word}` `{ty}`"),
                 }),
                 range: hover_range,
             });

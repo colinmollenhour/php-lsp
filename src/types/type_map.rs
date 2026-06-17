@@ -228,6 +228,15 @@ fn php_iterable_element_type(ty: &str) -> Option<&str> {
 /// immediately before the `class` keyword) are the most common case.
 fn collect_file_type_aliases(source: &str, stmts: &[Stmt<'_, '_>]) -> HashMap<String, String> {
     let mut aliases = HashMap::new();
+    collect_aliases_in_stmts(source, stmts, &mut aliases);
+    aliases
+}
+
+fn collect_aliases_in_stmts(
+    source: &str,
+    stmts: &[Stmt<'_, '_>],
+    aliases: &mut HashMap<String, String>,
+) {
     for stmt in stmts {
         if let Some(raw) = docblock_before(source, stmt.span.start) {
             let db = parse_docblock(&raw);
@@ -235,8 +244,12 @@ fn collect_file_type_aliases(source: &str, stmts: &[Stmt<'_, '_>]) -> HashMap<St
                 aliases.insert(ta.name.clone(), ta.type_expr.clone());
             }
         }
+        if let StmtKind::Namespace(ns) = &stmt.kind
+            && let NamespaceBody::Braced(inner) = &ns.body
+        {
+            collect_aliases_in_stmts(source, &inner.stmts, aliases);
+        }
     }
-    aliases
 }
 
 /// Post-process `map` by expanding any value that is a known alias name.

@@ -373,8 +373,12 @@ pub(super) fn resolve_receiver_class(
         return enclosing_class_at(source, doc, position)
             .or_else(|| analysis.and_then(|a| receiver_class_at(a, var_offset)));
     }
-    // mir-primary; TypeMap covers gaps where mir records no class-typed symbol.
-    // For foreach value vars over array_map results, add a targeted fallback.
+    // mir is always queried first. TypeMap is the fallback for when mir has no
+    // class-typed symbol at the position: it covers `@var`-annotated variables,
+    // `@param` hints (including `@psalm-type` aliases), `@var list<T>` foreach
+    // element propagation, and first-class callables (`strlen(...)` → Closure).
+    // The array_inference tier handles `array_map` callbacks where neither mir
+    // nor TypeMap records an element type.
     analysis
         .and_then(|a| receiver_class_at(a, var_offset))
         .or_else(|| type_map.get(&var_name).map(str::to_owned))
