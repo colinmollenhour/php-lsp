@@ -478,11 +478,52 @@ class Query {
     .await;
 }
 
-/// BUG (report §5): a trait-aliased method call must not be flagged
-/// `UndefinedMethod` — the alias introduces a real method.
+/// Probe: calling a method that truly does not exist must produce UndefinedMethod.
+/// This verifies the diagnostic pipeline reaches UndefinedMethod at all, so the
+/// alias test below has a meaningful baseline.
 #[tokio::test]
-#[ignore = "KNOWN BUG (audit report §5): trait alias not tracked -> false UndefinedMethod"]
-async fn trait_aliased_method_call_no_false_undefined_method_bug() {
+async fn undefined_method_on_known_class_fires() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+class Greeter {
+    public function hello(): void {}
+}
+function test(Greeter $g): void {
+    $g->doesNotExist();
+//  ^^^^^^^^^^^^^^^^^^ error: doesNotExist
+}
+"#,
+    )
+    .await;
+}
+
+/// Probe: class uses a trait, call genuinely missing method — UndefinedMethod still fires.
+/// Confirms that having a `use Trait;` does not suppress UndefinedMethod for methods that
+/// are genuinely absent (i.e., not aliases). The alias filter must be selective.
+#[tokio::test]
+async fn undefined_method_fires_for_class_using_trait() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+trait HasHello {
+    public function hello(): void {}
+}
+class Foo {
+    use HasHello;
+}
+function test(Foo $f): void {
+    $f->reallyMissing();
+//  ^^^^^^^^^^^^^^^^^^^ error: reallyMissing
+}
+"#,
+    )
+    .await;
+}
+
+/// §5: a trait-aliased method call must not be flagged `UndefinedMethod`.
+#[tokio::test]
+async fn trait_aliased_method_call_no_false_undefined_method() {
     let mut s = TestServer::new().await;
     s.check_no_diagnostics(
         r#"<?php

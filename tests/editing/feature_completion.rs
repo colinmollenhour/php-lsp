@@ -4477,3 +4477,92 @@ async fn completion_static_from_index_namespaced() {
         Method      set"#]]
     .assert_eq(&out);
 }
+
+// ── Type system — generic and docblock annotations ────────────────────────────
+
+/// `@var Collection<User>` — generic type param stripped so member lookup
+/// targets "Collection" correctly.
+#[tokio::test]
+async fn completion_generic_annotation_resolves_base_class() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+class User { public string $name = ''; }
+class Collection {
+    public function first(): ?User { return null; }
+    public function count(): int { return 0; }
+}
+
+/** @var Collection<User> $coll */
+$coll = getCollection();
+$coll->$0
+"#,
+        )
+        .await;
+    expect![[r#"
+        Method      count
+        Method      first"#]]
+    .assert_eq(&out);
+}
+
+/// `@psalm-type Result = Success|Failure` defined in class docblock — alias
+/// expanded before member lookup so both union types contribute completions.
+#[tokio::test]
+async fn completion_psalm_type_alias_expands() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+class Success { public function ok(): bool { return true; } }
+class Failure { public function reason(): string { return ''; } }
+
+/**
+ * @psalm-type Result = Success|Failure
+ */
+class Processor {
+    /**
+     * @param Result $r
+     */
+    public function handle($r): void {
+        $r->$0
+    }
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        Method      ok
+        Method      reason"#]]
+    .assert_eq(&out);
+}
+
+/// `@var list<Widget>` — element type extracted and propagated to the foreach
+/// value variable so members are available inside the loop body.
+#[tokio::test]
+async fn completion_list_element_type_in_foreach() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+class Widget {
+    public function getId(): int { return 0; }
+    public string $label = '';
+}
+
+/** @var list<Widget> $widgets */
+$widgets = fetchWidgets();
+foreach ($widgets as $w) {
+    $w->$0
+}
+"#,
+        )
+        .await;
+    expect![[r#"
+        Property    $label
+        Method      getId"#]]
+    .assert_eq(&out);
+}

@@ -1331,7 +1331,7 @@ class BackgroundJob implements Worker {}
 }
 
 #[tokio::test]
-async fn implementation_anonymous_class_no_panic() {
+async fn implementation_anonymous_class_navigable() {
     let mut s = TestServer::new().await;
     let out = s
         .check_implementation(
@@ -1341,7 +1341,7 @@ $obj = new class implements Greeter {};
 "#,
         )
         .await;
-    expect!["<none>"].assert_eq(&out);
+    expect!["main.php:2:11-2:16"].assert_eq(&out);
 }
 
 // Cursor on the parent class: `class Circle extends Base$0 implements Shape {}`
@@ -1722,7 +1722,7 @@ function bootstrap(): void {
 /// because the walker only visits `StmtKind::Class` (named classes).
 /// Named implementors are still found correctly.
 #[tokio::test]
-async fn implementation_anonymous_class_excluded() {
+async fn implementation_anonymous_class_navigable_alongside_named() {
     let mut s = TestServer::new().await;
     let out = s
         .check_implementation(
@@ -1731,20 +1731,22 @@ interface Renderable$0 {
     public function render(): string;
 }
 
-// Anonymous implementor — currently invisible to find-implementations.
 $view = new class implements Renderable {
     public function render(): string { return '<div/>'; }
 };
 
-// Named implementor — this one IS found.
+// Named implementor.
 class HtmlView implements Renderable {
     public function render(): string { return '<p/>'; }
 }
 "#,
         )
         .await;
-    // Only the named implementor is returned; the anonymous one is silently skipped.
-    expect!["main.php:11:6-11:14"].assert_eq(&out);
+    // Both the named and anonymous implementors are returned.
+    expect![[r#"
+        main.php:10:6-10:14
+        main.php:5:12-5:17"#]]
+    .assert_eq(&out);
 }
 
 // ── Audit report §2/§4/§5: inheritance, vendor autoload, trait aliases ──────
@@ -1851,11 +1853,9 @@ async fn definition_psr4_vendor_class() {
     expect!["vendor/acme/lib/src/Client.php:2:6-2:12"].assert_eq(&out);
 }
 
-/// §4 BUG: a PSR-0 vendor class is not indexed (vendor indexer is PSR-4-only),
-/// so go-to-definition returns `<none>`.
+/// §4: PSR-0 vendor class resolution via the PSR-0 fallback in `psr4_goto`.
 #[tokio::test]
-#[ignore = "KNOWN BUG (audit report §4): PSR-0 vendor packages are not indexed"]
-async fn definition_psr0_vendor_class_bug() {
+async fn definition_psr0_vendor_class() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join("vendor/acme/lib/src/Acme")).unwrap();
     std::fs::write(
@@ -1880,7 +1880,7 @@ async fn definition_psr0_vendor_class_bug() {
     let (_, line, ch) = s.locate("caller.php", "Acme_Client();", 0);
     let resp = s.definition("caller.php", line, ch).await;
     let out = common::render_locations(&resp, &s.uri(""));
-    expect!["vendor/acme/lib/src/Acme/Client.php:1:6-1:16"].assert_eq(&out);
+    expect!["vendor/acme/lib/src/Acme/Client.php:1:6-1:17"].assert_eq(&out);
 }
 
 /// §5 CONTROL: definition on a plain (un-aliased) trait method resolves.
@@ -1905,11 +1905,9 @@ class Query {
     expect!["main.php:2:20-2:24"].assert_eq(&out);
 }
 
-/// §5 BUG: definition on a trait-aliased method call must resolve to the
-/// aliased trait method; currently returns `<none>`.
+/// §5: definition on a trait-aliased method call resolves to the original trait method.
 #[tokio::test]
-#[ignore = "KNOWN BUG (audit report §5): trait-aliased method is unresolved"]
-async fn definition_on_trait_aliased_method_bug() {
+async fn definition_on_trait_aliased_method() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s

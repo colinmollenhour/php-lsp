@@ -2,7 +2,7 @@
 /// or extend a class with the given name.
 use std::sync::Arc;
 
-use php_ast::{NamespaceBody, Stmt, StmtKind};
+use php_ast::{ExprKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::document::ast::{ParsedDoc, SourceView};
@@ -189,15 +189,16 @@ fn collect_implementations(
                     .iter()
                     .any(|iface| name_matches(iface.to_string_repr().as_ref(), word, fqn));
 
-                // TODO: anonymous classes (`c.name == None`) are silently skipped.
-                // They implement interfaces but have no name to navigate to.
-                // A future fix could emit the location of the `new class` keyword instead.
-                if (extends_match || implements_match)
-                    && let Some(class_name) = c.name
-                {
+                if extends_match || implements_match {
+                    let range = if let Some(class_name) = c.name {
+                        sv.name_range_in_span(class_name.or_error(), stmt.span)
+                    } else {
+                        // Anonymous class (`new class {}`): point to the `class` keyword.
+                        sv.name_range_in_span("class", stmt.span)
+                    };
                     out.push(Location {
                         uri: uri.clone(),
-                        range: sv.name_range_in_span(class_name.or_error(), stmt.span),
+                        range,
                     });
                 }
             }
@@ -225,6 +226,9 @@ fn collect_implementations(
                     });
                 }
             }
+            StmtKind::Expression(expr) => {
+                collect_anon_class_in_expr(expr, word, fqn, sv, stmt.span, uri, out);
+            }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
                     collect_implementations(&inner.stmts, word, fqn, sv, uri, out);
@@ -232,5 +236,45 @@ fn collect_implementations(
             }
             _ => {}
         }
+    }
+}
+
+/// Recurse into an expression to find `new class {}` anonymous class declarations
+/// that implement or extend the target interface/class.
+fn collect_anon_class_in_expr(
+    expr: &php_ast::Expr<'_, '_>,
+    word: &str,
+    fqn: Option<&str>,
+    sv: SourceView<'_>,
+    stmt_span: php_ast::Span,
+    uri: &Url,
+    out: &mut Vec<Location>,
+) {
+    match &expr.kind {
+        ExprKind::AnonymousClass(c) => {
+            let extends_match = c
+                .extends
+                .as_ref()
+                .map(|e| name_matches(e.to_string_repr().as_ref(), word, fqn))
+                .unwrap_or(false);
+            let implements_match = c
+                .implements
+                .iter()
+                .any(|iface| name_matches(iface.to_string_repr().as_ref(), word, fqn));
+            if extends_match || implements_match {
+                // Emit the `class` keyword within the expression span as the location.
+                out.push(Location {
+                    uri: uri.clone(),
+                    range: sv.name_range_in_span("class", stmt_span),
+                });
+            }
+        }
+        ExprKind::New(n) => {
+            collect_anon_class_in_expr(n.class, word, fqn, sv, stmt_span, uri, out);
+        }
+        ExprKind::Assign(a) => {
+            collect_anon_class_in_expr(a.value, word, fqn, sv, stmt_span, uri, out);
+        }
+        _ => {}
     }
 }

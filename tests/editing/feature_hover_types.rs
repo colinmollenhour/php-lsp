@@ -536,3 +536,67 @@ $v = $m->nam$0e;
         ```"#]]
     .assert_eq(&out);
 }
+
+// ── Type system — generics, templates, and callable types ─────────────────────
+
+/// `@template T of \Countable` — the bound is surfaced in hover even though
+/// enforcement requires deeper mir-level analysis.
+#[tokio::test]
+async fn hover_template_bound_shows_constraint() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php
+/**
+ * @template T of \Countable
+ * @param T $items
+ * @return T
+ */
+function proce$0ss($items) { return $items; }
+"#,
+        expect![[r#"
+            ```php
+            function process($items)
+            ```
+
+            ---
+
+            **@return** `T`
+            **@param** `T` `$items`
+            **@template** `T` of `\Countable`"#]],
+    )
+    .await;
+}
+
+/// `$x = null; $x = new Foo()` — mir's flow-sensitive path resolves `$x` to
+/// `Foo` at the final assignment, discarding the intermediate `null`.
+#[tokio::test]
+async fn hover_reassignment_after_null_resolves_class() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php
+class Foo { public function doFoo(): void {} }
+$x = null;
+$x = new Foo();
+$x$0;
+"#,
+        expect![[r#"`$x` `Foo`"#]],
+    )
+    .await;
+}
+
+/// `$fn = strlen(...)` — first-class callable expression typed as `Closure`.
+#[tokio::test]
+async fn hover_first_class_callable_typed_as_closure() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php
+$fn = strlen(...);
+$fn$0;
+"#,
+        expect!["`$fn` `Closure`"],
+    )
+    .await;
+}
