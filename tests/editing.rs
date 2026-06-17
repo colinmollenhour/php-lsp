@@ -65,3 +65,5 @@ mod feature_selection_range;
 mod feature_signature_help;
 #[path = "editing/feature_symbols.rs"]
 mod feature_symbols;
+#[path = "editing/feature_type_gaps.rs"]
+mod feature_type_gaps;
