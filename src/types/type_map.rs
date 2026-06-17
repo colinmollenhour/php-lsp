@@ -36,6 +36,8 @@ impl TypeMap {
             None,
             doc,
         );
+        let aliases = collect_file_type_aliases(doc.source(), &doc.program().stmts);
+        expand_type_aliases(&mut map, &aliases);
         TypeMap(map)
     }
 
@@ -72,6 +74,8 @@ impl TypeMap {
             cursor_byte,
             doc,
         );
+        let aliases = collect_file_type_aliases(doc.source(), &doc.program().stmts);
+        expand_type_aliases(&mut map, &aliases);
         TypeMap(map)
     }
 
@@ -167,17 +171,91 @@ fn type_hint_to_class_string(
 
 /// Extract class names from a docblock type hint, in declaration order.
 ///
-/// Splits a union (`Foo|Bar|null`), trims a leading `\` and nullable `?`, keeps
-/// only parts that begin with an uppercase letter (class-like, not `int` /
-/// `string` / `null`), and reduces each to its short name (`A\B\Foo` → `Foo`).
+/// Splits a union (`Foo|Bar|null`), trims a leading `\` and nullable `?`, and
+/// reduces each class part to its short name (`A\B\Foo` → `Foo`).
+///
+/// Generic parameters on *user-defined* class names are stripped so the result
+/// is a bare FQCN suitable for member lookups (`Collection<User>` → `Collection`).
+///
+/// PHP built-in iterable types whose sole purpose is to carry an element type
+/// (`list<T>`, `array<K,V>`, `iterable<K,V>`, `non-empty-list<T>`,
+/// `non-empty-array<K,V>`) are unwrapped and their element-type class names are
+/// returned instead — this enables the TypeMap fallback to propagate element
+/// types through `foreach` loops when the mir-primary path is unavailable.
 fn docblock_class_parts(type_hint: &str) -> Vec<String> {
     type_hint
         .split('|')
-        .map(|p| p.trim().trim_start_matches('\\').trim_start_matches('?'))
-        .filter(|p| p.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
-        .filter_map(|p| p.rsplit('\\').next())
-        .map(|p| p.to_string())
+        .flat_map(|p| {
+            let p = p.trim().trim_start_matches('\\').trim_start_matches('?');
+            // PHP built-in iterable types: extract element class from the generic param.
+            if let Some(elem) = php_iterable_element_type(p) {
+                return docblock_class_parts(elem);
+            }
+            // User-defined class (starts uppercase): strip any generic params.
+            if p.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                let base = p.split_once('<').map(|(b, _)| b).unwrap_or(p);
+                if let Some(short) = base.rsplit('\\').next() {
+                    return vec![short.to_string()];
+                }
+            }
+            vec![]
+        })
         .collect()
+}
+
+/// If `ty` is one of the PHP built-in iterable types with a generic element
+/// (`list<T>`, `array<K,V>`, `iterable<K,V>`, `non-empty-list<T>`,
+/// `non-empty-array<K,V>`), returns the element-type substring; otherwise `None`.
+fn php_iterable_element_type(ty: &str) -> Option<&str> {
+    let base = ty.split_once('<').map(|(b, _)| b).unwrap_or(ty);
+    if !matches!(
+        base,
+        "list" | "array" | "iterable" | "non-empty-list" | "non-empty-array"
+    ) {
+        return None;
+    }
+    let inner = ty.split_once('<')?.1.strip_suffix('>')?;
+    // array<K,V> / iterable<K,V>: element type is the last generic argument.
+    Some(if let Some((_, last)) = inner.rsplit_once(',') {
+        last.trim()
+    } else {
+        inner.trim()
+    })
+}
+
+/// Collect `@psalm-type` / `@phpstan-type` aliases from all statement-level
+/// docblocks in `stmts`.  Aliases declared in a class docblock (the docblock
+/// immediately before the `class` keyword) are the most common case.
+fn collect_file_type_aliases(source: &str, stmts: &[Stmt<'_, '_>]) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+    for stmt in stmts {
+        if let Some(raw) = docblock_before(source, stmt.span.start) {
+            let db = parse_docblock(&raw);
+            for ta in &db.type_aliases {
+                aliases.insert(ta.name.clone(), ta.type_expr.clone());
+            }
+        }
+    }
+    aliases
+}
+
+/// Post-process `map` by expanding any value that is a known alias name.
+///
+/// `@psalm-type Result = Success|Failure` → variables mapped to `"Result"` are
+/// updated to `"Success|Failure"` so member lookups find the actual classes.
+/// Only one level of expansion is performed (no recursive alias resolution).
+fn expand_type_aliases(map: &mut HashMap<String, String>, aliases: &HashMap<String, String>) {
+    if aliases.is_empty() {
+        return;
+    }
+    for value in map.values_mut() {
+        if let Some(expanded_expr) = aliases.get(value.as_str()) {
+            let expanded_classes = docblock_class_parts(expanded_expr);
+            if !expanded_classes.is_empty() {
+                *value = expanded_classes.join("|");
+            }
+        }
+    }
 }
 
 /// Apply `@param` class-type hints from the docblock preceding `span_start` to
@@ -361,6 +439,19 @@ fn collect_types_stmts(
             }
 
             StmtKind::Foreach(f) => {
+                // Propagate element type: if the iterable is a variable with a
+                // known TypeMap type (e.g. from `@var list<Widget> $items`), map
+                // the foreach value variable to that same type so completions
+                // work inside the loop body in the TypeMap fallback path.
+                if let ExprKind::Variable(arr_name) = &f.expr.kind
+                    && let ExprKind::Variable(val_name) = &f.value.kind
+                {
+                    let arr_key = format!("${}", arr_name.as_str());
+                    if let Some(elem_type) = map.get(&arr_key).cloned() {
+                        map.entry(format!("${}", val_name.as_str()))
+                            .or_insert(elem_type);
+                    }
+                }
                 collect_types_stmts(
                     source,
                     std::slice::from_ref(f.body),
@@ -1425,6 +1516,119 @@ mod tests {
             tm.get("$obj"),
             Some("Palette"),
             "type map should walk into enum method bodies"
+        );
+    }
+
+    // ── Gap 1: generic params stripped from class types ───────────────────────
+
+    #[test]
+    fn generic_type_annotation_stripped_to_base_class() {
+        // `@var Collection<User> $coll` — the TypeMap fallback should store
+        // "Collection", not "Collection<User>", so member lookups succeed.
+        let src = "<?php\n/** @var Collection<User> $coll */\n$coll = get();";
+        let doc = ParsedDoc::parse(src.to_string());
+        let tm = TypeMap::from_doc(&doc);
+        assert_eq!(
+            tm.get("$coll"),
+            Some("Collection"),
+            "generic param should be stripped; expected Collection, not Collection<User>"
+        );
+    }
+
+    // ── Gap 4: list<T> element type propagated through foreach ────────────────
+
+    #[test]
+    fn list_var_annotation_maps_to_element_type() {
+        // `@var list<Widget> $items` — TypeMap should store "Widget" for $items
+        // so the foreach propagation step has a type to forward.
+        let src = "<?php\n/** @var list<Widget> $items */\n$items = get();";
+        let doc = ParsedDoc::parse(src.to_string());
+        let tm = TypeMap::from_doc(&doc);
+        assert_eq!(
+            tm.get("$items"),
+            Some("Widget"),
+            "element type Widget should be extracted from list<Widget>"
+        );
+    }
+
+    #[test]
+    fn array_element_annotation_maps_to_element_type() {
+        // `@var array<Widget> $map` (single-param form) — TypeMap should store "Widget".
+        // Note: `array<int, Widget>` with a space inside the generics is not handled
+        // by the whitespace-split @var body extractor in docblock.rs; use the
+        // single-param form or list<T> for this fallback path.
+        let src = "<?php\n/** @var array<Widget> $map */\n$map = get();";
+        let doc = ParsedDoc::parse(src.to_string());
+        let tm = TypeMap::from_doc(&doc);
+        assert_eq!(
+            tm.get("$map"),
+            Some("Widget"),
+            "element type Widget should be extracted from array<Widget>"
+        );
+    }
+
+    #[test]
+    fn foreach_value_var_inherits_element_type() {
+        // `@var list<Widget> $items` followed by `foreach ($items as $w)` —
+        // TypeMap should map `$w` to "Widget" in the fallback path.
+        let src = "<?php\n/** @var list<Widget> $items */\n$items = get();\nforeach ($items as $w) { $w; }";
+        let doc = ParsedDoc::parse(src.to_string());
+        let tm = TypeMap::from_doc(&doc);
+        assert_eq!(
+            tm.get("$w"),
+            Some("Widget"),
+            "$w should inherit Widget element type inside foreach"
+        );
+    }
+
+    // ── Gap 2: @psalm-type alias expansion ────────────────────────────────────
+
+    #[test]
+    fn psalm_type_alias_expanded_for_param() {
+        // Class docblock declares `@psalm-type Result = Success|Failure`.
+        // The method `@param Result $r` should expand to both classes.
+        let src = r#"<?php
+/** @psalm-type Result = Success|Failure */
+class Processor {
+    /** @param Result $r */
+    public function handle($r): void {}
+}"#;
+        let doc = ParsedDoc::parse(src.to_string());
+        let tm = TypeMap::from_doc(&doc);
+        let val = tm.get("$r").expect("$r should be in the type map");
+        assert!(
+            val.contains("Success"),
+            "alias should expand to include Success; got: {val}"
+        );
+        assert!(
+            val.contains("Failure"),
+            "alias should expand to include Failure; got: {val}"
+        );
+    }
+
+    // ── Gap 6: first-class callable mapped to Closure ────────────────────────
+
+    #[test]
+    fn first_class_callable_maps_to_closure() {
+        let src = "<?php\n$fn = strlen(...);";
+        let doc = ParsedDoc::parse(src.to_string());
+        let tm = TypeMap::from_doc(&doc);
+        assert_eq!(
+            tm.get("$fn"),
+            Some("Closure"),
+            "first-class callable should be mapped to Closure"
+        );
+    }
+
+    #[test]
+    fn first_class_method_callable_maps_to_closure() {
+        let src = "<?php\n$obj = new Foo();\n$m = $obj->bar(...);";
+        let doc = ParsedDoc::parse(src.to_string());
+        let tm = TypeMap::from_doc(&doc);
+        assert_eq!(
+            tm.get("$m"),
+            Some("Closure"),
+            "method first-class callable should be mapped to Closure"
         );
     }
 }
