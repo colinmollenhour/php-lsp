@@ -23,7 +23,6 @@ match ($p) {
     .await;
 }
 
-/// Confirm that static method hover in match arm still works (regression check).
 #[tokio::test]
 async fn hover_backed_enum_shows_backing_type() {
     let mut s = TestServer::new().await;
@@ -40,7 +39,6 @@ enum Stat$0us: string { case Active = 'active'; }
     .await;
 }
 
-/// Backed int enum.
 #[tokio::test]
 async fn hover_class_constant() {
     let mut s = TestServer::new().await;
@@ -59,8 +57,6 @@ class Config {
     .await;
 }
 
-/// A function with a nullable param type `?T` must render the `?` in hover so
-/// callers can see the type is optional. Cursor is on the function name.
 #[tokio::test]
 async fn hover_enum_case_declaration() {
     let mut s = TestServer::new().await;
@@ -77,8 +73,6 @@ enum Status { case Acti$0ve; case Inactive; }
     .await;
 }
 
-/// Hovering on a class constant must show the constant with its inferred or
-/// declared type. An unimplemented constant-hover returns `<no hover>`.
 #[tokio::test]
 async fn hover_function_with_signature() {
     let mut s = TestServer::new().await;
@@ -109,7 +103,6 @@ function sho$0w(?string $label): void {}
     .await;
 }
 
-/// Hovering on a trait identifier must render as `trait Name`, not `class`.
 #[tokio::test]
 async fn hover_property_access() {
     let mut s = TestServer::new().await;
@@ -130,9 +123,6 @@ echo $u->na$0me;
     .await;
 }
 
-/// Hovering on an enum *case* (not the enum name) should return the qualified
-/// case label. If the server only indexes enum names but not individual cases
-/// this will produce `<no hover>` — that is the bug to fix.
 #[tokio::test]
 async fn hover_static_property() {
     let mut s = TestServer::new().await;
@@ -197,10 +187,6 @@ $result = box$0('hello');
     .await;
 }
 
-/// At a call site, template T is shown literally (not substituted to string).
-/// NOTE: Full template substitution (T → string) requires call-site argument
-/// inference in type_map.rs, which is a larger architectural change deferred
-/// to a future iteration. This test documents the current limitation.
 #[tokio::test]
 async fn hover_union_type_property() {
     let mut s = TestServer::new().await;
@@ -221,9 +207,6 @@ echo $c->se$0tting;
     .await;
 }
 
-/// mir-primary variable hover renders a *union* type. The legacy short-name
-/// tracker collapsed unions to a single class, so this is a resolution-quality
-/// gain that had no coverage. Guards the mir hover path.
 #[tokio::test]
 async fn hover_union_typed_variable_shows_union() {
     let mut s = TestServer::new().await;
@@ -240,8 +223,6 @@ function pet(Cat|Dog $a): void { $a$0; }
     .await;
 }
 
-/// mir 0.31.0 fix: `$x = Enum::Case` previously resolved to `mixed`; now
-/// synthesises `TNamedObject`. Hover directly asserts the inferred type.
 #[tokio::test]
 async fn hover_variable_from_enum_case_shows_type() {
     let mut s = TestServer::new().await;
@@ -454,8 +435,6 @@ $u->na$0me;
     .await;
 }
 
-/// Method call disambiguation: two classes both define `process`. mir resolves
-/// to the declaring class, ensuring Mailer's params are shown not Queue's.
 #[tokio::test]
 async fn hover_catch_variable_shows_exception_class() {
     let mut s = TestServer::new().await;
@@ -511,9 +490,8 @@ enum Stat$0us: string implements \Stringable {}
 
 // ── __get magic property access ───────────────────────────────────────────────
 
-/// Accessing a property through `__get` shows the `__get` return type in hover.
-/// mir-php propagates the magic accessor return type to the PropertyAccess symbol,
-/// and the LSP surfaces it even when there is no declared PHP property.
+/// Accessing a property through `__get` shows the return type in hover even
+/// when no declared PHP property exists.
 #[tokio::test]
 async fn magic_get_hover_shows_return_type() {
     let mut s = TestServer::new().await;
@@ -539,8 +517,7 @@ $v = $m->nam$0e;
 
 // ── Type system — generics, templates, and callable types ─────────────────────
 
-/// `@template T of \Countable` — the bound is surfaced in hover even though
-/// enforcement requires deeper mir-level analysis.
+/// `@template T of \Countable` — the constraint is surfaced in hover.
 #[tokio::test]
 async fn hover_template_bound_shows_constraint() {
     let mut s = TestServer::new().await;
@@ -568,8 +545,7 @@ function proce$0ss($items) { return $items; }
     .await;
 }
 
-/// `$x = null; $x = new Foo()` — mir's flow-sensitive path resolves `$x` to
-/// `Foo` at the final assignment, discarding the intermediate `null`.
+/// `$x = null; $x = new Foo()` — hover resolves `$x` to `Foo` at the final assignment.
 #[tokio::test]
 async fn hover_reassignment_after_null_resolves_class() {
     let mut s = TestServer::new().await;

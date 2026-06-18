@@ -84,9 +84,7 @@ $w = new Wid$0get();
     .await;
 }
 
-/// Cross-file goto-definition for a namespace-free class — exercises the
-/// `find_in_indexes` path where the defining file is opened but not the
-/// active file.
+/// Cross-file goto-definition for a namespace-free class.
 #[tokio::test]
 async fn definition_cross_file_simple_class() {
     let mut s = TestServer::new().await;
@@ -163,9 +161,7 @@ $f->wr$0ite();
 
 // ── declaration: open-file paths ────────────────────────────────────────────
 
-/// Cursor on a method call resolves to the abstract declaration in a parent
-/// class — exercises `find_abstract_declaration` for `StmtKind::Class` with
-/// `m.is_abstract`, not for an interface.
+/// Cursor on a method call resolves to the abstract declaration in the parent class.
 #[tokio::test]
 async fn declaration_on_abstract_class_method() {
     let mut s = TestServer::new().await;
@@ -182,9 +178,7 @@ $x->bui$0ld();
     expect!["main.php:1:47-1:52"].assert_eq(&out);
 }
 
-/// Cursor on a usage of an interface name (in `implements`) resolves to the
-/// interface's name range — exercises the `i.name == word` branch in
-/// `find_abstract_declaration`.
+/// Cursor on an interface name used in `implements` resolves to the interface declaration.
 #[tokio::test]
 async fn declaration_on_interface_name_usage() {
     let mut s = TestServer::new().await;
@@ -199,9 +193,7 @@ class A implements Writ$0able {}
     expect!["main.php:1:10-1:18"].assert_eq(&out);
 }
 
-/// Concrete free function — no abstract counterpart exists, so the first pass
-/// yields nothing and we fall through to `find_any_declaration`'s
-/// `StmtKind::Function` arm.
+/// Declaration on a concrete free function (no abstract counterpart).
 #[tokio::test]
 async fn declaration_falls_back_to_concrete_function() {
     let mut s = TestServer::new().await;
@@ -216,7 +208,7 @@ gre$0et();
     expect!["main.php:1:9-1:14"].assert_eq(&out);
 }
 
-/// Plain (non-abstract) class — second pass resolves the class name.
+/// Declaration on a plain (non-abstract) class resolves to the class name.
 #[tokio::test]
 async fn declaration_falls_back_to_class_name() {
     let mut s = TestServer::new().await;
@@ -231,8 +223,7 @@ $w = new Wid$0get();
     expect!["main.php:1:6-1:12"].assert_eq(&out);
 }
 
-/// Trait method — `find_any_declaration` matches `StmtKind::Trait` and walks
-/// its members. No abstract counterpart, so first pass returns None.
+/// Declaration on a trait method resolves to the trait member.
 #[tokio::test]
 async fn declaration_on_trait_method() {
     let mut s = TestServer::new().await;
@@ -249,8 +240,7 @@ $a->hel$0lo();
     expect!["main.php:1:34-1:39"].assert_eq(&out);
 }
 
-/// Trait property — exercises the `Property` arm of the trait body, including
-/// the `$`-prefix stripping (`bare = word.strip_prefix('$')`).
+/// Declaration on a trait property resolves to the property declaration.
 #[tokio::test]
 async fn declaration_on_trait_property() {
     let mut s = TestServer::new().await;
@@ -267,7 +257,7 @@ $a->na$0me;
     expect!["main.php:1:29-1:33"].assert_eq(&out);
 }
 
-/// Trait constant — exercises the `ClassConst` arm of `StmtKind::Trait`.
+/// Declaration on a trait constant resolves to the constant declaration.
 #[tokio::test]
 async fn declaration_on_trait_constant() {
     let mut s = TestServer::new().await;
@@ -283,8 +273,7 @@ echo A::VERS$0ION;
     expect!["main.php:1:24-1:31"].assert_eq(&out);
 }
 
-/// Cursor on an enum name resolves to its declaration via the second pass
-/// (`StmtKind::Enum(e) if e.name == word`).
+/// Cursor on an enum name resolves to the enum declaration.
 #[tokio::test]
 async fn declaration_on_enum_name() {
     let mut s = TestServer::new().await;
@@ -299,8 +288,7 @@ $s = Su$0it::Hearts;
     expect!["main.php:1:5-1:9"].assert_eq(&out);
 }
 
-/// Interface constant — exercises the `ClassConst` arm of `StmtKind::Interface`
-/// in `find_any_declaration` (the abstract pass doesn't look at constants).
+/// Declaration on an interface constant resolves to the constant declaration.
 #[tokio::test]
 async fn declaration_on_interface_constant() {
     let mut s = TestServer::new().await;
@@ -315,9 +303,7 @@ echo Limits::MA$0X;
     expect!["main.php:1:25-1:28"].assert_eq(&out);
 }
 
-/// Cross-file: cursor in the implementation file, declaration lives in a
-/// separate (also-opened) interface file. Both files are opened so this hits
-/// the open-doc path, not the index fallback.
+/// Cross-file: declaration in a separately-opened abstract class file.
 #[tokio::test]
 async fn declaration_cross_file_abstract_method() {
     let mut s = TestServer::new().await;
@@ -357,8 +343,7 @@ nonexistent_$0func();
     expect!["<none>"].assert_eq(&out);
 }
 
-/// Interface inside a braced namespace — exercises the `NamespaceBody::Braced`
-/// recursion in `find_abstract_declaration`.
+/// Declaration on a method inside a braced namespace resolves correctly.
 #[tokio::test]
 async fn declaration_inside_braced_namespace() {
     let mut s = TestServer::new().await;
@@ -380,13 +365,6 @@ namespace App {
 }
 
 // ── declaration: stub-index fallback (file on disk, not opened) ─────────────
-//
-// `goto_declaration` only looks at *open* docs. When the cursor's word is
-// undefined in every open doc, the backend falls through to
-// `goto_declaration_from_index`, which serves results from `FileIndex` entries
-// built by the workspace scan. To exercise that path over the wire we write
-// files to disk, start a rooted server, wait for the scan to finish, and only
-// `did_open` the caller — so the declaration target is index-only.
 
 /// Abstract method declaration served from a not-opened parent class.
 #[tokio::test]
@@ -454,7 +432,7 @@ async fn declaration_from_index_finds_interface_name() {
     expect!["Logger.php:1:10-1:16"].assert_eq(&out);
 }
 
-/// No abstract counterpart: free function served via the index second-pass.
+/// Free function declaration served from an indexed (not-opened) file.
 #[tokio::test]
 async fn declaration_from_index_falls_back_to_function() {
     let tmp = tempfile::tempdir().unwrap();
@@ -476,7 +454,7 @@ async fn declaration_from_index_falls_back_to_function() {
     expect!["helpers.php:1:9-1:20"].assert_eq(&out);
 }
 
-/// No abstract counterpart: plain class name served via the index second-pass.
+/// Plain class declaration served from an indexed (not-opened) file.
 #[tokio::test]
 async fn declaration_from_index_falls_back_to_class() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1008,8 +986,8 @@ class Builder {
     .await;
 }
 
-/// Untyped promoted param with only a `@param` docblock — the original
-/// scenario the user reported where definition jumped to an unrelated class.
+/// Untyped promoted param with only a `@param` docblock resolves to the param,
+/// not to an unrelated class with the same property name.
 #[tokio::test]
 async fn definition_promoted_property_docblock_typed() {
     let mut s = TestServer::new().await;
@@ -1055,8 +1033,7 @@ $r->co$0nn;
     .await;
 }
 
-/// Variable goto-definition must jump to the first assignment in scope, not the
-/// use-site. $0 is on a read; the `def` annotation marks the initial assignment.
+/// Variable goto-definition jumps to the first assignment in scope.
 #[tokio::test]
 async fn definition_variable_jumps_to_first_occurrence() {
     let mut s = TestServer::new().await;
@@ -1121,8 +1098,7 @@ namespace App {
     .await;
 }
 
-/// Cross-file goto-definition for a free function (not a class), exercises the
-/// `StmtKind::Function` arm of `scan_statements` via `other_docs`.
+/// Cross-file goto-definition for a free function (not a class).
 #[tokio::test]
 async fn definition_cross_file_free_function() {
     let mut s = TestServer::new().await;
@@ -1344,8 +1320,6 @@ $obj = new class implements Greeter {};
     expect!["main.php:2:11-2:16"].assert_eq(&out);
 }
 
-// Cursor on the parent class: `class Circle extends Base$0 implements Shape {}`
-// must return exactly one location, same as searching for the interface.
 #[tokio::test]
 async fn implementation_class_that_extends_and_implements_parent_side() {
     let mut s = TestServer::new().await;
@@ -1361,10 +1335,7 @@ class Circle extends Base implements Shape {}
     expect!["main.php:3:6-3:12"].assert_eq(&out);
 }
 
-// Without a `use` import the handler passes fqn=None.
-// A class that writes `extends \Animal` (backslash-qualified) refers to the
-// global-namespace Animal — it must be found when searching for a global-
-// namespace interface `Animal` (no namespace declaration).
+/// `extends \Animal` (backslash-qualified) must match a global-namespace `Animal`.
 #[tokio::test]
 async fn implementation_global_namespace_backslash_prefix_matched() {
     let mut s = TestServer::new().await;
@@ -1383,9 +1354,7 @@ class Dog extends \Animal {}
     expect!["Dog.php:1:6-1:9"].assert_eq(&out);
 }
 
-// With `use App\Animal` the handler resolves fqn="App\Animal".
-// A class doing `extends \App\Animal` (fully-qualified with leading backslash)
-// must be found.
+/// `extends \App\Animal` (fully-qualified) matches when `use App\Animal` is in scope.
 #[tokio::test]
 async fn implementation_fqn_fully_qualified_extends_found() {
     let mut s = TestServer::new().await;
@@ -1405,8 +1374,7 @@ class Dog extends \App\Animal {}
     expect!["Dog.php:1:6-1:9"].assert_eq(&out);
 }
 
-// Same as above but the class writes `extends App\Animal` (no leading `\`).
-// `name_matches` strips the leading `\` from the repr before comparing.
+/// `extends App\Animal` (no leading `\`) matches when `use App\Animal` is in scope.
 #[tokio::test]
 async fn implementation_fqn_qualified_without_leading_backslash_found() {
     let mut s = TestServer::new().await;
@@ -1426,9 +1394,7 @@ class Dog extends App\Animal {}
     expect!["Dog.php:1:6-1:9"].assert_eq(&out);
 }
 
-// When fqn is provided, the short-name form `extends Animal` must still match
-// so that classes in the same namespace (which omit the namespace prefix) are
-// included alongside FQN-using classes.
+/// Short-name `extends Animal` matches even when a fully-qualified `use` is in scope.
 #[tokio::test]
 async fn implementation_fqn_short_name_still_matched() {
     let mut s = TestServer::new().await;
@@ -1548,15 +1514,9 @@ async fn definition_mixin_method_cross_file() {
     expect!["Macroable.php:2:20-2:25"].assert_eq(&out);
 }
 
-// ── implementation name-range regression ──────────────────────────────────────
-//
-// When the implementing class name also appears (as a word) in a string literal
-// *before* the class declaration in the file, the old global `name_range` scan
-// --- PHP 8 attribute alias expansion ---
+// ── PHP 8 attribute alias expansion ──────────────────────────────────────────
 
-/// `#[ORM\Column]` with `use Doctrine\ORM\Mapping as ORM` must jump to the
-/// `Column` class, not silently fail.  The PSR-4 fallback must expand the alias
-/// prefix before resolving the FQN.
+/// `#[ORM\Column]` with `use Doctrine\ORM\Mapping as ORM` must jump to `Column`.
 #[tokio::test]
 async fn definition_php8_attribute_aliased_namespace() {
     use std::fs;
@@ -1601,9 +1561,8 @@ async fn definition_php8_attribute_aliased_namespace() {
     );
 }
 
-// (using `.to_string()`) found the literal occurrence instead of the declaration.
-// The span-constrained fix restricts the search to the class stmt's span.
-
+/// Class name appearing in a string literal before its declaration must not confuse
+/// the implementation search; the result must point to the actual class declaration.
 #[tokio::test]
 async fn implementation_class_name_correct_when_name_appears_in_earlier_string_literal() {
     let mut s = TestServer::new().await;
@@ -1620,10 +1579,7 @@ class Logger implements Loggable {}
 
 // ── Trait conflict resolution (insteadof) ────────────────────────────────────
 
-/// When two traits both declare `hello()` and one is excluded with `insteadof`,
-/// go-to-definition navigates to the winning trait method.  mir-php resolves the
-/// declaring class through insteadof rules; the LSP uses that resolved class to
-/// look up the precise method location rather than walking traits in declaration order.
+/// `insteadof` conflict: go-to-definition navigates to the winning trait method.
 #[tokio::test]
 async fn insteadof_conflict_resolution_navigates_to_winning_trait() {
     let mut s = TestServer::new().await;
@@ -1653,9 +1609,7 @@ $c->hel$0lo();
 
 // ── Facade / service-container gaps ──────────────────────────────────────────
 
-/// A real method on a class resolves normally even when the class mimics a
-/// Facade pattern (defines getFacadeAccessor). The gap is `__callStatic`
-/// forwarding — see the test below.
+/// A real method on a Facade-pattern class resolves normally.
 #[tokio::test]
 async fn facade_real_method_resolves() {
     let mut s = TestServer::new().await;
@@ -1718,9 +1672,7 @@ function bootstrap(): void {
     expect!["main.php:1:6-1:20"].assert_eq(&out);
 }
 
-/// Anonymous class implementors are not included in find-implementations results
-/// because the walker only visits `StmtKind::Class` (named classes).
-/// Named implementors are still found correctly.
+/// Both named and anonymous class implementors are returned by find-implementations.
 #[tokio::test]
 async fn implementation_anonymous_class_navigable_alongside_named() {
     let mut s = TestServer::new().await;
@@ -1749,13 +1701,9 @@ class HtmlView implements Renderable {
     .assert_eq(&out);
 }
 
-// ── Audit report §2/§4/§5: inheritance, vendor autoload, trait aliases ──────
-// §2 (extends/implements def+hover) verified WORKING once the index is ready
-// (the live failure was an index-not-ready artifact of §3). §4 (PSR-0 vendor)
-// and §5 (trait-aliased methods) are genuine bugs: their `*_bug` tests assert
-// the correct target and are `#[ignore]`d until fixed.
+// ── inheritance, vendor autoload, trait aliases ───────────────────────────────
 
-/// §2: definition on the interface in an `implements` clause (index-only).
+/// Definition on the interface in an `implements` clause (index-only).
 #[tokio::test]
 async fn definition_on_implements_target_from_index() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1777,7 +1725,7 @@ async fn definition_on_implements_target_from_index() {
     expect!["Shape.php:2:10-2:15"].assert_eq(&out);
 }
 
-/// §2: definition on the parent class in an `extends` clause (index-only).
+/// Definition on the parent class in an `extends` clause (index-only).
 #[tokio::test]
 async fn definition_on_extends_target_from_index() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1799,7 +1747,7 @@ async fn definition_on_extends_target_from_index() {
     expect!["Base.php:2:6-2:10"].assert_eq(&out);
 }
 
-/// §2: hover on the interface in an `implements` clause (index-only).
+/// Hover on the interface in an `implements` clause (index-only).
 #[tokio::test]
 async fn hover_on_implements_target_from_index() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1824,7 +1772,7 @@ async fn hover_on_implements_target_from_index() {
     );
 }
 
-/// §4 CONTROL: a PSR-4 vendor class resolves from the index.
+/// PSR-4 vendor class resolves from the index.
 #[tokio::test]
 async fn definition_psr4_vendor_class() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1853,7 +1801,7 @@ async fn definition_psr4_vendor_class() {
     expect!["vendor/acme/lib/src/Client.php:2:6-2:12"].assert_eq(&out);
 }
 
-/// §4: PSR-0 vendor class resolution via the PSR-0 fallback in `psr4_goto`.
+/// PSR-0 vendor class resolves from the index.
 #[tokio::test]
 async fn definition_psr0_vendor_class() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1883,7 +1831,7 @@ async fn definition_psr0_vendor_class() {
     expect!["vendor/acme/lib/src/Acme/Client.php:1:6-1:17"].assert_eq(&out);
 }
 
-/// §5 CONTROL: definition on a plain (un-aliased) trait method resolves.
+/// Definition on a plain (un-aliased) trait method resolves correctly.
 #[tokio::test]
 async fn definition_on_trait_method_unaliased() {
     let mut s = TestServer::new().await;
@@ -1905,7 +1853,7 @@ class Query {
     expect!["main.php:2:20-2:24"].assert_eq(&out);
 }
 
-/// §5: definition on a trait-aliased method call resolves to the original trait method.
+/// Definition on a trait-aliased method call resolves to the original trait method.
 #[tokio::test]
 async fn definition_on_trait_aliased_method() {
     let mut s = TestServer::new().await;

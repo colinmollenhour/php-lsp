@@ -22,8 +22,6 @@ async fn diagnostics_published_on_did_change_for_undefined_function() {
     assert!(has, "expected UndefinedFunction after didChange: {notif:?}");
 }
 
-/// Regression for issue #177 — deprecated-call warnings must appear on did_open,
-/// not only after the first did_change.
 #[tokio::test]
 async fn new_expr_fully_qualified_not_flagged_as_undefined_class() {
     let tmp = tempfile::tempdir().unwrap();
@@ -105,8 +103,6 @@ async fn new_expr_with_explicit_use_alias_not_flagged_as_undefined_class() {
     .assert_eq(&out);
 }
 
-/// Sanity baseline: fully-qualified `new \App\Model\Entity()` (no `use` statement)
-/// must not emit UndefinedClass when the class is PSR-4-resolvable.
 #[tokio::test]
 async fn new_expr_with_grouped_use_import_not_flagged_as_undefined_class() {
     let tmp = tempfile::tempdir().unwrap();
@@ -143,8 +139,6 @@ async fn new_expr_with_grouped_use_import_not_flagged_as_undefined_class() {
     .assert_eq(&out);
 }
 
-/// `use` import of an interface must not be flagged UndefinedClass when the
-/// interface is PSR-4-resolvable and used in an `implements` clause.
 #[tokio::test]
 async fn new_expr_with_use_import_not_flagged_as_undefined_class() {
     let tmp = tempfile::tempdir().unwrap();
@@ -176,10 +170,7 @@ async fn new_expr_with_use_import_not_flagged_as_undefined_class() {
     .assert_eq(&out);
 }
 
-/// Regression: `use A\B\C as Alias; new Alias()` must not emit UndefinedClass.
-/// The explicit `as` form writes a different key into `file_imports` than the
-/// implicit short-name form, and is the primary path that was broken before
-/// mir 0.14.0 populated `Codebase.file_imports` from `StubSlice.imports`.
+/// `use A\B\C as Alias; new Alias()` must not emit UndefinedClass.
 #[tokio::test]
 async fn psr4_imported_class_not_flagged_before_workspace_scan() {
     let tmp = tempfile::tempdir().unwrap();
@@ -214,11 +205,7 @@ async fn psr4_imported_class_not_flagged_before_workspace_scan() {
     .assert_eq(&out);
 }
 
-/// Same-namespace, single-base PSR-4: a class referencing a sibling in the
-/// same namespace WITHOUT a `use` statement must not emit UndefinedClass.
-/// This is the core bug — the previous pre-load path only covered `use`
-/// imports and FQN-`new` refs, missing bare same-namespace type hints,
-/// `extends`, `instanceof`, and static-member access.
+/// Same-namespace bare class reference (no `use`) must not emit UndefinedClass.
 #[tokio::test]
 async fn same_namespace_bare_ref_not_flagged_as_undefined_class() {
     let tmp = tempfile::tempdir().unwrap();
@@ -251,9 +238,7 @@ async fn same_namespace_bare_ref_not_flagged_as_undefined_class() {
     .assert_eq(&out);
 }
 
-/// Same-namespace, single-base PSR-4: `extends` across files with no `use`.
-/// `extends` is a separate AST position from type hints; this guards against a
-/// regression where the visitor stops collecting one but not the other.
+/// Same-namespace `extends` across files with no `use` must not emit UndefinedClass.
 #[tokio::test]
 async fn same_namespace_extends_not_flagged_as_undefined_class() {
     let tmp = tempfile::tempdir().unwrap();
@@ -409,8 +394,6 @@ class Broken {
     .await;
 }
 
-/// Regression for issue #170: mir-analyzer must detect errors inside
-/// namespaced class method bodies, not just top-level / non-namespaced code.
 #[tokio::test]
 async fn undefined_function_top_level() {
     let mut s = TestServer::new().await;
@@ -456,9 +439,9 @@ async fn use_imported_interface_in_implements_not_flagged_as_undefined_class() {
     .assert_eq(&out);
 }
 
-// ── Audit report §5: false UndefinedMethod on trait-aliased methods ─────────
+// ── UndefinedMethod on trait-aliased methods ─────────────────────────────────
 
-/// CONTROL: a plain (un-aliased) trait method call produces no diagnostics.
+/// Control: a plain (un-aliased) trait method call produces no diagnostics.
 #[tokio::test]
 async fn trait_method_call_no_false_undefined_method() {
     let mut s = TestServer::new().await;
@@ -478,9 +461,7 @@ class Query {
     .await;
 }
 
-/// Probe: calling a method that truly does not exist must produce UndefinedMethod.
-/// This verifies the diagnostic pipeline reaches UndefinedMethod at all, so the
-/// alias test below has a meaningful baseline.
+/// Calling a method that does not exist produces UndefinedMethod.
 #[tokio::test]
 async fn undefined_method_on_known_class_fires() {
     let mut s = TestServer::new().await;
@@ -498,9 +479,7 @@ function test(Greeter $g): void {
     .await;
 }
 
-/// Probe: class uses a trait, call genuinely missing method — UndefinedMethod still fires.
-/// Confirms that having a `use Trait;` does not suppress UndefinedMethod for methods that
-/// are genuinely absent (i.e., not aliases). The alias filter must be selective.
+/// Calling a genuinely missing method on a trait-using class still fires UndefinedMethod.
 #[tokio::test]
 async fn undefined_method_fires_for_class_using_trait() {
     let mut s = TestServer::new().await;
@@ -521,7 +500,7 @@ function test(Foo $f): void {
     .await;
 }
 
-/// §5: a trait-aliased method call must not be flagged `UndefinedMethod`.
+/// A trait-aliased method call must not be flagged `UndefinedMethod`.
 #[tokio::test]
 async fn trait_aliased_method_call_no_false_undefined_method() {
     let mut s = TestServer::new().await;
