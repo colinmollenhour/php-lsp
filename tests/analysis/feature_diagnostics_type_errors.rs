@@ -38,7 +38,6 @@ function wrap(): void {
         .await;
 }
 
-/// `new ShortName()` where `use A\B\ShortName;` must not emit UndefinedClass.
 #[tokio::test]
 async fn argument_type_mismatch_detected() {
     let mut server = TestServer::new().await;
@@ -55,11 +54,6 @@ function wrap(): void {
         .await;
 }
 
-/// PSR-4-resolvable classes must not produce UndefinedClass diagnostics even
-/// when the background workspace scan has not yet reached the dependency file.
-/// The fix (PSR-4 lazy-loading inside `get_semantic_issues_salsa`) reads the
-/// dependency from disk before running semantic analysis, making the result
-/// deterministic regardless of scan timing.
 #[tokio::test]
 async fn duplicate_named_arg_in_constructor() {
     let mut s = TestServer::new().await;
