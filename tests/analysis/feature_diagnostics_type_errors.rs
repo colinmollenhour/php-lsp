@@ -39,11 +39,28 @@ function wrap(): void {
 }
 
 #[tokio::test]
-async fn argument_type_mismatch_detected() {
+async fn argument_type_coercion_is_info_in_non_strict_mode() {
     let mut server = TestServer::new().await;
     server
         .check_diagnostics(
             r#"<?php
+function takes_string(string $s): void {}
+function wrap(): void {
+    takes_string(42);
+//               ^^ info: takes_string
+}
+"#,
+        )
+        .await;
+}
+
+#[tokio::test]
+async fn argument_type_mismatch_is_error_in_strict_mode() {
+    let mut server = TestServer::new().await;
+    server
+        .check_diagnostics(
+            r#"<?php
+declare(strict_types=1);
 function takes_string(string $s): void {}
 function wrap(): void {
     takes_string(42);

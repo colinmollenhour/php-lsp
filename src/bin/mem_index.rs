@@ -131,8 +131,6 @@ fn main() {
 
     for (url, src) in php_files.iter() {
         if let Some(s) = session.as_ref() {
-            // Post mir 0.22: ingest_file replaces manual DefinitionCollector
-            // + StubSlice + ingest_stub_slice plumbing.
             let src_arc: Arc<str> = Arc::from(src.as_str());
             let doc = ParsedDoc::parse(src_arc.clone());
             let file: Arc<str> = Arc::from(url.as_str());

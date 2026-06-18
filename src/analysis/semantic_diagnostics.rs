@@ -9,11 +9,8 @@ use crate::document::ast::ParsedDoc;
 use crate::lang::config::DiagnosticsConfig;
 
 /// Run semantic checks on `doc` against the supplied `AnalysisSession`.
-///
-/// Replaces the legacy MirDb-mutating path (pre mir 0.22). The session owns
-/// the workspace MirDb internally; this function ingests the current file,
-/// runs Pass 2 via `FileAnalyzer`, and returns LSP diagnostics filtered by
-/// `DiagnosticsConfig`.
+/// Ingests the current file, runs Pass 2 via `FileAnalyzer`, and returns LSP
+/// diagnostics filtered by `DiagnosticsConfig`.
 pub fn semantic_diagnostics(
     uri: &Url,
     doc: &ParsedDoc,
@@ -97,7 +94,9 @@ fn issue_passes_filter(issue: &mir_issues::Issue, cfg: &DiagnosticsConfig) -> bo
         | IssueKind::InvalidOperand { .. }
         | IssueKind::InvalidCast { .. }
         | IssueKind::AbstractInstantiation { .. }
-        | IssueKind::MixedClone => cfg.type_errors,
+        | IssueKind::MixedClone
+        | IssueKind::ReadonlyPropertyAssignment { .. }
+        | IssueKind::ArgumentTypeCoercion { .. } => cfg.type_errors,
         IssueKind::DeprecatedCall { .. }
         | IssueKind::DeprecatedMethodCall { .. }
         | IssueKind::DeprecatedMethod { .. }
@@ -108,28 +107,22 @@ fn issue_passes_filter(issue: &mir_issues::Issue, cfg: &DiagnosticsConfig) -> bo
         | IssueKind::DuplicateTrait { .. }
         | IssueKind::DuplicateEnum { .. }
         | IssueKind::DuplicateFunction { .. } => cfg.duplicate_declarations,
-        // mir 0.22 unused-symbol warnings. Off by default; opt in via
-        // `diagnostics.unusedSymbols` in initializationOptions.
         IssueKind::UnusedVariable { .. }
         | IssueKind::UnusedParam { .. }
         | IssueKind::UnusedMethod { .. }
         | IssueKind::UnusedProperty { .. }
         | IssueKind::UnusedFunction { .. } => cfg.unused_symbols,
-        // mir 0.36 missing-type-annotation lints. Off by default; opt in via
-        // `diagnostics.missingTypes`.
         IssueKind::MissingReturnType { .. }
         | IssueKind::MissingParamType { .. }
         | IssueKind::MissingPropertyType { .. } => cfg.missing_types,
-        // mir 0.36 mixed-type usage lints. Off by default; opt in via
-        // `diagnostics.mixedUsage`.
         IssueKind::MixedArgument { .. }
         | IssueKind::MixedAssignment { .. }
         | IssueKind::MixedMethodCall { .. }
         | IssueKind::MixedPropertyFetch { .. }
         | IssueKind::MixedPropertyAssignment { .. }
         | IssueKind::MixedArrayAccess
-        | IssueKind::MixedArrayOffset => cfg.mixed_usage,
-        // mir 0.41 Info-severity diagnostics — always shown.
+        | IssueKind::MixedArrayOffset
+        | IssueKind::MixedReturnStatement { .. } => cfg.mixed_usage,
         IssueKind::DocblockTypeContradiction { .. }
         | IssueKind::UnevaluatedCode { .. }
         | IssueKind::IfThisIsMismatch { .. } => true,
@@ -138,8 +131,7 @@ fn issue_passes_filter(issue: &mir_issues::Issue, cfg: &DiagnosticsConfig) -> bo
 }
 
 fn to_lsp_diagnostic(issue: mir_issues::Issue) -> Diagnostic {
-    // mir 0.29+ uses 1-based lines; LSP uses 0-based.
-    // mir 0.42.0+ uses 0-based columns throughout (both body-analysis and collector-stored).
+    // mir uses 1-based lines; LSP uses 0-based. Columns are 0-based on both sides.
     let line = issue.location.line.saturating_sub(1);
     let col_start = issue.location.col_start as u32;
     let col_end = issue.location.col_end as u32;

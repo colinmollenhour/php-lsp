@@ -3,7 +3,6 @@
 //! (`resolve`), the per-file name→declarations table (`symbol_map`), and
 //! built-in class member lookup from the bundled stubs (`stub_members`).
 
-pub mod array_inference;
 pub mod resolve;
 pub mod symbol_map;
 pub mod type_map;

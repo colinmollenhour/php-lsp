@@ -377,19 +377,9 @@ pub(super) fn resolve_receiver_class(
     // class-typed symbol at the position: it covers `@var`-annotated variables,
     // `@param` hints (including `@psalm-type` aliases), `@var list<T>` foreach
     // element propagation, and first-class callables (`strlen(...)` → Closure).
-    // The array_inference tier handles `array_map` callbacks where neither mir
-    // nor TypeMap records an element type.
     analysis
         .and_then(|a| receiver_class_at(a, var_offset))
         .or_else(|| type_map.get(&var_name).map(str::to_owned))
-        .or_else(|| {
-            let val_name = var_name.trim_start_matches('$');
-            let arr_name = crate::types::array_inference::find_foreach_array_var(
-                &doc.program().stmts,
-                val_name,
-            )?;
-            crate::types::array_inference::scan_array_map_return(&doc.program().stmts, arr_name)
-        })
 }
 
 /// Resolve the class(es) of a receiver variable from mir's recorded symbol at
