@@ -101,10 +101,7 @@ async fn workspace_symbol_finds_class_by_short_name() {
     expect!["Class       User @ src/Model/User.php:4"].assert_eq(&out);
 }
 
-/// Regression: workspace/symbol with no matches must return `[]`, not `null`.
-/// Prior to the fix, the server returned JSON `null` for empty results, which
-/// violates the LSP spec (WorkspaceSymbol[] | null — but callers that always
-/// expect an array would break).
+/// workspace/symbol with no matches returns `[]`, not `null`.
 #[tokio::test]
 async fn workspace_symbols_returns_empty_array_not_null_on_no_match() {
     let mut s = TestServer::new().await;
@@ -558,9 +555,8 @@ async fn document_symbols_deprecated_method() {
     );
 }
 
-/// Regression: when a class member name (method, property, constant) matches an
-/// earlier top-level function, `selectionRange` must fall inside the member's
-/// `fullRange`. VSCode's `Fr.validate` rejects the entire response otherwise.
+/// When a class member name matches an earlier top-level function, `selectionRange`
+/// falls inside the member's `fullRange`, not the function's range.
 #[tokio::test]
 async fn document_symbols_selection_range_class_member_name_matches_earlier_function() {
     let mut s = TestServer::new().await;
@@ -588,8 +584,8 @@ class Pipeline {
     .assert_eq(&render_document_symbols(&resp));
 }
 
-/// Regression: when two classes share a method name, the second class's method
-/// `selectionRange` must not point into the first class.
+/// When two classes share a method name, each method's `selectionRange` points
+/// into its own class, not the other.
 #[tokio::test]
 async fn document_symbols_selection_range_second_class_method_not_confused() {
     let mut s = TestServer::new().await;
@@ -616,8 +612,8 @@ class Beta {
     .assert_eq(&render_document_symbols(&resp));
 }
 
-/// Regression: interface method name matching an earlier top-level function
-/// must have `selectionRange` inside the interface member's `fullRange`.
+/// When an interface method name matches an earlier top-level function, `selectionRange`
+/// falls inside the interface member's range.
 #[tokio::test]
 async fn document_symbols_selection_range_interface_method_matches_earlier_function() {
     let mut s = TestServer::new().await;
@@ -641,8 +637,8 @@ interface Reader {
     .assert_eq(&render_document_symbols(&resp));
 }
 
-/// Regression: trait method name matching an earlier top-level function must
-/// have `selectionRange` inside the trait member's `fullRange`.
+/// When a trait method name matches an earlier top-level function, `selectionRange`
+/// falls inside the trait member's range.
 #[tokio::test]
 async fn document_symbols_selection_range_trait_method_matches_earlier_function() {
     let mut s = TestServer::new().await;
@@ -666,8 +662,8 @@ trait Formatter {
     .assert_eq(&render_document_symbols(&resp));
 }
 
-/// Regression: enum case name matching an earlier top-level function must have
-/// `selectionRange` inside the enum member's `fullRange`.
+/// When an enum case name matches an earlier top-level function, `selectionRange`
+/// falls inside the enum member's range.
 #[tokio::test]
 async fn document_symbols_selection_range_enum_case_matches_earlier_function() {
     let mut s = TestServer::new().await;
@@ -691,8 +687,8 @@ enum Status {
     .assert_eq(&render_document_symbols(&resp));
 }
 
-/// Regression: enum method name matching an earlier top-level function must
-/// have `selectionRange` inside the enum member's `fullRange`.
+/// When an enum method name matches an earlier top-level function, `selectionRange`
+/// falls inside the enum member's range.
 #[tokio::test]
 async fn document_symbols_selection_range_enum_method_matches_earlier_function() {
     let mut s = TestServer::new().await;

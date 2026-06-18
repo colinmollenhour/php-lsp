@@ -38,10 +38,7 @@ function wrap(): void {
         .await;
 }
 
-/// Regression: `new ShortName()` where `use A\B\ShortName;` must not emit
-/// UndefinedClass when the class is on disk (PSR-4 lazy-loading path).
-/// Distinct from `psr4_imported_class_not_flagged_before_workspace_scan` which
-/// only tested parameter type hints — this exercises the `new` expression path.
+/// `new ShortName()` where `use A\B\ShortName;` must not emit UndefinedClass.
 #[tokio::test]
 async fn argument_type_mismatch_detected() {
     let mut server = TestServer::new().await;

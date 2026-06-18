@@ -106,9 +106,7 @@ echo $w$0;
     .await;
 }
 
-/// Variable assigned from an enum case constant (`$x = Status::Active`).
-/// mir 0.31.0 synthesises a `TNamedObject` for enum-case assignments; this
-/// test guards that the mir path resolves the type (no TypeMap fallback needed).
+/// Variable assigned from an enum case constant resolves to the enum type.
 #[tokio::test]
 async fn type_definition_variable_from_enum_case_assignment() {
     let mut s = TestServer::new().await;
@@ -230,9 +228,7 @@ function write_log(Logger $l$0): void {}
 
 // ── Tests for indexed type definition (background files) ────
 
-/// Type definition should resolve types from background-indexed files
-/// This tests the goto_type_definition_from_index code path.
-/// Note: The indexed version returns the class keyword location from the index.
+/// Type definition resolves types from background-indexed (not-opened) files.
 #[tokio::test]
 async fn type_definition_from_background_indexed_file() {
     let mut s = TestServer::with_fixture("psr4-mini").await;
@@ -357,10 +353,7 @@ function create(UserAccount $acc$0): void {}
     .await;
 }
 
-/// **LIMITATION**: Generic-like syntax (e.g., Collection<User>) is not supported.
-/// The type hint parser doesn't understand generic syntax. This test uses `Collection` (valid PHP)
-/// to verify that without explicit type information, generic parameters aren't synthesized.
-/// TODO: Parse and handle generic-like type syntax.
+/// Generic-like syntax (`Collection<User>`) is not resolved; type definition returns nothing.
 #[tokio::test]
 async fn type_definition_limitation_generic_types_not_supported() {
     let mut s = TestServer::new().await;
@@ -374,12 +367,10 @@ function process(Collection<User> $items$0): void {}
 "#,
         )
         .await;
-    // Generic syntax isn't recognized - Collection<User> is parsed as something unexpected
     expect!["<none>"].assert_eq(&out);
 }
 
-/// Enum method parameters should have type definitions resolved.
-/// Regression: param_type_for previously did not check StmtKind::Enum.
+/// Type definition on a parameter inside an enum method resolves correctly.
 #[tokio::test]
 async fn type_definition_enum_method_parameter() {
     let mut s = TestServer::new().await;
@@ -396,8 +387,7 @@ enum Status {
     .await;
 }
 
-/// When multiple classes share a short name, exact FQN match should be preferred.
-/// Regression: goto_type_definition_from_index previously returned first short name match.
+/// When multiple classes share a short name, the exact FQN match is preferred.
 #[tokio::test]
 async fn type_definition_prefers_exact_fqn_over_short_name() {
     let mut s = TestServer::new().await;
@@ -422,8 +412,7 @@ function create(User $u$0): void {}
     .await;
 }
 
-/// Unqualified type names in non-global namespaces should be resolved with namespace context.
-/// Regression: param_type_for previously didn't qualify unqualified names.
+/// Unqualified type names in non-global namespaces are resolved with namespace context.
 #[tokio::test]
 async fn type_definition_unqualified_name_in_namespace() {
     let mut s = TestServer::new().await;
@@ -446,11 +435,9 @@ class UserService {
     .await;
 }
 
-// ── Regression tests for $var FQN resolution ─────────────────────────────────
+// ── $var FQN resolution ───────────────────────────────────────────────────────
 
-/// `$var = new Class()` in a namespace: TypeMap stores only the short class name,
-/// but resolve_fqn must qualify it to the file's namespace so the FQN-scoped
-/// search picks the right file when two classes share the same short name.
+/// `$var = new Class()` in a namespace resolves to the class in the same namespace.
 #[tokio::test]
 async fn type_definition_var_new_in_namespace_prefers_same_namespace() {
     let mut s = TestServer::new().await;
@@ -504,8 +491,7 @@ $inv$0->total();
     .await;
 }
 
-/// Typed parameter in a class method (not a top-level function) in a namespace.
-/// Regression: param_type_for must recurse into class members.
+/// Type definition on a typed parameter inside a namespaced class method.
 #[tokio::test]
 async fn type_definition_method_param_in_namespaced_class() {
     let mut s = TestServer::new().await;
@@ -607,7 +593,7 @@ function dispatch(Cmd $c$0): void {}
     .await;
 }
 
-// ── Regression tests for index (background file) FQN resolution ──────────────
+// ── index (background file) FQN resolution ───────────────────────────────────
 
 /// Background-indexed class: `$var` in a namespace resolves without an explicit
 /// `use` import — the namespace itself qualifies the short class name to an FQN.
@@ -632,8 +618,7 @@ $u$0->greet();
     .assert_eq(&out);
 }
 
-/// Background-indexed class: typed parameter with `use` alias, index path.
-/// Tests that goto_type_definition_from_index also resolves aliases.
+/// Type definition for a `use`-aliased type resolves from a background-indexed file.
 #[tokio::test]
 async fn type_definition_index_param_alias_resolved() {
     let mut s = TestServer::with_fixture("psr4-mini").await;

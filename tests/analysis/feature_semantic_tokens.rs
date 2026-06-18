@@ -977,10 +977,7 @@ async fn semantic_tokens_match_expression() {
     .assert_eq(&out);
 }
 
-/// Regression: foreach key/value variables were not being tokenized.
-/// Previously, collect_stmt for StmtKind::Foreach only tokenized f.expr and f.body,
-/// leaving $k and $v without TT_VARIABLE tokens.
-/// Bug #6 from ROADMAP: foreach key/value now collected.
+/// foreach key/value variables are tokenized as `TT_VARIABLE`.
 #[tokio::test]
 async fn semantic_tokens_foreach_key_value_variables() {
     use common::render_semantic_tokens;

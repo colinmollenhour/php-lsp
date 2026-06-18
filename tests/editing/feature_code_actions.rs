@@ -797,13 +797,9 @@ class Logger {
     );
 }
 
-// --- Regression tests for property type hint propagation ---
+// ── property type hint propagation ───────────────────────────────────────────
 
-/// Regression: property type hints were not propagated to promoted parameters.
-/// When promoting a typed property (e.g., "private string $name") where the
-/// constructor parameter had no explicit type, the generated parameter would lose
-/// the property's type hint, producing "private $name" instead of "private string $name".
-/// Bug #9 from ROADMAP: type hint now stored in prop_info and emitted during promotion.
+/// Promoting a typed property preserves the type hint on the generated parameter.
 #[tokio::test]
 async fn promote_action_with_property_type_hint() {
     let mut server = TestServer::new().await;

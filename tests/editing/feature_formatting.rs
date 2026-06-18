@@ -404,8 +404,7 @@ async fn on_type_formatting_newline_no_edit_when_already_correct() {
     );
 }
 
-/// Range formatting on a code snippet that doesn't start with <?php
-/// exercises the header injection and stripping path.
+/// Range formatting on a snippet without a leading `<?php` tag.
 #[tokio::test]
 async fn range_formatting_non_php_tagged_snippet() {
     let mut server = TestServer::new().await;

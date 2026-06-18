@@ -148,10 +148,7 @@ $u->na$0
 
 #[tokio::test]
 async fn completion_method_chain_does_not_panic() {
-    // Regression: `resolve_receiver_class` returned None for method-chain receivers
-    // like `$obj->bar()->` because the var-name extractor stops at `)`. The fix
-    // delegates to mir's type-at-offset. This test verifies the server returns a
-    // valid response (no crash, no LSP error) for a chained call cursor position.
+    // Completion on a method-chain receiver (`$obj->bar()->`) must not panic.
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let ls = labels(
@@ -4392,15 +4389,9 @@ createUser($0
     .assert_eq(&out);
 }
 
-// ── Audit report §1: member/static completion via the workspace index ───────
-// Re-verification of the audit's "namespaced completion is broken" finding.
-// Checked through the hardest path — the receiver's class is an indexed
-// (not-open) file inside a `namespace` — and it WORKS once the index is ready.
-// The live failure was an index-not-ready artifact of §3 (on the 36k-file repo
-// the scan never completes, so completion ran against a partial index). These
-// guard the namespace-aware index path against regression.
+// ── member/static completion via the workspace index ─────────────────────────
 
-/// CONTROL: member completion, class resolved from the index, global namespace.
+/// Member completion when the class is index-only, global namespace.
 #[tokio::test]
 async fn completion_member_from_index_global_namespace() {
     let tmp = tempfile::tempdir().unwrap();

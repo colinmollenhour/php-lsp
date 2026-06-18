@@ -353,10 +353,8 @@ async fn inlay_hints_respects_lsp_half_open_range_semantics() {
     expect![[r#"2:2 x:"#]].assert_eq(&out);
 }
 
-/// Regression: method hint collisions when multiple classes define methods with same name.
-/// Previously, method hints were keyed by bare method_name, so when two classes both
-/// defined process() with different signatures, the wrong hint was shown.
-/// Bug #8 from ROADMAP: method hints now keyed by "ClassName::methodName".
+/// Method hint collisions: when multiple classes define a method with the same name,
+/// each call site shows the correct parameter hints for its own class.
 #[tokio::test]
 async fn inlay_hints_method_name_collision() {
     let mut s = TestServer::new().await;

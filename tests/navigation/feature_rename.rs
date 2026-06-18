@@ -55,8 +55,7 @@ $g->hello();
     .await;
 }
 
-/// Regression: renaming a variable inside an enum method previously produced
-/// zero edits because collect_in_fn_at had no arm for StmtKind::Enum.
+/// Renaming a variable inside an enum method produces edits for all occurrences.
 #[tokio::test]
 async fn rename_variable_inside_enum_method() {
     let mut s = TestServer::new().await;
@@ -74,9 +73,7 @@ enum Status {
     .await;
 }
 
-/// Regression: renaming a variable parameter in an interface method previously
-/// produced zero edits because collect_in_fn_at gated param collection inside
-/// `if let Some(body)`, but interface methods have no body.
+/// Renaming a variable parameter in an interface method (bodyless) produces edits.
 #[tokio::test]
 async fn rename_variable_interface_method_param() {
     let mut s = TestServer::new().await;
@@ -93,7 +90,7 @@ interface Logger {
     .await;
 }
 
-/// Regression: same bug as above but for abstract class methods.
+/// Renaming a variable parameter in an abstract class method produces edits.
 #[tokio::test]
 async fn rename_variable_abstract_class_method_param() {
     let mut s = TestServer::new().await;
@@ -110,7 +107,7 @@ abstract class Processor {
     .await;
 }
 
-/// Regression: same bug as above but for abstract trait methods.
+/// Renaming a variable parameter in an abstract trait method produces edits.
 #[tokio::test]
 async fn rename_variable_abstract_trait_method_param() {
     let mut s = TestServer::new().await;
@@ -202,9 +199,7 @@ class Counter {
     .await;
 }
 
-/// Regression for #141: rename must rewrite the matching segment of a `use`
-/// import in addition to call sites. Pinned via snapshot so a future change to
-/// the single-pass walker cannot silently drop the `use`-line edit.
+/// Renaming a class rewrites the matching `use` import in addition to call sites.
 #[tokio::test]
 async fn rename_class_rewrites_use_import_in_same_file() {
     let mut s = TestServer::new().await;
@@ -620,12 +615,9 @@ async fn rename_superglobal_is_blocked_by_prepare_rename() {
     }
 }
 
-// --- Regression tests for bugs fixed in walk.rs and rename.rs ---
+// ── variable rename: scope boundaries ────────────────────────────────────────
 
-/// Regression: arrow functions auto-capture outer-scope variables.
-/// Previously, VarRefsVisitor treated arrow functions as hard scope boundaries
-/// and did not recurse into their body, leaving arrow function references unrenamed.
-/// Bug #2 from ROADMAP: arrow functions now properly auto-capture.
+/// Arrow functions auto-capture outer-scope variables; rename covers those captures.
 #[tokio::test]
 async fn rename_variable_in_arrow_function() {
     let mut s = TestServer::new().await;
@@ -693,10 +685,7 @@ function process(): void {
     .await;
 }
 
-/// Regression: closure use() clause variables were not being collected during rename.
-/// Previously, VarRefsVisitor returned early on closures without checking use_vars,
-/// leaving the use() clause pointing to the old undefined name.
-/// Bug #3 from ROADMAP: closures now collect use() references before stopping.
+/// Closure `use()` clause variables are included when renaming the captured variable.
 #[tokio::test]
 async fn rename_variable_in_closure_use_clause() {
     let mut s = TestServer::new().await;
@@ -770,12 +759,7 @@ function process(): void {
     .await;
 }
 
-/// Regression: rename with same-named symbols in different namespaces was not FQN-aware.
-/// Previously, rename() called find_references_with_use without FQN context,
-/// causing cross-namespace false matches.
-/// Bug #4 from ROADMAP: namespace-aware rename now resolves target FQN.
-/// This test demonstrates that renaming a class resolves its FQN correctly
-/// within a single namespace scope.
+/// Renaming a class is FQN-aware; same-named symbols in other namespaces are not affected.
 #[tokio::test]
 async fn rename_within_namespace_scope() {
     let mut s = TestServer::new().await;
