@@ -2,6 +2,30 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.12.0] — 2026-06-19
+
+### Features
+
+- **Trait alias go-to-definition**: Go-to-definition on a call to a trait-aliased method (`use Trait { orig as alias }`) now redirects to the original method in the aliasing trait. `FileIndex` records these aliases in `ClassDef.trait_method_aliases` so the resolution works without a full `ParsedDoc`.
+- **PSR-0 autoloading**: `Psr4Map` now reads `psr-0` entries from `composer.json` and `vendor/composer/installed.json` and tries them as a fallback when PSR-4 resolution returns nothing. Go-to-definition for underscore-separated class names (e.g. `Acme_Client`) in PSR-0 vendor packages now resolves correctly.
+- **`is_readonly` and `is_backed_enum` in FileIndex**: `ClassDef` gains `is_readonly` (readonly class modifier) and `is_backed_enum` (enum with a scalar backing type); `PropertyDef` gains `is_readonly`. All three are extracted during `FileIndex::extract` so cross-file features can use them without a full parse.
+
+### Bug Fixes
+
+- **Readonly class hover from index**: Hovering a readonly class defined in a background file now renders `readonly class Foo` instead of `class Foo`. `class_hover_from_index` was checking `is_abstract` but not the new `is_readonly` flag.
+- **Anonymous class implementations navigable**: `new class implements I {}` now appears in go-to-implementation results. `collect_anon_class_in_expr` previously missed the `ExprKind::New` wrapper that anonymous-class expressions are parsed into.
+- **TypeMap fallback improvements** (used when mir analysis is unavailable at an offset):
+  - Generic params stripped from docblock class names (`@var Collection<User>` → `Collection`).
+  - `list<T>`, `array<T>`, and `iterable<T>` element types propagated to foreach loop variables.
+  - `@psalm-type` / `@phpstan-type` aliases in file-level docblocks collected and expanded so `@param Result $r` resolves when `Result` is a local alias.
+  - `$fn = strlen(...)` (first-class callable) now registers `$fn` as `Closure` in the fallback path.
+  - `@psalm-type` aliases inside braced-namespace blocks are now collected.
+- **Variable hover completeness**: Variable hover now uses mir for scalar and callable types (int, string, callable, …) that were previously silently dropped when TypeMap had nothing.
+
+### Dependencies
+
+- mir updated to 0.45.0; `array_inference` fallback removed (no longer needed).
+
 ## [0.11.0] — 2026-06-17
 
 ### Features
