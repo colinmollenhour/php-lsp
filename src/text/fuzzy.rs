@@ -100,21 +100,9 @@ fn starts_with_at(candidate: &str, query_lower: &str, at: usize) -> bool {
     }
 }
 
-/// One-shot wrapper around [`FuzzyQuery::camel_match`]. Prefer building a
-/// [`FuzzyQuery`] outside the loop when matching many candidates.
-pub(crate) fn fuzzy_camel_match(query: &str, candidate: &str) -> bool {
-    FuzzyQuery::new(query).camel_match(candidate)
-}
-
-/// One-shot wrapper around [`FuzzyQuery::symbol_match`]. Prefer building a
-/// [`FuzzyQuery`] outside the loop when matching many candidates.
-pub(crate) fn fuzzy_symbol_match(query: &str, candidate: &str) -> bool {
-    FuzzyQuery::new(query).symbol_match(candidate)
-}
-
 /// Compute a sort key so prefix matches sort before camel-abbreviation matches.
 /// Lower string = higher priority.  Only called on items that passed
-/// [`fuzzy_camel_match`], so the `else` branch (substring) is unreachable here.
+/// [`FuzzyQuery::camel_match`], so the `else` branch (substring) is unreachable here.
 pub(crate) fn camel_sort_key(query: &str, label: &str) -> String {
     let lq = query.to_lowercase();
     let ll = label.to_lowercase();
@@ -129,36 +117,43 @@ pub(crate) fn camel_sort_key(query: &str, label: &str) -> String {
 mod tests {
     use super::*;
 
+    fn camel(query: &str, candidate: &str) -> bool {
+        FuzzyQuery::new(query).camel_match(candidate)
+    }
+    fn symbol(query: &str, candidate: &str) -> bool {
+        FuzzyQuery::new(query).symbol_match(candidate)
+    }
+
     #[test]
     fn fuzzy_camel_match_prefix() {
-        assert!(fuzzy_camel_match("Blog", "BlogController"));
-        assert!(fuzzy_camel_match("blog", "BlogController"));
+        assert!(camel("Blog", "BlogController"));
+        assert!(camel("blog", "BlogController"));
     }
 
     #[test]
     fn fuzzy_camel_match_abbreviation() {
-        assert!(fuzzy_camel_match("BC", "BlogController"));
-        assert!(fuzzy_camel_match("GRF", "getRecentFiles"));
-        assert!(fuzzy_camel_match("str_r", "str_replace")); // boundary after '_'
+        assert!(camel("BC", "BlogController"));
+        assert!(camel("GRF", "getRecentFiles"));
+        assert!(camel("str_r", "str_replace")); // boundary after '_'
     }
 
     #[test]
     fn fuzzy_camel_match_no_substring() {
-        // fuzzy_camel_match (used for completions) must NOT match substrings
-        assert!(!fuzzy_camel_match("Controller", "BlogController"));
-        assert!(!fuzzy_camel_match("xyz", "BlogController"));
+        // camel_match (used for completions) must NOT match substrings
+        assert!(!camel("Controller", "BlogController"));
+        assert!(!camel("xyz", "BlogController"));
     }
 
     #[test]
     fn fuzzy_symbol_match_substring_fallback() {
-        // fuzzy_symbol_match (used for workspace symbols) DOES match substrings
-        assert!(fuzzy_symbol_match("Controller", "BlogController"));
-        assert!(fuzzy_symbol_match("controller", "BlogController"));
-        assert!(fuzzy_symbol_match("controller", "UserController"));
+        // symbol_match (used for workspace symbols) DOES match substrings
+        assert!(symbol("Controller", "BlogController"));
+        assert!(symbol("controller", "BlogController"));
+        assert!(symbol("controller", "UserController"));
         // prefix and camel still work
-        assert!(fuzzy_symbol_match("Blog", "BlogController"));
-        assert!(fuzzy_symbol_match("BC", "BlogController"));
+        assert!(symbol("Blog", "BlogController"));
+        assert!(symbol("BC", "BlogController"));
         // no match
-        assert!(!fuzzy_symbol_match("xyz", "BlogController"));
+        assert!(!symbol("xyz", "BlogController"));
     }
 }
