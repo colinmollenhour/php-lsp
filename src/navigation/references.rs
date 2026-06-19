@@ -11,9 +11,8 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use super::walk::{
     all_class_ref_names_in_stmts, class_refs_in_stmts, constant_refs_in_stmts,
-    fqn_new_class_refs_in_stmts, function_refs_in_stmts, global_constant_refs_in_stmts,
-    method_refs_in_stmts, new_refs_in_stmts, property_refs_in_stmts, refs_in_stmts,
-    refs_in_stmts_with_use,
+    function_refs_in_stmts, global_constant_refs_in_stmts, method_refs_in_stmts, new_refs_in_stmts,
+    property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use,
 };
 use crate::document::ast::{ParsedDoc, str_offset_in_range};
 use crate::text::{fqn_short_name, utf16_code_units};
@@ -308,14 +307,6 @@ fn collect_imports_filtered(
         let _ = v.visit_stmt(stmt);
     }
     v.out
-}
-
-/// Collect every FQN class name (e.g. `\App\Model\Entity`) referenced in a
-/// `new` expression that has no corresponding `use` import (i.e. written with
-/// a leading `\`).  Returns de-duplicated strings with the leading `\` stripped,
-/// ready for `session.lazy_load_class`.
-pub(crate) fn collect_fqn_new_class_refs(doc: &ParsedDoc) -> Vec<String> {
-    fqn_new_class_refs_in_stmts(&doc.program().stmts)
 }
 
 /// Collect every class-typed reference in `doc` (extends, implements, new,
