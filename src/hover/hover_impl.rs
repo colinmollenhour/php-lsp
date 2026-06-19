@@ -29,16 +29,6 @@ fn is_hoverable(decl: &Declaration<'_>) -> bool {
     )
 }
 
-pub(crate) fn hover_info(
-    source: &str,
-    doc: &ParsedDoc,
-    analysis: Option<&mir_analyzer::FileAnalysis>,
-    position: Position,
-    other_docs: &[(Url, Arc<ParsedDoc>)],
-) -> Option<Hover> {
-    hover_at(source, doc, analysis, other_docs, position, None)
-}
-
 /// Indexed variant: uses pre-computed [`SymbolMap`]s for the cross-file
 /// declaration lookup (path 4/5), eliminating repeated AST walks on stable
 /// files. All other paths (named-arg hover, mir-member hover, static-prop
@@ -65,40 +55,6 @@ pub fn hover_info_with_maps(
                     && let Some(sig) = &entry.signature
                 {
                     return Some((sig.clone(), entry.doc_markdown.clone()));
-                }
-            }
-            None
-        },
-    )
-}
-
-/// Full hover: the cross-file declaration lookup walks `other_docs` with
-/// [`resolve_declaration`]. See [`hover_at_core`] for the shared body.
-pub fn hover_at(
-    source: &str,
-    doc: &ParsedDoc,
-    analysis: Option<&mir_analyzer::FileAnalysis>,
-    other_docs: &[(Url, Arc<ParsedDoc>)],
-    position: Position,
-    session: Option<&mir_analyzer::AnalysisSession>,
-) -> Option<Hover> {
-    hover_at_core(
-        source,
-        doc,
-        analysis,
-        other_docs,
-        position,
-        session,
-        |resolved_word| {
-            for (_, other) in other_docs {
-                if let Some(sig) =
-                    resolve_declaration(&other.program().stmts, resolved_word, &is_hoverable)
-                        .and_then(|d| declaration_signature(&d, resolved_word))
-                {
-                    let md = find_docblock(&other.program().stmts, resolved_word)
-                        .map(|db| db.to_markdown())
-                        .filter(|md| !md.is_empty());
-                    return Some((sig, md));
                 }
             }
             None
@@ -647,7 +603,7 @@ mod tests {
         // the integration tests that use TestServer with a real session.
         let src = "<?php\n$pdo = new PDO('sqlite::memory:');\n$pdo->query('SELECT 1');";
         let doc = ParsedDoc::parse(src.to_string());
-        let h = hover_at(src, &doc, None, &[], pos(1, 12), None);
+        let h = hover_info_with_maps(src, &doc, None, pos(1, 12), &[], &[], None);
         assert!(h.is_none(), "built-in class hover requires a session");
     }
 }
