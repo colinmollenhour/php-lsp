@@ -64,6 +64,11 @@ pub struct ClassDef {
     pub fqn: Box<str>,
     pub kind: ClassKind,
     pub is_abstract: bool,
+    /// `true` for `readonly class Foo {}` (PHP 8.2+).
+    pub is_readonly: bool,
+    /// `true` for backed enums (`enum Status: string {}`); always `false` for
+    /// pure enums and non-enum class kinds.
+    pub is_backed_enum: bool,
     /// `extends` clause as written in source (may be short name or FQN).
     pub parent: Option<Arc<str>>,
     pub implements: Vec<Arc<str>>,
@@ -141,6 +146,7 @@ pub enum Visibility {
 pub struct PropertyDef {
     pub name: Box<str>,
     pub is_static: bool,
+    pub is_readonly: bool,
     pub type_hint: Option<Box<str>>,
     pub visibility: Visibility,
     pub start_line: u32,
@@ -236,6 +242,8 @@ fn collect_stmts(
                     fqn: fqn(ns, class_name_str),
                     kind: ClassKind::Class,
                     is_abstract: c.modifiers.is_abstract,
+                    is_readonly: c.modifiers.is_readonly,
+                    is_backed_enum: false,
                     parent: c
                         .extends
                         .as_ref()
@@ -273,6 +281,7 @@ fn collect_stmts(
                                     class_def.properties.push(PropertyDef {
                                         name: Box::from(p_name),
                                         is_static: false,
+                                        is_readonly: ast_param.is_readonly,
                                         type_hint: ast_param
                                             .type_hint
                                             .as_ref()
@@ -306,6 +315,7 @@ fn collect_stmts(
                             class_def.properties.push(PropertyDef {
                                 name: Box::from(p_name),
                                 is_static: p.is_static,
+                                is_readonly: p.is_readonly,
                                 type_hint: p.type_hint.as_ref().map(|t| format_type_hint(t).into()),
                                 visibility: vis,
                                 start_line: pstart,
@@ -377,6 +387,8 @@ fn collect_stmts(
                     fqn: fqn(ns, i_name),
                     kind: ClassKind::Interface,
                     is_abstract: true,
+                    is_readonly: false,
+                    is_backed_enum: false,
                     parent: None,
                     implements: i
                         .extends
@@ -435,6 +447,8 @@ fn collect_stmts(
                     fqn: fqn(ns, t_name),
                     kind: ClassKind::Trait,
                     is_abstract: false,
+                    is_readonly: false,
+                    is_backed_enum: false,
                     parent: None,
                     implements: Vec::new(),
                     traits: Vec::new(),
@@ -478,6 +492,7 @@ fn collect_stmts(
                             trait_def.properties.push(PropertyDef {
                                 name: Box::from(p_name),
                                 is_static: p.is_static,
+                                is_readonly: p.is_readonly,
                                 type_hint: p.type_hint.as_ref().map(|t| format_type_hint(t).into()),
                                 visibility: vis,
                                 start_line: pstart,
@@ -526,6 +541,8 @@ fn collect_stmts(
                     fqn: fqn(ns, e_name),
                     kind: ClassKind::Enum,
                     is_abstract: false,
+                    is_readonly: false,
+                    is_backed_enum: e.scalar_type.is_some(),
                     parent: None,
                     implements: e
                         .implements
@@ -734,6 +751,70 @@ mod tests {
                 .iter()
                 .any(|c| c.as_ref() == "Inactive")
         );
+    }
+
+    #[test]
+    fn pure_enum_is_not_backed() {
+        let src = "<?php\nenum Direction { case North; case South; }";
+        let doc = ParsedDoc::parse(src.to_string());
+        let idx = FileIndex::extract(&doc);
+        assert!(!idx.classes[0].is_backed_enum);
+    }
+
+    #[test]
+    fn backed_enum_is_marked() {
+        let src = "<?php\nenum Status: string { case Active = 'active'; }";
+        let doc = ParsedDoc::parse(src.to_string());
+        let idx = FileIndex::extract(&doc);
+        assert!(idx.classes[0].is_backed_enum);
+    }
+
+    #[test]
+    fn readonly_class_is_marked() {
+        let src = "<?php\nreadonly class ValueObject { public function __construct(public string $id) {} }";
+        let doc = ParsedDoc::parse(src.to_string());
+        let idx = FileIndex::extract(&doc);
+        let cls = &idx.classes[0];
+        assert!(cls.is_readonly);
+    }
+
+    #[test]
+    fn non_readonly_class_is_not_marked() {
+        let src = "<?php\nclass Plain {}";
+        let doc = ParsedDoc::parse(src.to_string());
+        let idx = FileIndex::extract(&doc);
+        assert!(!idx.classes[0].is_readonly);
+    }
+
+    #[test]
+    fn readonly_property_is_marked() {
+        let src = "<?php\nclass Dto { public readonly string $value; }";
+        let doc = ParsedDoc::parse(src.to_string());
+        let idx = FileIndex::extract(&doc);
+        let prop = &idx.classes[0].properties[0];
+        assert!(prop.is_readonly);
+    }
+
+    #[test]
+    fn non_readonly_property_is_not_marked() {
+        let src = "<?php\nclass Dto { public string $value; }";
+        let doc = ParsedDoc::parse(src.to_string());
+        let idx = FileIndex::extract(&doc);
+        let prop = &idx.classes[0].properties[0];
+        assert!(!prop.is_readonly);
+    }
+
+    #[test]
+    fn readonly_promoted_param_is_marked() {
+        let src = "<?php\nclass Dto { public function __construct(public readonly string $id) {} }";
+        let doc = ParsedDoc::parse(src.to_string());
+        let idx = FileIndex::extract(&doc);
+        let prop = idx.classes[0]
+            .properties
+            .iter()
+            .find(|p| p.name.as_ref() == "id")
+            .expect("promoted property 'id' should be indexed");
+        assert!(prop.is_readonly);
     }
 
     #[test]
