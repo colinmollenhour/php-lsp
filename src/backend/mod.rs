@@ -44,10 +44,10 @@ pub struct Backend {
 
 impl Backend {
     pub fn new(client: Client) -> Self {
-        // No imperative Codebase field anymore — `self.codebase()` below
-        // delegates to the salsa-memoized `codebase` query, which composes
-        // bundled stubs + every file's StubSlice and returns a fresh
-        // `Arc<Codebase>` (or the memoized one when inputs are unchanged).
+        // No imperative Codebase field anymore — analysis reads the
+        // salsa-memoized `codebase` query, which composes bundled stubs + every
+        // file's StubSlice and returns a fresh `Arc<Codebase>` (or the memoized
+        // one when inputs are unchanged).
         let docs = Arc::new(DocumentStore::new());
         let psr4 = docs.psr4_arc();
         Backend {
@@ -107,14 +107,6 @@ impl Backend {
 
     fn get_doc(&self, uri: &Url) -> Option<Arc<ParsedDoc>> {
         self.open_files.get_doc(&self.docs, uri)
-    }
-
-    /// Current MirDb snapshot for the workspace, owned by the
-    /// `AnalysisSession`. Cheap clone (Arc-wrapped internals).
-    fn codebase(&self) -> mir_analyzer::db::MirDbStorage {
-        let php_version = self.docs.workspace_php_version();
-        let session = self.docs.analysis_session(php_version);
-        session.snapshot_db()
     }
 
     /// `use Foo as Bar;` map for a single file, read directly from the AST.
@@ -279,62 +271,11 @@ impl Backend {
         Some(locs)
     }
 
-    /// Type-aware property access sites from the mir session.
-    ///
-    /// Property refs need type-aware filtering: `$mailer->status` and
-    /// `$order->status` share a name but belong to different classes. Mir keys
-    /// property references on the declaring class (since v0.38.0), so
-    /// `references_to(Name::Property { class: fqcn, name })` returns only
-    /// accesses whose receiver type resolved to the correct owner.
-    ///
-    /// Returns `None` when the kind isn't `Property` or no mir symbol can be
-    /// built (i.e. the cursor is on an access site where the owning class is
-    /// unknown rather than on a declaration).
-    fn session_property_references(
-        &self,
-        word: &str,
-        kind: Option<crate::navigation::references::SymbolKind>,
-        target_fqn: Option<&str>,
-    ) -> Option<Vec<Location>> {
-        if !matches!(
-            kind,
-            Some(crate::navigation::references::SymbolKind::Property)
-        ) {
-            return None;
-        }
-        let sym = build_mir_symbol(word, kind, target_fqn)?;
-        let locs = self
-            .docs
-            .session_references_to(&sym)
-            .into_iter()
-            .filter_map(crate::references::session_tuple_to_location)
-            .collect();
-        Some(locs)
-    }
-
     /// Resolve the PHP version to use. See `autoload::resolve_php_version_from_roots`
     /// for the full priority order.
     fn resolve_php_version(&self, explicit: Option<&str>) -> (String, &'static str) {
         let roots = self.root_paths.load();
         crate::lang::autoload::resolve_php_version_from_roots(&roots, explicit)
-    }
-
-    /// Compute diagnostic publishes for every open dependent of `changed_uri`.
-    /// Uses `session.analyze_dependents_of` to scope work to files whose
-    /// Pass-2 results actually changed; merges LSP-side parse + duplicate-decl
-    /// diagnostics so the publish reflects the full picture per file.
-    async fn compute_dependent_publishes(
-        &self,
-        changed_uri: &Url,
-        diag_cfg: &crate::lang::config::DiagnosticsConfig,
-    ) -> Vec<(Url, Vec<Diagnostic>)> {
-        compute_dependent_publishes_owned(
-            Arc::clone(&self.docs),
-            self.open_files.clone(),
-            changed_uri.clone(),
-            diag_cfg.clone(),
-        )
-        .await
     }
 }
 
