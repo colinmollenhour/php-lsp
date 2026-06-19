@@ -454,6 +454,8 @@ pub fn class_hover_from_index(
                     ClassKind::Class => {
                         if cls.is_abstract {
                             "abstract class"
+                        } else if cls.is_readonly {
+                            "readonly class"
                         } else {
                             "class"
                         }

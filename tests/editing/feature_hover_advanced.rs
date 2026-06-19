@@ -619,6 +619,31 @@ readonly class Poi$0nt { public function __construct(public float $x, public flo
     .await;
 }
 
+/// Hovering on a `readonly class` defined in a background (non-open) file must
+/// show the `readonly class` keyword, not just `class`.
+#[tokio::test]
+async fn hover_readonly_class_from_index_shows_keyword() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_hover(
+            r#"
+//- /Immutable.php
+<?php
+readonly class Immutable {}
+
+//- /main.php
+<?php
+$obj = new Immu$0table();
+"#,
+        )
+        .await;
+    assert!(
+        out.contains("readonly class"),
+        "expected 'readonly class' in hover, got: {out}"
+    );
+}
+
 // ── Use-alias resolution ──────────────────────────────────────────────────────
 
 /// Hovering on `Bar` where `use Foo as Bar` is in scope must show the `Foo`
