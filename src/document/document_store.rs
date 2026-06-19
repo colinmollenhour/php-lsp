@@ -231,7 +231,7 @@ impl DocumentStore {
     /// Return the `Arc<ArcSwap<Psr4Map>>` so callers can share it.
     /// `Backend` clones this arc at construction time so writes
     /// (e.g. loading composer.json on `initialized`) are immediately visible
-    /// to `lazy_load_psr4_imports` without extra plumbing.
+    /// to PSR-4 resolution during analysis without extra plumbing.
     pub fn psr4_arc(&self) -> Arc<ArcSwap<Psr4Map>> {
         Arc::clone(&self.psr4)
     }
@@ -758,37 +758,6 @@ impl DocumentStore {
             .get(uri)
             .filter(|e| e.0.as_str() == result_id)
             .map(|e| Arc::clone(&e.1))
-    }
-
-    /// Before running semantic analysis for `uri`, resolve every `use`-imported
-    /// class through the PSR-4 map and mirror any that are not yet registered.
-    /// This prevents spurious `UndefinedClass` diagnostics when the background
-    /// workspace scan has not yet reached a dependency file.
-    fn lazy_load_psr4_imports(&self, uri: &Url) {
-        let doc = match self.get_doc_salsa(uri) {
-            Some(d) => d,
-            None => return,
-        };
-        let fqns = crate::references::collect_referenced_class_fqns(&doc);
-        if fqns.is_empty() {
-            return;
-        }
-        let psr4 = self.psr4.load();
-        let paths: Vec<std::path::PathBuf> =
-            fqns.iter().filter_map(|fqcn| psr4.resolve(fqcn)).collect();
-        drop(psr4);
-
-        for path in paths {
-            let Ok(dep_url) = Url::from_file_path(&path) else {
-                continue;
-            };
-            if self.file_texts.contains_key(&dep_url) && !self.deleted_uris.contains(&dep_url) {
-                continue;
-            }
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                self.mirror_text(&dep_url, &text);
-            }
-        }
     }
 
     /// Raw semantic issues for a file, computed via mir's session-based
