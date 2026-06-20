@@ -2,6 +2,16 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.12.1] — 2026-06-21
+
+### Bug Fixes
+
+- **Variable goto-def lands on `$name`, not the type annotation**: Go-to-definition on `$var` in a function or method body now jumps to the `$` sigil of the parameter declaration rather than the start of the type annotation span (`Baz $x` previously resolved to `B`).
+- **Find-references on `$variable` was always empty**: The general reference walker matched only `ExprKind::Identifier`, not `ExprKind::Variable`, so variable references never appeared. References for `$var` now use a scope-aware walker that collects all occurrences within the enclosing function/method.
+- **Foreach `$key` leaked into sibling functions**: Variable references were not scoped to the enclosing function, so `$key` in a `foreach` loop would also return same-named variables in unrelated functions. References are now confined to the immediately enclosing function or method body.
+- **`parent::__construct()` returned all constructors in the file**: Cursor on a call site like `parent::__construct()` was falling through to the unscoped method-reference path and returning every `__construct` declaration. It now resolves to the enclosing class's own instantiation sites only.
+- **`parent::__construct()` call-site leaked across namespaces**: In namespaced classes, the call-site fallback now computes the fully-qualified class name (e.g. `Alpha\Widget`) so that same-short-name classes from different namespaces are excluded from the results.
+
 ## [0.12.0] — 2026-06-19
 
 ### Features
