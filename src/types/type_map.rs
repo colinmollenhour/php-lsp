@@ -846,6 +846,89 @@ pub fn enclosing_class_at(_source: &str, doc: &ParsedDoc, position: Position) ->
     enclosing_class_in_stmts(sv, &doc.program().stmts, position)
 }
 
+/// Like [`enclosing_class_at`] but returns the fully-qualified name
+/// (`"Ns\\ClassName"`) when the class lives inside a namespace.
+/// Used by the `__construct` call-site path so that `construct_references`
+/// can apply namespace-level filtering and avoid matching a same-short-named
+/// class in a different namespace.
+pub fn enclosing_class_fqn_at(
+    _source: &str,
+    doc: &ParsedDoc,
+    position: Position,
+) -> Option<String> {
+    let sv = doc.view();
+    enclosing_class_fqn_in_stmts(sv, &doc.program().stmts, position, "")
+}
+
+fn enclosing_class_fqn_in_stmts(
+    sv: SourceView<'_>,
+    stmts: &[Stmt<'_, '_>],
+    pos: Position,
+    ns_prefix: &str,
+) -> Option<String> {
+    let make_fqn = |ns: &str, short: &str| -> String {
+        if ns.is_empty() {
+            short.to_owned()
+        } else {
+            format!("{}\\{}", ns, short)
+        }
+    };
+    let mut current_ns = ns_prefix.to_owned();
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Class(c) => {
+                let start = sv.position_of(stmt.span.start).line;
+                let end = sv.position_of(stmt.span.end).line;
+                if pos.line >= start && pos.line <= end {
+                    return c.name.map(|n| make_fqn(&current_ns, &n.to_string()));
+                }
+            }
+            StmtKind::Interface(i) => {
+                let start = sv.position_of(stmt.span.start).line;
+                let end = sv.position_of(stmt.span.end).line;
+                if pos.line >= start && pos.line <= end {
+                    return Some(make_fqn(&current_ns, &i.name.to_string()));
+                }
+            }
+            StmtKind::Trait(t) => {
+                let start = sv.position_of(stmt.span.start).line;
+                let end = sv.position_of(stmt.span.end).line;
+                if pos.line >= start && pos.line <= end {
+                    return Some(make_fqn(&current_ns, &t.name.to_string()));
+                }
+            }
+            StmtKind::Enum(e) => {
+                let start = sv.position_of(stmt.span.start).line;
+                let end = sv.position_of(stmt.span.end).line;
+                if pos.line >= start && pos.line <= end {
+                    return Some(make_fqn(&current_ns, &e.name.to_string()));
+                }
+            }
+            StmtKind::Namespace(ns) => {
+                let ns_name = ns
+                    .name
+                    .as_ref()
+                    .map(|n| n.to_string_repr().to_string())
+                    .unwrap_or_default();
+                match &ns.body {
+                    NamespaceBody::Braced(inner) => {
+                        if let Some(found) =
+                            enclosing_class_fqn_in_stmts(sv, &inner.stmts, pos, &ns_name)
+                        {
+                            return Some(found);
+                        }
+                    }
+                    NamespaceBody::Simple => {
+                        current_ns = ns_name;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Return the LSP range of the class/interface/trait/enum declaration
 /// whose body contains `position`, or `None` if the cursor is outside any.
 /// Used by linked-editing to scope same-name member rewrites to the

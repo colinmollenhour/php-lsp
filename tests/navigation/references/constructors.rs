@@ -291,6 +291,70 @@ new Alpha();
     .await;
 }
 
+/// Cursor on `parent::__construct()` inside a namespaced child class must be
+/// scoped to that namespace and must not return instantiation sites for a
+/// same-short-name class in a different namespace (braced-namespace style).
+#[tokio::test]
+async fn references_constructor_call_site_namespaced_class_excludes_sibling_namespace() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"//- /a.php
+<?php
+namespace Alpha;
+class Widget extends Base {
+    public function __construct(int $x) {
+        parent::__con$0struct($x);
+    }
+}
+
+//- /b.php
+<?php
+namespace Beta;
+class Widget {
+    public function __construct(string $s) {}
+}
+
+//- /c.php
+<?php
+$a = new \Alpha\Widget(1);
+//       ^^^^^^^^^^^^^ ref
+$b = new \Beta\Widget('x');
+"#,
+    )
+    .await;
+}
+
+/// Same as above but the namespace is declared via the simple (no-brace) style.
+#[tokio::test]
+async fn references_constructor_call_site_simple_namespace_excludes_sibling_namespace() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"//- /a.php
+<?php
+namespace Alpha;
+class Box extends Base {
+    public function __construct(int $n) {
+        parent::__con$0struct($n);
+    }
+}
+
+//- /b.php
+<?php
+namespace Beta;
+class Box {
+    public function __construct(string $s) {}
+}
+
+//- /c.php
+<?php
+$a = new \Alpha\Box(1);
+//       ^^^^^^^^^^ ref
+$b = new \Beta\Box('x');
+"#,
+    )
+    .await;
+}
+
 /// Cursor on `__construct` in the constructor body of a class with a different
 /// name must not bleed into sibling-class constructor references.
 #[tokio::test]

@@ -10,7 +10,7 @@ use crate::navigation::definition::{
 use crate::navigation::references::{SymbolKind, find_references, find_references_with_target};
 use crate::navigation::walk::collect_var_refs_in_scope;
 use crate::text::{fqn_short_name, utf16_code_units, word_at_position};
-use crate::types::type_map::{TypeMap, enclosing_class_at};
+use crate::types::type_map::{TypeMap, enclosing_class_at, enclosing_class_fqn_at};
 
 use super::super::helpers::{
     class_name_at_construct_decl, promoted_property_at_cursor, range_within,
@@ -228,7 +228,7 @@ impl Backend {
                     class_name_at_construct_decl(doc.source(), &doc.program().stmts, position);
                 let on_call_site = decl_class.is_none();
                 let class_name =
-                    decl_class.or_else(|| enclosing_class_at(doc.source(), &doc, position));
+                    decl_class.or_else(|| enclosing_class_fqn_at(doc.source(), &doc, position));
                 if let Some(class_name) = class_name {
                     // When cursor is on a call site (not the `function __construct`
                     // declaration), exclude the cursor span from results — it points
