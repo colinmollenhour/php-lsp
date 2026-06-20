@@ -2,6 +2,51 @@
 
 use super::*;
 
+/// Two classes in the same file share the same property name. References for one
+/// must NOT include the declaration of the other — previously `str_offset` found
+/// the first occurrence in the file, mapping both declarations to class A's span.
+#[tokio::test]
+async fn references_property_same_name_two_classes_no_cross_bleed() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+class A {
+    public int $va$0lue = 0;
+    //          ^^^^^ def
+    public function getA(): int { return $this->value; }
+    //                                          ^^^^^ ref
+}
+class B {
+    public int $value = 0;
+    public function getB(): int { return $this->value; }
+}
+"#,
+    )
+    .await;
+}
+
+/// Same scenario from the other class — cursor on B's property must only show B's
+/// declaration and B's access site, not A's declaration or A's access.
+#[tokio::test]
+async fn references_property_same_name_two_classes_b_side() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+class A {
+    public int $value = 0;
+    public function getA(): int { return $this->value; }
+}
+class B {
+    public int $va$0lue = 0;
+    //          ^^^^^ def
+    public function getB(): int { return $this->value; }
+    //                                          ^^^^^ ref
+}
+"#,
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn references_promoted_property_this_access() {
     // `$this->prop` inside a method must be returned alongside external `->prop`

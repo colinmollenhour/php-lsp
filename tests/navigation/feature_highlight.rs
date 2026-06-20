@@ -457,3 +457,98 @@ echo 'call foo here';
         "line 3 (string literal) should not be highlighted: {lines:?}"
     );
 }
+
+/// Array-destructuring assignment: `[$a, $b] = expr` — both `$a` and `$b` on
+/// the LHS are write positions. Previously they were tagged READ because the
+/// `ExprKind::Assign` handler only checked for a direct `Variable` target and
+/// fell into `visit_expr` for any other lhs, which produces READ.
+#[tokio::test]
+async fn highlight_array_destructuring_lhs_is_write() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+function foo(): void {
+    [$fi$0rst, $second] = [1, 2];
+//   ^^^^^^ write
+    echo $first;
+//       ^^^^^^ read
+}
+"#,
+    )
+    .await;
+}
+
+/// `list($a, $b) = expr` is the classical destructuring form; the parser
+/// normalises it to the same array-destructuring AST as `[$a, $b] = expr`.
+#[tokio::test]
+async fn highlight_list_destructuring_lhs_is_write() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+function foo(): void {
+    list($ke$0y, $val) = ['k', 'v'];
+//       ^^^^ write
+    echo $key;
+//       ^^^^ read
+}
+"#,
+    )
+    .await;
+}
+
+/// `global $x` is a write (it binds the global into the local scope) and must
+/// be highlighted as WRITE, not READ.
+#[tokio::test]
+async fn highlight_global_declaration_is_write() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+function foo(): void {
+    global $co$0nfig;
+//         ^^^^^^^ write
+    echo $config['debug'];
+//       ^^^^^^^ read
+}
+"#,
+    )
+    .await;
+}
+
+/// `static $x = val` declares and initialises a persistent local; the declaration
+/// must appear as a WRITE in highlights (previously it was missing entirely because
+/// `walk_stmt` for `StaticVar` only visited the default expression, not the name).
+#[tokio::test]
+async fn highlight_static_variable_declaration_is_write() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+function counter(): int {
+    static $co$0unt = 0;
+//         ^^^^^^ write
+    $count++;
+//  ^^^^^^ write
+    return $count;
+//         ^^^^^^ read
+}
+"#,
+    )
+    .await;
+}
+
+/// Nested array destructuring: `[[$a, $b], $c] = ...` — all three variables
+/// are write positions.
+#[tokio::test]
+async fn highlight_nested_array_destructuring_lhs_is_write() {
+    let mut s = TestServer::new().await;
+    s.check_highlight_annotated(
+        r#"<?php
+function foo(): void {
+    [[$fi$0rst, $second], $third] = [[1, 2], 3];
+//    ^^^^^^ write
+    echo $first;
+//       ^^^^^^ read
+}
+"#,
+    )
+    .await;
+}

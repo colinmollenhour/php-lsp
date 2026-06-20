@@ -431,7 +431,9 @@ fn scan_doc(
             // Property walker emits both access sites *and* declaration spans
             // (used by rename). Strip decls here when the caller doesn't want them.
             Some(SymbolKind::Property) => {
-                property_refs_in_stmts(source, stmts, word, &mut spans);
+                let class_filter =
+                    target_fqn.map(|fqn| fqn_short_name(fqn.trim_start_matches('\\')));
+                property_refs_in_stmts(source, stmts, word, class_filter, &mut spans);
                 if !include_declaration {
                     let mut decl_spans = Vec::new();
                     collect_declaration_spans(

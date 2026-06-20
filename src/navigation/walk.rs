@@ -199,6 +199,31 @@ struct VarRefsVisitor<'a> {
     out: Vec<(Span, DocumentHighlightKind)>,
 }
 
+impl VarRefsVisitor<'_> {
+    /// Mark all variable nodes in an lvalue expression as WRITE positions.
+    /// Handles plain variables (`$x`), array/list destructuring (`[$a, $b]`,
+    /// `list($a, $b)`), and nested destructuring (`[[$a, $b], $c]`).
+    /// Falls back to `visit_expr` for other lvalue shapes (e.g. `$arr[$key]`)
+    /// so their sub-expressions are still collected as READ.
+    fn mark_lvalue_writes(&mut self, expr: &Expr<'_, '_>) {
+        match &expr.kind {
+            ExprKind::Variable(name) if name.as_str() == self.var_name => {
+                self.out.push((expr.span, DocumentHighlightKind::WRITE));
+            }
+            ExprKind::Array(elements) => {
+                for elem in elements.iter() {
+                    if !matches!(elem.value.kind, ExprKind::Omit) {
+                        self.mark_lvalue_writes(&elem.value);
+                    }
+                }
+            }
+            _ => {
+                let _ = self.visit_expr(expr);
+            }
+        }
+    }
+}
+
 impl<'arena, 'src> Visitor<'arena, 'src> for VarRefsVisitor<'_> {
     fn visit_stmt(&mut self, stmt: &Stmt<'arena, 'src>) -> ControlFlow<()> {
         // Stop at scope-defining statement boundaries.
@@ -226,6 +251,31 @@ impl<'arena, 'src> Visitor<'arena, 'src> for VarRefsVisitor<'_> {
                 let _ = self.visit_stmt(f.body);
                 ControlFlow::Continue(())
             }
+            // `global $x` pulls the global into local scope; mark as WRITE
+            // rather than letting walk_stmt visit it as READ.
+            StmtKind::Global(exprs) => {
+                for expr in exprs.iter() {
+                    if let ExprKind::Variable(name) = &expr.kind
+                        && name.as_str() == self.var_name
+                    {
+                        self.out.push((expr.span, DocumentHighlightKind::WRITE));
+                    }
+                }
+                ControlFlow::Continue(())
+            }
+            // `static $x = val` declares and initialises a persistent local;
+            // walk_stmt only visits the default expression and skips the name.
+            StmtKind::StaticVar(vars) => {
+                for sv in vars.iter() {
+                    if sv.name.or_error() == self.var_name {
+                        self.out.push((sv.span, DocumentHighlightKind::WRITE));
+                    }
+                    if let Some(default) = &sv.default {
+                        let _ = self.visit_expr(default);
+                    }
+                }
+                ControlFlow::Continue(())
+            }
             _ => walk_stmt(self, stmt),
         }
     }
@@ -241,14 +291,7 @@ impl<'arena, 'src> Visitor<'arena, 'src> for VarRefsVisitor<'_> {
             }
             // Assignment: target is WRITE, value is READ
             ExprKind::Assign(a) => {
-                // Visit target with WRITE kind
-                if let ExprKind::Variable(name) = &a.target.kind {
-                    if name.as_str() == self.var_name {
-                        self.out.push((a.target.span, DocumentHighlightKind::WRITE));
-                    }
-                } else {
-                    let _ = self.visit_expr(a.target);
-                }
+                self.mark_lvalue_writes(a.target);
                 // Visit value with READ kind (default)
                 let _ = self.visit_expr(a.value);
                 ControlFlow::Continue(())
@@ -421,15 +464,23 @@ fn collect_in_fn_at(
 
 /// Collect all spans where `prop_name` is accessed (`->prop`, `?->prop`) or
 /// declared as a class/trait property, across all statements.
+///
+/// `class_filter` — when `Some`, `$this->prop` accesses and property
+/// declarations are only collected when inside the named class body.
+/// Non-`$this` accesses (e.g. `$x->prop`) are always collected.
+/// Pass `None` to collect unconditionally (rename path, single-class files).
 pub fn property_refs_in_stmts(
     source: &str,
     stmts: &[Stmt<'_, '_>],
     prop_name: &str,
+    class_filter: Option<&str>,
     out: &mut Vec<Span>,
 ) {
     let mut v = PropertyRefsVisitor {
         source,
         prop_name,
+        class_filter,
+        current_class: None,
         out: Vec::new(),
     };
     for stmt in stmts {
@@ -441,10 +492,25 @@ pub fn property_refs_in_stmts(
 struct PropertyRefsVisitor<'a> {
     source: &'a str,
     prop_name: &'a str,
+    class_filter: Option<&'a str>,
+    current_class: Option<String>,
     out: Vec<Span>,
 }
 
 impl<'arena, 'src> Visitor<'arena, 'src> for PropertyRefsVisitor<'_> {
+    fn visit_stmt(&mut self, stmt: &Stmt<'arena, 'src>) -> ControlFlow<()> {
+        let class_name: Option<String> = match &stmt.kind {
+            StmtKind::Class(c) => c.name.map(|n| n.to_string()),
+            StmtKind::Trait(t) => Some(t.name.to_string()),
+            _ => return walk_stmt(self, stmt),
+        };
+        let prev = self.current_class.take();
+        self.current_class = class_name;
+        let r = walk_stmt(self, stmt);
+        self.current_class = prev;
+        r
+    }
+
     fn visit_expr(&mut self, expr: &Expr<'arena, 'src>) -> ControlFlow<()> {
         match &expr.kind {
             ExprKind::PropertyAccess(p) | ExprKind::NullsafePropertyAccess(p) => {
@@ -454,7 +520,14 @@ impl<'arena, 'src> Visitor<'arena, 'src> for PropertyRefsVisitor<'_> {
                     .get(span.start as usize..span.end as usize)
                     .unwrap_or("");
                 if name_in_src == self.prop_name {
-                    self.out.push(span);
+                    let is_this =
+                        matches!(&p.object.kind, ExprKind::Variable(v) if v.as_str() == "this");
+                    let in_scope = self.class_filter.is_none()
+                        || !is_this
+                        || self.class_filter == self.current_class.as_deref();
+                    if in_scope {
+                        self.out.push(span);
+                    }
                 }
             }
             // Static property access: Class::$prop, self::$prop, parent::$prop.
@@ -480,23 +553,36 @@ impl<'arena, 'src> Visitor<'arena, 'src> for PropertyRefsVisitor<'_> {
     fn visit_class_member(&mut self, member: &ClassMember<'arena, 'src>) -> ControlFlow<()> {
         match &member.kind {
             ClassMemberKind::Property(p) if p.name == self.prop_name => {
-                let name_str = p.name.or_error();
-                let offset = str_offset(self.source, name_str).unwrap_or(0);
-                self.out.push(Span {
-                    start: offset,
-                    end: offset + name_str.len() as u32,
-                });
+                let in_scope = self.class_filter.is_none()
+                    || self.class_filter == self.current_class.as_deref();
+                if in_scope {
+                    let name_str = p.name.or_error();
+                    // Scope to member.span: str_offset would find the first occurrence
+                    // in the whole file, causing wrong spans when two classes share a
+                    // property name.
+                    let start = str_offset_in_range(self.source, member.span, name_str)
+                        .unwrap_or_else(|| str_offset(self.source, name_str).unwrap_or(0));
+                    self.out.push(Span {
+                        start,
+                        end: start + name_str.len() as u32,
+                    });
+                }
             }
             // Constructor-promoted parameters act as property declarations.
             ClassMemberKind::Method(m) if m.name == "__construct" => {
-                for p in m.params.iter() {
-                    if p.visibility.is_some() && p.name == self.prop_name {
-                        let name_str = p.name.or_error();
-                        let offset = str_offset(self.source, name_str).unwrap_or(0);
-                        self.out.push(Span {
-                            start: offset,
-                            end: offset + name_str.len() as u32,
-                        });
+                let in_scope = self.class_filter.is_none()
+                    || self.class_filter == self.current_class.as_deref();
+                if in_scope {
+                    for p in m.params.iter() {
+                        if p.visibility.is_some() && p.name == self.prop_name {
+                            let name_str = p.name.or_error();
+                            let start = str_offset_in_range(self.source, p.span, name_str)
+                                .unwrap_or_else(|| str_offset(self.source, name_str).unwrap_or(0));
+                            self.out.push(Span {
+                                start,
+                                end: start + name_str.len() as u32,
+                            });
+                        }
                     }
                 }
             }
@@ -1347,6 +1433,80 @@ mod tests {
         );
     }
 
+    #[test]
+    fn var_refs_array_destructuring_lhs_is_write() {
+        // [$a, $b] = [1, 2] — $a and $b on the LHS are WRITE positions.
+        // var_refs_in_stmts stops at function scope boundaries, so use
+        // collect_var_refs_in_scope with a byte offset inside the function body.
+        let src = "<?php\nfunction f() { [$a, $b] = [1, 2]; echo $a + $b; }";
+        let doc = parse(src);
+        let byte_off = src.find("[$a").unwrap();
+        let mut out = vec![];
+        collect_var_refs_in_scope(&doc.program().stmts, "a", byte_off, &mut out);
+        let writes: Vec<_> = out
+            .iter()
+            .filter(|(_, k)| *k == DocumentHighlightKind::WRITE)
+            .collect();
+        assert_eq!(
+            writes.len(),
+            1,
+            "expected exactly 1 WRITE for $a in destructuring: {out:?}"
+        );
+        let reads: Vec<_> = out
+            .iter()
+            .filter(|(_, k)| *k == DocumentHighlightKind::READ)
+            .collect();
+        assert_eq!(
+            reads.len(),
+            1,
+            "expected exactly 1 READ for $a in echo: {out:?}"
+        );
+    }
+
+    #[test]
+    fn var_refs_global_declaration_is_write() {
+        // global $cfg — the declaration must be WRITE.
+        // var_refs_in_stmts stops at function scope boundaries, so use
+        // collect_var_refs_in_scope with a byte offset inside the function body.
+        let src = "<?php\nfunction f() { global $cfg; echo $cfg; }";
+        let doc = parse(src);
+        let byte_off = src.find("global").unwrap();
+        let mut out = vec![];
+        collect_var_refs_in_scope(&doc.program().stmts, "cfg", byte_off, &mut out);
+        let writes: Vec<_> = out
+            .iter()
+            .filter(|(_, k)| *k == DocumentHighlightKind::WRITE)
+            .collect();
+        assert_eq!(writes.len(), 1, "global $cfg must be WRITE: {out:?}");
+    }
+
+    #[test]
+    fn var_refs_static_declaration_is_write_and_collected() {
+        // static $n = 0 — declaration must be WRITE; $n++ also WRITE; return $n READ.
+        // var_refs_in_stmts stops at function scope boundaries, so use
+        // collect_var_refs_in_scope with a byte offset inside the function body.
+        let src = "<?php\nfunction counter() { static $n = 0; $n++; return $n; }";
+        let doc = parse(src);
+        let byte_off = src.find("static").unwrap();
+        let mut out = vec![];
+        collect_var_refs_in_scope(&doc.program().stmts, "n", byte_off, &mut out);
+        let writes: Vec<_> = out
+            .iter()
+            .filter(|(_, k)| *k == DocumentHighlightKind::WRITE)
+            .collect();
+        // static $n = 0  → WRITE, $n++ → WRITE
+        assert!(
+            writes.len() >= 2,
+            "static $n and $n++ must both be WRITE: {out:?}"
+        );
+        let total = out.len();
+        // static $n, $n++, return $n → at least 3 occurrences
+        assert!(
+            total >= 3,
+            "expected at least 3 occurrences of $n, got {total}: {out:?}"
+        );
+    }
+
     // ── collect_var_refs_in_scope ────────────────────────────────────────────
 
     #[test]
@@ -1408,12 +1568,36 @@ mod tests {
 
     // ── property_refs_in_stmts ───────────────────────────────────────────────
 
+    /// Two classes share a property name: `property_refs_in_stmts` for class B's
+    /// `$value` must return spans that point into class B's text, not class A's —
+    /// the old `str_offset` found the first file-wide occurrence (class A).
+    #[test]
+    fn property_refs_same_name_in_two_classes_points_to_correct_class() {
+        let src = "<?php\nclass A { public int $value = 0; }\nclass B { public int $value = 0; function f() { return $this->value; } }";
+        let doc = parse(src);
+        let mut out = vec![];
+        property_refs_in_stmts(src, &doc.program().stmts, "value", None, &mut out);
+        // Both classes contribute spans; make sure all returned spans actually
+        // point to the word "value" in the source.
+        for span in &out {
+            let text = &src[span.start as usize..span.end as usize];
+            assert_eq!(
+                text, "value",
+                "span {span:?} does not point to 'value' — got {text:?}"
+            );
+        }
+        assert!(
+            out.len() >= 3,
+            "expected at least decl×2 + access×1, got {out:?}"
+        );
+    }
+
     #[test]
     fn property_refs_finds_declaration_and_access() {
         let src = "<?php\nclass Baz { public int $val = 0; function get() { return $this->val; } }";
         let doc = parse(src);
         let mut out = vec![];
-        property_refs_in_stmts(src, &doc.program().stmts, "val", &mut out);
+        property_refs_in_stmts(src, &doc.program().stmts, "val", None, &mut out);
         // property declaration + $this->val access
         assert_eq!(out.len(), 2, "expected decl + access, got {}", out.len());
     }
@@ -1423,7 +1607,7 @@ mod tests {
         let src = "<?php\n$r = $obj?->name;";
         let doc = parse(src);
         let mut out = vec![];
-        property_refs_in_stmts(src, &doc.program().stmts, "name", &mut out);
+        property_refs_in_stmts(src, &doc.program().stmts, "name", None, &mut out);
         assert_eq!(out.len(), 1);
     }
 
@@ -1432,7 +1616,7 @@ mod tests {
         let src = "<?php\nclass Reg { public static int $val = 0; }\nReg::$val;\nReg::$val = 1;";
         let doc = parse(src);
         let mut out = vec![];
-        property_refs_in_stmts(src, &doc.program().stmts, "val", &mut out);
+        property_refs_in_stmts(src, &doc.program().stmts, "val", None, &mut out);
         // declaration + two static access sites
         assert_eq!(out.len(), 3, "expected decl + 2 accesses, got: {out:?}");
     }

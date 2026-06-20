@@ -253,7 +253,13 @@ pub fn rename_property(
     for (uri, doc) in all_docs {
         let sv = doc.view();
         let mut spans = Vec::new();
-        property_refs_in_stmts(sv.source(), &doc.program().stmts, prop_name, &mut spans);
+        property_refs_in_stmts(
+            sv.source(),
+            &doc.program().stmts,
+            prop_name,
+            None,
+            &mut spans,
+        );
         if !spans.is_empty() {
             let mut seen = std::collections::HashSet::new();
             let mut edits: Vec<TextEdit> = spans
