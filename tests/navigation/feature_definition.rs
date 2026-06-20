@@ -1049,6 +1049,106 @@ function foo() {
     .await;
 }
 
+/// Goto-definition on a typed parameter variable must land on `$param`, not on
+/// the type annotation. Previously, `p.span` (which starts at the type) was
+/// used, so clicking `$x` in `Baz $x` would jump to `B` in `Baz`.
+#[tokio::test]
+async fn definition_variable_typed_param_lands_on_sigil() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+class Baz {}
+function foo(Baz $x): void {
+//               ^^ def
+    $y = $x$0;
+}
+"#,
+    )
+    .await;
+}
+
+/// Goto-definition inside a method body with a typed parameter must land on
+/// `$param`, not the type annotation.
+#[tokio::test]
+async fn definition_variable_method_param_lands_on_sigil() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+class Greeter {
+    public function greet(string $name): string {
+        //                       ^^^^^ def
+        return $name$0;
+    }
+}
+"#,
+    )
+    .await;
+}
+
+/// Goto-definition with cursor ON the parameter declaration itself (not in the
+/// body) must still resolve to that same parameter.
+#[tokio::test]
+async fn definition_variable_cursor_on_param_declaration() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+function transform(int $val$0): int {
+    //                 ^^^^ def
+    return $val * 2;
+}
+"#,
+    )
+    .await;
+}
+
+/// Goto-definition for an untyped parameter `function foo($x)` must land on
+/// `$x`, not fail or jump to an unrelated position.
+#[tokio::test]
+async fn definition_variable_untyped_param() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+function noop($x): mixed {
+    //        ^^ def
+    return $x$0;
+}
+"#,
+    )
+    .await;
+}
+
+/// Goto-definition for a typed parameter with a default value must land on
+/// `$param`, not on the type or the default.
+#[tokio::test]
+async fn definition_variable_param_with_default() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+function greet(string $name = 'World'): string {
+    //                ^^^^^ def
+    return 'Hello ' . $name$0;
+}
+"#,
+    )
+    .await;
+}
+
+/// Goto-definition for the second of several typed params must land on the
+/// correct `$param`, not on the first one.
+#[tokio::test]
+async fn definition_variable_second_typed_param() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+function add(int $a, int $b): int {
+    //                   ^^ def
+    return $a + $b$0;
+}
+"#,
+    )
+    .await;
+}
+
 /// Goto-definition on an enum case reference must jump to the case declaration.
 #[tokio::test]
 async fn definition_enum_case_same_file() {

@@ -45,3 +45,6 @@ mod advanced_types;
 
 #[path = "references/attributes_complete.rs"]
 mod attributes_complete;
+
+#[path = "references/variables.rs"]
+mod variables;

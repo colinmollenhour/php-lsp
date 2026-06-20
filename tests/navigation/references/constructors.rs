@@ -244,3 +244,71 @@ async fn references_on_constructor_scoped_by_namespace_fqn() {
         "Beta::Widget::__construct must not appear: {hits:?}"
     );
 }
+
+/// Cursor on `parent::__construct()` in a child constructor must resolve to
+/// the child class's own instantiation sites, not every `__construct` in the
+/// file.
+#[tokio::test]
+async fn references_constructor_from_parent_call_site_scoped_to_child() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+class Base {
+    public function __construct(int $id) {}
+}
+class Child extends Base {
+    public function __construct(int $id, string $name) {
+        parent::__con$0struct($id);
+    }
+}
+new Child(1, 'Alice');
+//  ^^^^^ ref
+new Base(2);
+"#,
+    )
+    .await;
+}
+
+/// When cursor is on `parent::__construct()` and the owning class has no
+/// `new ClassName()` call in the file, the result must be empty rather than
+/// returning all constructors across the file.
+#[tokio::test]
+async fn references_constructor_call_site_no_instantiation_returns_empty() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+class Alpha {
+    public function __construct() {}
+}
+class Beta extends Alpha {
+    public function __construct() {
+        parent::__con$0struct();
+    }
+}
+new Alpha();
+"#,
+    )
+    .await;
+}
+
+/// Cursor on `__construct` in the constructor body of a class with a different
+/// name must not bleed into sibling-class constructor references.
+#[tokio::test]
+async fn references_constructor_decl_does_not_include_sibling_class() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+class Lion {
+    public function __con$0struct() {}
+    //              ^^^^^^^^^^^ def
+}
+class Tiger {
+    public function __construct() {}
+}
+new Lion();
+//  ^^^^ ref
+new Tiger();
+"#,
+    )
+    .await;
+}

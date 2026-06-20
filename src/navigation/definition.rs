@@ -27,12 +27,33 @@ pub fn goto_definition(
         let mut spans = Vec::new();
         collect_var_refs_in_scope(&doc.program().stmts, bare, byte_off, &mut spans);
         if let Some((span, _)) = spans.into_iter().min_by_key(|(s, _)| s.start) {
-            return Some(Location {
-                uri: uri.clone(),
-                range: Range {
+            // Promoted property parameters include a visibility keyword before the
+            // type and name (`private Database $db`); keep the full span so the cursor
+            // lands on the complete declaration. Regular typed params (`int $x`) have
+            // span.start at the type — narrow to just $var_name instead.
+            let src_at_start = source.get(span.start as usize..).unwrap_or("");
+            let is_promoted = src_at_start.starts_with("private ")
+                || src_at_start.starts_with("public ")
+                || src_at_start.starts_with("protected ")
+                || src_at_start.starts_with("readonly ");
+            let range = if is_promoted {
+                Range {
                     start: sv.position_of(span.start),
                     end: sv.position_of(span.end),
-                },
+                }
+            } else {
+                let name_with_sigil = format!("${bare}");
+                let precise_start =
+                    crate::document::ast::str_offset_in_range(source, span, &name_with_sigil)
+                        .unwrap_or(span.start);
+                Range {
+                    start: sv.position_of(precise_start),
+                    end: sv.position_of(precise_start + name_with_sigil.len() as u32),
+                }
+            };
+            return Some(Location {
+                uri: uri.clone(),
+                range,
             });
         }
     }

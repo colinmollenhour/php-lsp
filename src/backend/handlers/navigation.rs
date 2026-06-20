@@ -8,10 +8,13 @@ use crate::navigation::definition::{
     find_declaration_range, find_method_in_class_hierarchy, find_method_range_in_class,
 };
 use crate::navigation::references::{SymbolKind, find_references, find_references_with_target};
-use crate::text::{fqn_short_name, word_at_position};
+use crate::navigation::walk::collect_var_refs_in_scope;
+use crate::text::{fqn_short_name, utf16_code_units, word_at_position};
 use crate::types::type_map::{TypeMap, enclosing_class_at};
 
-use super::super::helpers::{class_name_at_construct_decl, range_within};
+use super::super::helpers::{
+    class_name_at_construct_decl, promoted_property_at_cursor, range_within,
+};
 use super::super::panic_guard::guard_async_result;
 use super::super::{Backend, build_mir_symbol, resolve_reference_symbol};
 
@@ -217,18 +220,83 @@ impl Backend {
 
             if word == "__construct"
                 && let Some(doc) = self.get_doc(uri)
-                && let Some(class_name) =
-                    class_name_at_construct_decl(doc.source(), &doc.program().stmts, position)
             {
-                let locations = self.construct_references(
-                    uri,
-                    &source,
-                    position,
-                    &class_name,
-                    include_declaration,
-                );
-                return Ok((!locations.is_empty()).then_some(locations));
+                // Try declaration site first; fall back to the enclosing class so
+                // that `parent::__construct()` call sites also resolve correctly
+                // instead of matching all constructors across the workspace.
+                let decl_class =
+                    class_name_at_construct_decl(doc.source(), &doc.program().stmts, position);
+                let on_call_site = decl_class.is_none();
+                let class_name =
+                    decl_class.or_else(|| enclosing_class_at(doc.source(), &doc, position));
+                if let Some(class_name) = class_name {
+                    // When cursor is on a call site (not the `function __construct`
+                    // declaration), exclude the cursor span from results — it points
+                    // to the `parent::__construct()` text, not to the declaration.
+                    let incl_decl = include_declaration && !on_call_site;
+                    let locations =
+                        self.construct_references(uri, &source, position, &class_name, incl_decl);
+                    return Ok((!locations.is_empty()).then_some(locations));
+                }
+                // Cannot determine the owning class — return empty rather than
+                // falling through to the unscoped method-reference path.
+                return Ok(None);
             }
+
+            // Variables: scope-aware search within the enclosing function/method.
+            // The general-purpose reference walker only matches identifiers, not
+            // `ExprKind::Variable`, so variables would otherwise return nothing.
+            // Skip this path for promoted properties — they need the general
+            // property-reference search (which also finds `$this->name` accesses).
+            // Skip also when var_spans is empty (class/static property declarations,
+            // top-level declarations) so the general path can handle them.
+            if word.starts_with('$')
+                && let Some(doc) = self.get_doc(uri)
+            {
+                let is_promoted =
+                    promoted_property_at_cursor(doc.source(), &doc.program().stmts, position)
+                        .is_some();
+                if !is_promoted {
+                    let bare = word.trim_start_matches('$');
+                    let byte_off = doc.view().byte_of_position(position) as usize;
+                    let mut var_spans = Vec::new();
+                    collect_var_refs_in_scope(&doc.program().stmts, bare, byte_off, &mut var_spans);
+                    if !var_spans.is_empty() {
+                        let name_with_sigil = format!("${bare}");
+                        let name_utf16_len = utf16_code_units(&name_with_sigil);
+                        let sv = doc.view();
+                        let src = doc.source();
+                        let locations: Vec<Location> = var_spans
+                            .into_iter()
+                            .map(|(span, _kind)| {
+                                // param spans include type annotation; narrow to $var_name.
+                                let precise_start = crate::document::ast::str_offset_in_range(
+                                    src,
+                                    span,
+                                    &name_with_sigil,
+                                )
+                                .unwrap_or(span.start);
+                                let start = sv.position_of(precise_start);
+                                Location {
+                                    uri: uri.clone(),
+                                    range: Range {
+                                        start,
+                                        end: Position {
+                                            line: start.line,
+                                            character: start.character + name_utf16_len,
+                                        },
+                                    },
+                                }
+                            })
+                            .collect();
+                        return Ok(Some(locations));
+                    }
+                }
+            }
+            // Fall through to the general reference path for:
+            // - promoted properties (need cross-method $this->prop search)
+            // - class/static property declarations (var_spans empty)
+            // - any other $word the scope walker didn't find
 
             let doc_opt = self.get_doc(uri);
             let (word, kind, constant_owner) =
