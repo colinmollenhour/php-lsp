@@ -2,6 +2,13 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.13.0] — 2026-06-21
+
+### Features
+
+- **Configurable parse debounce delay**: `initializationOptions` now accepts `debounceMs` (integer, default `100`). Set lower for fast machines or Neovim users; set higher for slow machines or large files to reduce parse thrashing.
+- **`@template-covariant` / `@template-contravariant` in hover**: Hovering a class or function with a covariant or contravariant template parameter now shows the correct tag (`@template-covariant T`, `@template-contravariant T of Base`) instead of always rendering `@template`.
+
 ## [0.12.2] — 2026-06-21
 
 ### Dependencies
