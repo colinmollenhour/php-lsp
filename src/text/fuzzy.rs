@@ -1,12 +1,7 @@
 //! Fuzzy matching for completion and workspace-symbol filtering.
 
-/// A fuzzy-match query with its lowercase form computed once.
-///
-/// Matching loops over thousands of candidates (workspace symbols, completion
-/// filtering) previously lowercased the query — and the candidate, into fresh
-/// `String`s — per candidate. Build a `FuzzyQuery` once per request instead;
-/// the per-candidate checks below allocate nothing (char-iterator comparisons,
-/// Unicode-lowercase-correct like the old code).
+/// A fuzzy-match query with its lowercase form computed once per request.
+/// Per-candidate checks allocate nothing (char-iterator comparisons).
 pub(crate) struct FuzzyQuery {
     lower: String,
 }
