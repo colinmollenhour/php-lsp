@@ -2,6 +2,15 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.12.2] — 2026-06-21
+
+### Dependencies
+
+- **mir updated to 0.46.0**: Fixes ~8 false positives including trait property
+  access, method override covariance, reference assignments, `preg_replace()`
+  return types, generic collection empty arrays, `@internal` scoping, and
+  `extract()`/variable-variable assignments. Also picks up php-rs-parser 0.18.1.
+
 ## [0.12.1] — 2026-06-21
 
 ### Bug Fixes
