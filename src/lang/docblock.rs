@@ -127,12 +127,21 @@ pub struct DocTypeAlias {
     pub type_expr: String,
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum TemplateVariance {
+    Invariant,
+    Covariant,
+    Contravariant,
+}
+
 #[derive(Debug, PartialEq)]
 pub struct DocTemplate {
     /// Template parameter name, e.g. `T`.
     pub name: String,
     /// Optional upper bound, e.g. `Base` from `@template T of Base`.
     pub bound: Option<String>,
+    /// Variance from `@template-covariant` / `@template-contravariant`.
+    pub variance: TemplateVariance,
 }
 
 #[derive(Debug, PartialEq)]
@@ -214,10 +223,15 @@ impl Docblock {
             out.push_str(&format!("**@see** {}\n", s));
         }
         for t in &self.templates {
+            let tag = match t.variance {
+                TemplateVariance::Covariant => "@template-covariant",
+                TemplateVariance::Contravariant => "@template-contravariant",
+                TemplateVariance::Invariant => "@template",
+            };
             if let Some(bound) = &t.bound {
-                out.push_str(&format!("**@template** `{}` of `{}`\n", t.name, bound));
+                out.push_str(&format!("**{}** `{}` of `{}`\n", tag, t.name, bound));
             } else {
-                out.push_str(&format!("**@template** `{}`\n", &t.name.to_string()));
+                out.push_str(&format!("**{}** `{}`\n", tag, t.name));
             }
         }
         for m in &self.mixins {
@@ -375,7 +389,16 @@ pub fn parse_docblock(raw: &str) -> Docblock {
                 Some(other) => Some(other.to_string()),
                 None => None,
             };
-            Some(DocTemplate { name, bound })
+            let variance = match t.name.as_str() {
+                "template-covariant" => TemplateVariance::Covariant,
+                "template-contravariant" => TemplateVariance::Contravariant,
+                _ => TemplateVariance::Invariant,
+            };
+            Some(DocTemplate {
+                name,
+                bound,
+                variance,
+            })
         })
         .collect();
 
@@ -828,6 +851,7 @@ mod tests {
         assert_eq!(db.templates.len(), 1);
         assert_eq!(db.templates[0].name, "T");
         assert!(db.templates[0].bound.is_none());
+        assert_eq!(db.templates[0].variance, TemplateVariance::Invariant);
     }
 
     #[test]
@@ -837,6 +861,61 @@ mod tests {
         assert_eq!(db.templates.len(), 1);
         assert_eq!(db.templates[0].name, "T");
         assert_eq!(db.templates[0].bound.as_deref(), Some("BaseClass"));
+        assert_eq!(db.templates[0].variance, TemplateVariance::Invariant);
+    }
+
+    #[test]
+    fn parses_template_covariant() {
+        let raw = "/**\n * @template-covariant T\n */";
+        let db = parse_docblock(raw);
+        assert_eq!(db.templates.len(), 1);
+        assert_eq!(db.templates[0].name, "T");
+        assert_eq!(db.templates[0].variance, TemplateVariance::Covariant);
+    }
+
+    #[test]
+    fn parses_template_contravariant() {
+        let raw = "/**\n * @template-contravariant T of Base\n */";
+        let db = parse_docblock(raw);
+        assert_eq!(db.templates.len(), 1);
+        assert_eq!(db.templates[0].name, "T");
+        assert_eq!(db.templates[0].bound.as_deref(), Some("Base"));
+        assert_eq!(db.templates[0].variance, TemplateVariance::Contravariant);
+    }
+
+    #[test]
+    fn to_markdown_shows_template_covariant() {
+        let db = Docblock {
+            templates: vec![DocTemplate {
+                name: "T".to_string(),
+                bound: None,
+                variance: TemplateVariance::Covariant,
+            }],
+            ..Default::default()
+        };
+        let md = db.to_markdown();
+        assert!(
+            md.contains("@template-covariant"),
+            "expected @template-covariant in markdown, got: {md}"
+        );
+    }
+
+    #[test]
+    fn to_markdown_shows_template_contravariant() {
+        let db = Docblock {
+            templates: vec![DocTemplate {
+                name: "T".to_string(),
+                bound: Some("Base".to_string()),
+                variance: TemplateVariance::Contravariant,
+            }],
+            ..Default::default()
+        };
+        let md = db.to_markdown();
+        assert!(
+            md.contains("@template-contravariant"),
+            "expected @template-contravariant in markdown, got: {md}"
+        );
+        assert!(md.contains("Base"), "expected bound in markdown");
     }
 
     #[test]
@@ -863,6 +942,7 @@ mod tests {
             templates: vec![DocTemplate {
                 name: "T".to_string(),
                 bound: Some("Base".to_string()),
+                variance: TemplateVariance::Invariant,
             }],
             ..Default::default()
         };
