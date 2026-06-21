@@ -36,15 +36,7 @@ jobs:
         with:
           toolchain: "1.96"
 
-      - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+      - uses: Swatinem/rust-cache@v2
 
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
@@ -96,15 +88,9 @@ jobs:
           toolchain: "1.96"
           targets: ${{ matrix.target }}
 
-      - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.target }}-cargo-
+          key: ${{ matrix.target }}
 
       - name: Install cross-compilation dependencies
         if: matrix.deps
@@ -183,14 +169,7 @@ jobs:
         with:
           toolchain: "1.96"
 
-      - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ubuntu-publish-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ubuntu-publish-cargo-
+      - uses: Swatinem/rust-cache@v2
 
       - name: Publish to crates.io
         run: cargo publish --package php-lsp
