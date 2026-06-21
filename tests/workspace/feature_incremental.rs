@@ -5,13 +5,6 @@ use super::*;
 
 use expect_test::expect;
 
-fn has_code(notif: &serde_json::Value, code: &str) -> bool {
-    notif["params"]["diagnostics"]
-        .as_array()
-        .map(|arr| arr.iter().any(|d| d["code"].as_str() == Some(code)))
-        .unwrap_or(false)
-}
-
 fn render_def_location(resp: &serde_json::Value, root_uri: &str) -> String {
     common::render_locations(resp, root_uri)
 }
@@ -194,11 +187,8 @@ async fn cross_file_diagnostics_refresh_on_next_didchange() {
     let mut server = TestServer::new().await;
     server.open("dep.php", "<?php\nclass Widget {}\n").await;
     let notif = server.open("user.php", "<?php\n$w = new Widget();\n").await;
-    assert!(
-        !has_code(&notif, "UndefinedClass"),
-        "Widget is defined — expected no UndefinedClass initially: {:?}",
-        notif["params"]["diagnostics"]
-    );
+    // Widget is defined — no error initially.
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(&notif));
 
     server
         .change("dep.php", 2, "<?php\nclass Gadget {}\n")
@@ -207,11 +197,9 @@ async fn cross_file_diagnostics_refresh_on_next_didchange() {
     let notif = server
         .change("user.php", 2, "<?php\n$w = new Widget();\n")
         .await;
-    assert!(
-        has_code(&notif, "UndefinedClass"),
-        "after renaming Widget→Gadget in dep.php, user.php must report UndefinedClass: {:?}",
-        notif["params"]["diagnostics"]
-    );
+    // Widget renamed to Gadget in dep.php; user.php must report UndefinedClass.
+    expect!["1:9-1:15 [1] UndefinedClass: Class Widget does not exist"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -228,10 +216,9 @@ async fn cross_file_diagnostics_republish_on_dependency_change() {
 
     let uri = server.uri("user2.php");
     let notif = server.client().wait_for_diagnostics(&uri).await;
-    assert!(
-        has_code(&notif, "UndefinedClass"),
-        "expected proactive UndefinedClass on user2.php after dependency edit"
-    );
+    // Widget2 renamed to Gadget2; user2.php proactively republished.
+    expect!["1:9-1:16 [1] UndefinedClass: Class Widget2 does not exist"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -298,11 +285,9 @@ async fn cross_file_diagnostic_clears_when_dependency_opened() {
     let notif = server
         .open("user_open.php", "<?php\n$w = new ProvidedClass();\n")
         .await;
-    assert!(
-        has_code(&notif, "UndefinedClass"),
-        "expected UndefinedClass before dep is opened: {:?}",
-        notif["params"]["diagnostics"]
-    );
+    // ProvidedClass not yet defined.
+    expect!["1:9-1:22 [1] UndefinedClass: Class ProvidedClass does not exist"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 
     server
         .open("provider.php", "<?php\nclass ProvidedClass {}\n")
@@ -310,11 +295,8 @@ async fn cross_file_diagnostic_clears_when_dependency_opened() {
 
     let user_uri = server.uri("user_open.php");
     let notif = server.client().wait_for_diagnostics(&user_uri).await;
-    assert!(
-        !has_code(&notif, "UndefinedClass"),
-        "expected UndefinedClass cleared after dep opened: {:?}",
-        notif["params"]["diagnostics"]
-    );
+    // ProvidedClass now defined; error cleared.
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -359,11 +341,9 @@ async fn cross_file_republish_fans_out_to_multiple_dependents() {
     for (label, uri) in [("u1", &u1), ("u2", &u2)] {
         let notif = notifs
             .get(uri)
-            .unwrap_or_else(|| panic!("missing publish for {label} ({uri})"));
-        assert!(
-            has_code(notif, "UndefinedClass"),
-            "{label}: expected UndefinedClass after FanWidget rename"
-        );
+            .unwrap_or_else(|| panic!("{label} did not receive publishDiagnostics"));
+        expect!["1:9-1:18 [1] UndefinedClass: Class FanWidget does not exist"]
+            .assert_eq(&render_diagnostics_notification(notif));
     }
 }
 
@@ -433,22 +413,16 @@ async fn cross_file_republish_preserves_dependent_parse_errors() {
     // republished, the parse error must survive (we merge LSP-side parse
     // diagnostics with mir's semantic issues).
     let mut server = TestServer::new().await;
-    // Count parse-error diagnostics (no `code` field) vs semantic ones.
-    fn parse_error_count(notif: &serde_json::Value) -> usize {
-        notif["params"]["diagnostics"]
-            .as_array()
-            .map(|arr| arr.iter().filter(|d| d.get("code").is_none()).count())
-            .unwrap_or(0)
-    }
-
     let notif = server
         .open("broken.php", "<?php\nnew Triggered();\nbroken(;\n")
         .await;
-    let original_parse = parse_error_count(&notif);
-    assert!(
-        original_parse > 0,
-        "expected parse errors after opening 'broken(;'"
-    );
+    // Initially: UndefinedClass for Triggered + parse errors from broken(;
+    expect![[r#"
+        1:4-1:13 [1] UndefinedClass: Class Triggered does not exist
+        2:0-2:7 [1] UndefinedFunction: Function broken() is not defined
+        2:7-2:8 [1] ?: expected ')', found ';'
+        2:7-2:8 [1] ?: expected expression"#]]
+    .assert_eq(&render_diagnostics_notification(&notif));
 
     server
         .open("trigger.php", "<?php\nclass Triggered {}\n")
@@ -456,11 +430,13 @@ async fn cross_file_republish_preserves_dependent_parse_errors() {
 
     let broken_uri = server.uri("broken.php");
     let notif = server.client().wait_for_diagnostics(&broken_uri).await;
-    let final_parse = parse_error_count(&notif);
-    // Parse errors must be preserved during cross-file republish, even
-    // though the UndefinedClass diagnostic clears once `Triggered` exists.
-    assert_eq!(
-        final_parse, original_parse,
-        "parse error count changed during cross-file republish: expected {original_parse}, got {final_parse}"
-    );
+    // UndefinedClass clears once Triggered is defined; parse errors survive.
+    // Note: cross-file republish currently produces two diagnostic entries per
+    // parse error (one from the AST layer, one from the semantic layer).
+    expect![[r#"
+        2:7-2:8 [1] ?: expected ')', found ';'
+        2:7-2:8 [1] ?: expected expression
+        2:7-2:8 [1] ParseError: Parse error: expected ')', found ';'
+        2:7-2:8 [1] ParseError: Parse error: expected expression"#]]
+    .assert_eq(&render_diagnostics_notification(&notif));
 }

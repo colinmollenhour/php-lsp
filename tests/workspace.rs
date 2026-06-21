@@ -32,6 +32,8 @@ mod feature_lsp_gaps_verification;
 mod feature_project_structures;
 #[path = "workspace/feature_pull_diagnostics.rs"]
 mod feature_pull_diagnostics;
+#[path = "workspace/feature_push_diagnostics.rs"]
+mod feature_push_diagnostics;
 #[path = "workspace/feature_server.rs"]
 mod feature_server;
 #[path = "workspace/feature_workspace_folders.rs"]
