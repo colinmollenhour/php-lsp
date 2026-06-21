@@ -841,15 +841,14 @@ class Greeter {
 #[tokio::test]
 async fn definition_on_unknown_symbol_returns_null() {
     let mut s = TestServer::new().await;
-    s.open("unk.php", "<?php\n$x = new UnknownClass();\n").await;
-    let resp = s.definition("unk.php", 1, 13).await;
-    assert!(resp["error"].is_null(), "definition errored: {resp:?}");
-    let result = &resp["result"];
-    let is_empty = result.is_null() || result.as_array().map(|a| a.is_empty()).unwrap_or(false);
-    assert!(
-        is_empty,
-        "unknown symbol should have no definition, got: {result:?}"
-    );
+    let out = s
+        .check_definition(
+            r#"<?php
+$x = new Unkno$0wnClass();
+"#,
+        )
+        .await;
+    expect!["<none>"].assert_eq(&out);
 }
 
 // --- cross-file definition (psr4-mini fixture) ---

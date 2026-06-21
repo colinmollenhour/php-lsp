@@ -1049,4 +1049,37 @@ async fn hover_magic_constant_trait() {
     .await;
 }
 
+#[tokio::test]
+async fn hover_keyword_self() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php class Foo { public function clone(): sel$0f {} }"#,
+        expect![["`self` — the class in which the method is defined"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_static_return_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php class Foo { public function make(): stat$0ic {} }"#,
+        expect![["`static` — the class on which the method was called (late static binding, PHP 5.3)"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_parent_return_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php class Child extends Base { public function __construct(): paren$0t {} }"#,
+        expect![["`parent` — the parent class of the current class"]],
+    )
+    .await;
+}
+
 // ── 2.4 PHP attribute hover ───────────────────────────────────────────────────

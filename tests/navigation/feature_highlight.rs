@@ -40,65 +40,44 @@ $g->hello();
     .await;
 }
 
-/// Highlights of a variable used as both param and body ref inside an enum
-/// method — both occurrences are on the same line so we assert by count.
 #[tokio::test]
 async fn highlight_variable_inside_enum_method() {
     let mut s = TestServer::new().await;
-    let opened = s
-        .open_fixture(
-            r#"<?php
+    s.check_highlight_annotated(
+        r#"<?php
 enum Status {
-    public function label($a$0rg) { return $arg + 1; }
+    public function label(
+        $a$0rg
+    //  ^^^^ write
+    ) {
+        return $arg + 1;
+    //         ^^^^ read
+    }
 }
 "#,
-        )
-        .await;
-    let c = opened.cursor();
-    let resp = s.document_highlight(&c.path, c.line, c.character).await;
-    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let highlights = resp["result"].as_array().expect("array");
-    assert_eq!(
-        highlights.len(),
-        2,
-        "expected 2 highlights (param + body ref): {highlights:?}"
-    );
-    let lines = lines_of(highlights);
-    assert!(
-        lines.iter().all(|&l| l == 2),
-        "both highlights must be on the method body line: {lines:?}"
-    );
+    )
+    .await;
 }
 
-/// Highlights must not bleed outer-scope variable with the same name into
-/// an enum method's highlight set.
+/// $arg in outer scope must not bleed into the enum method's highlight set.
 #[tokio::test]
 async fn highlight_enum_method_does_not_bleed_outer_scope() {
     let mut s = TestServer::new().await;
-    let opened = s
-        .open_fixture(
-            r#"<?php
+    s.check_highlight_annotated(
+        r#"<?php
 $arg = 0;
 enum Status {
-    public function label($a$0rg) { return $arg + 1; }
+    public function label(
+        $a$0rg
+    //  ^^^^ write
+    ) {
+        return $arg + 1;
+    //         ^^^^ read
+    }
 }
 "#,
-        )
-        .await;
-    let c = opened.cursor();
-    let resp = s.document_highlight(&c.path, c.line, c.character).await;
-    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let highlights = resp["result"].as_array().expect("array");
-    assert_eq!(
-        highlights.len(),
-        2,
-        "expected exactly 2 highlights (param + body ref): {highlights:?}"
-    );
-    let lines = lines_of(highlights);
-    assert!(
-        lines.iter().all(|&l| l == 3),
-        "outer $arg (line 1) must not appear: {lines:?}"
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -294,77 +273,55 @@ echo Foo::BAR;
 #[tokio::test]
 async fn highlight_variable_increment_operators() {
     let mut s = TestServer::new().await;
-    let opened = s
-        .open_fixture(
-            r#"<?php
+    s.check_highlight_annotated(
+        r#"<?php
 function foo() {
     $x$0++;
+//  ^^ ref
     ++$x;
+//    ^^ ref
     --$x;
+//    ^^ ref
     $x--;
+//  ^^ ref
 }
 "#,
-        )
-        .await;
-    let c = opened.cursor();
-    let resp = s.document_highlight(&c.path, c.line, c.character).await;
-    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let highlights = resp["result"].as_array().expect("array");
-    assert_eq!(
-        highlights.len(),
-        4,
-        "expected 4 highlights (all increment/decrement positions): {highlights:?}"
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn highlight_foreach_key_binding_and_use() {
     let mut s = TestServer::new().await;
-    let opened = s
-        .open_fixture(
-            r#"<?php
+    s.check_highlight_annotated(
+        r#"<?php
 function foo($arr) {
     foreach ($arr as $k$0ey => $value) {
+//                   ^^^^ write
         echo $key;
+//           ^^^^ read
     }
 }
 "#,
-        )
-        .await;
-    let c = opened.cursor();
-    let resp = s.document_highlight(&c.path, c.line, c.character).await;
-    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let highlights = resp["result"].as_array().expect("array");
-    assert_eq!(
-        highlights.len(),
-        2,
-        "expected 2 highlights (binding + usage): {highlights:?}"
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn highlight_foreach_value_binding_and_use() {
     let mut s = TestServer::new().await;
-    let opened = s
-        .open_fixture(
-            r#"<?php
+    s.check_highlight_annotated(
+        r#"<?php
 function foo($arr) {
     foreach ($arr as $v$0alue) {
+//                   ^^^^^^ write
         echo $value;
+//           ^^^^^^ read
     }
 }
 "#,
-        )
-        .await;
-    let c = opened.cursor();
-    let resp = s.document_highlight(&c.path, c.line, c.character).await;
-    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let highlights = resp["result"].as_array().expect("array");
-    assert_eq!(
-        highlights.len(),
-        2,
-        "expected 2 highlights (binding + usage): {highlights:?}"
-    );
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -385,31 +342,24 @@ function foo($n$0ame) {
 #[tokio::test]
 async fn highlight_class_constant_multiple_refs() {
     let mut s = TestServer::new().await;
-    let opened = s
-        .open_fixture(
-            r#"<?php
+    s.check_highlight_annotated(
+        r#"<?php
 class Status {
     const AC$0TIVE = 1;
+    //    ^^^^^^ ref
     const INACTIVE = 0;
 
     public function check() {
         if ($this->value === Status::ACTIVE) {
+//                                   ^^^^^^ ref
             return Status::ACTIVE;
+//                         ^^^^^^ ref
         }
     }
 }
 "#,
-        )
-        .await;
-    let c = opened.cursor();
-    let resp = s.document_highlight(&c.path, c.line, c.character).await;
-    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let highlights = resp["result"].as_array().expect("array");
-    assert_eq!(
-        highlights.len(),
-        3,
-        "expected 3 highlights (decl + 2 refs): {highlights:?}"
-    );
+    )
+    .await;
 }
 
 #[tokio::test]

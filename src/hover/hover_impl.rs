@@ -202,6 +202,9 @@ fn hover_at_core(
             "callable" => Some(
                 "`callable` — any callable: Closure, function-name string, or `[object, method]` array",
             ),
+            "self" => Some("`self` — the class in which the method is defined"),
+            "static" => Some("`static` — the class on which the method was called (late static binding, PHP 5.3)"),
+            "parent" => Some("`parent` — the parent class of the current class"),
             _ => None,
         };
         if let Some(doc_str) = keyword_doc {
