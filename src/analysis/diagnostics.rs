@@ -74,38 +74,3 @@ pub fn parse_document(source: &str) -> (ParsedDoc, Vec<Diagnostic>) {
     let diagnostics = diagnostics_from_doc(&doc);
     (doc, diagnostics)
 }
-
-#[cfg(test)]
-mod tests {
-
-    /// Probe: print every (start, end, zero_width) tuple for a wider set of
-    /// error-inducing snippets to see if any zero-width span can be made to
-    /// land *on* a non-BMP (surrogate-pair) character rather than at EOF.
-    #[test]
-    fn probe_zero_width_spans() {
-        let cases: &[(&str, &str)] = &[
-            ("class_no_name", "<?php\nclass {"),
-            ("fn_no_name", "<?php\nfunction ("),
-            ("assign_no_rhs", "<?php\n$x ="),
-            ("bare_emoji", "<?php\n\u{1F600}"),
-            ("emoji_class", "<?php\nclass \u{1F600} {"),
-            // Try to force a zero-width span mid-file rather than at EOF.
-            ("emoji_then_valid", "<?php\n\u{1F600}\nfunction f() {}"),
-            ("emoji_in_string_ctx", "<?php\n$x = \u{1F600};"),
-        ];
-        for (label, src) in cases {
-            let doc = crate::document::ast::ParsedDoc::parse(src.to_string());
-            for e in &doc.errors {
-                let span = e.span();
-                let ch = src[span.start as usize..].chars().next();
-                println!(
-                    "{label}: span=({},{}) zero_width={} char={ch:?} src_len={}",
-                    span.start,
-                    span.end,
-                    span.end == span.start,
-                    src.len(),
-                );
-            }
-        }
-    }
-}
