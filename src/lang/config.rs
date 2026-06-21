@@ -226,6 +226,11 @@ pub struct LspConfig {
     /// workspace root paths, and PSR-4 namespace count.
     /// Enable via `initializationOptions.debug = true`.
     pub debug: bool,
+    /// Debounce delay in milliseconds between the last `textDocument/didChange`
+    /// and the parse + analysis run. Defaults to 100 ms. Set lower for
+    /// fast machines / Neovim users; set higher for slow machines or large
+    /// files to reduce thrashing.
+    pub debounce_ms: u64,
 }
 
 impl Default for LspConfig {
@@ -239,6 +244,7 @@ impl Default for LspConfig {
             max_indexed_files: MAX_INDEXED_FILES,
             index_vendor: false,
             debug: false,
+            debounce_ms: 100,
         }
     }
 }
@@ -320,6 +326,9 @@ impl LspConfig {
         }
         if let Some(b) = v.get("debug").and_then(|x| x.as_bool()) {
             cfg.debug = b;
+        }
+        if let Some(n) = v.get("debounceMs").and_then(|x| x.as_u64()) {
+            cfg.debounce_ms = n.max(1);
         }
         cfg
     }

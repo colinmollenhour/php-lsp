@@ -141,6 +141,24 @@ fn lsp_config_default_max_indexed_files() {
     assert_eq!(cfg.max_indexed_files, MAX_INDEXED_FILES);
 }
 
+#[test]
+fn lsp_config_default_debounce_ms() {
+    let cfg = LspConfig::default();
+    assert_eq!(cfg.debounce_ms, 100);
+}
+
+#[test]
+fn lsp_config_parses_debounce_ms() {
+    let cfg = LspConfig::from_value(&serde_json::json!({"debounceMs": 150}));
+    assert_eq!(cfg.debounce_ms, 150);
+}
+
+#[test]
+fn lsp_config_debounce_ms_minimum_one() {
+    let cfg = LspConfig::from_value(&serde_json::json!({"debounceMs": 0}));
+    assert_eq!(cfg.debounce_ms, 1);
+}
+
 // FeaturesConfig tests
 #[test]
 fn features_config_default_all_enabled() {

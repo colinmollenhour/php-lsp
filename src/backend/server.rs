@@ -306,11 +306,13 @@ impl LanguageServer for Backend {
             let docs = Arc::clone(&self.docs);
             let open_files = self.open_files.clone();
             let client = self.client.clone();
-            let diag_cfg = self.config.load().diagnostics.clone();
+            let cfg = self.config.load();
+            let diag_cfg = cfg.diagnostics.clone();
+            let debounce_ms = cfg.debounce_ms;
             tokio::spawn(async move {
-                // 100 ms debounce: if another edit arrives before we parse,
-                // the version gate below will discard this result.
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                // Debounce: if another edit arrives before we parse, the version
+                // gate below will discard this result.
+                tokio::time::sleep(std::time::Duration::from_millis(debounce_ms)).await;
 
                 // Skip the expensive parse+analyze if a newer edit already
                 // superseded this one. Collapses N rapid keystrokes into 1
