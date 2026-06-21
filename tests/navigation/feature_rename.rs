@@ -158,6 +158,34 @@ func$0tion greet(): void {}
     expect!["<not renameable>"].assert_eq(&out);
 }
 
+/// `parent`, `self`, and `static` are PHP class-reference keywords and must
+/// not be renameable even though they look like identifiers.
+#[tokio::test]
+async fn prepare_rename_on_parent_self_static_returns_nothing() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    for (src, label) in &[
+        (
+            "<?php\nclass Child extends Base {\n    public function f(): void { par$0ent::f(); }\n}",
+            "parent",
+        ),
+        (
+            "<?php\nclass Foo {\n    public static function make(): static { return se$0lf::create(); }\n}",
+            "self",
+        ),
+        (
+            "<?php\nclass Foo {\n    public static function create(): sta$0tic { return new static(); }\n}",
+            "static",
+        ),
+    ] {
+        let out = s.check_prepare_rename(src).await;
+        assert_eq!(
+            out, "<not renameable>",
+            "prepare_rename should block {label}"
+        );
+    }
+}
+
 /// `prepareRename` on a variable should return the range covering the
 /// variable name (without `$`) so editors highlight the right text.
 #[tokio::test]
@@ -613,6 +641,23 @@ async fn rename_superglobal_is_blocked_by_prepare_rename() {
             "prepare_rename should block {superglobal}"
         );
     }
+}
+
+/// `$this` is PHP's object-context pseudo-variable and cannot be renamed.
+#[tokio::test]
+async fn rename_this_is_blocked_by_prepare_rename() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_prepare_rename(
+            r#"<?php
+class Foo {
+    public function bar(): void { $th$0is->baz(); }
+}
+"#,
+        )
+        .await;
+    expect!["<not renameable>"].assert_eq(&out);
 }
 
 // ── variable rename: scope boundaries ────────────────────────────────────────

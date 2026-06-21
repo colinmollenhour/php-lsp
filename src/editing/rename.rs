@@ -152,6 +152,7 @@ fn is_php_keyword(word: &str) -> bool {
             | "new"
             | "null"
             | "or"
+            | "parent"
             | "print"
             | "private"
             | "protected"
@@ -188,6 +189,7 @@ fn is_superglobal(word: &str) -> bool {
             | "$_SERVER"
             | "$_ENV"
             | "$GLOBALS"
+            | "$this"
     )
 }
 
