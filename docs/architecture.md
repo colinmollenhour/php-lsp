@@ -1,9 +1,25 @@
 # Architecture
 
-php-lsp is a Cargo workspace with two crates:
+php-lsp is a single-crate Rust project. It depends on the
+**[mir-php](https://github.com/jorgsowa/mir)** family of crates for static
+analysis — `mir-analyzer`, `mir-codebase`, `mir-issues`, `mir-types` — which
+live in a separate repository and are published to crates.io independently.
 
 - **`php-lsp`** — the LSP server ([tower-lsp](https://crates.io/crates/tower-lsp), [tokio](https://crates.io/crates/tokio)), communicates over stdin/stdout
-- **`mir-php`** — the static analysis engine; no LSP dependency, usable standalone
+- **[mir-php](https://github.com/jorgsowa/mir)** — external static analysis engine; no LSP dependency, usable standalone
+
+## Local development with a patched mir
+
+When working on both `php-lsp` and `mir-php` simultaneously, point Cargo at your
+local checkout via a `[patch]` override in `Cargo.toml` (do not commit this):
+
+```toml
+[patch."https://github.com/jorgsowa/mir"]
+mir-analyzer  = { path = "../mir/crates/mir-analyzer" }
+mir-codebase  = { path = "../mir/crates/mir-codebase" }
+mir-issues    = { path = "../mir/crates/mir-issues" }
+mir-types     = { path = "../mir/crates/mir-types" }
+```
 
 ## Request flow
 
@@ -11,40 +27,40 @@ php-lsp is a Cargo workspace with two crates:
 Editor / AI agent
       │  stdin/stdout (JSON-RPC)
       ▼
-  backend.rs          ← implements tower-lsp LanguageServer trait
+  src/backend/server.rs    ← implements tower-lsp LanguageServer trait
       │
-      ├── document_store.rs   ← ASTs, raw text, diagnostics, LRU index
-      ├── autoload.rs         ← PSR-4 FQN → file resolution
-      ├── type_map.rs         ← variable → class inference
-      ├── use_resolver.rs     ← short name → FQN via `use` statements
-      └── <feature>.rs        ← one module per LSP feature
+      ├── src/backend/handlers/    ← one handler file per feature family
+      ├── src/document/            ← ASTs, raw text, diagnostics, open-file state
+      ├── src/db/                  ← salsa query layer (memoized analysis)
+      ├── src/index/               ← workspace scan + on-disk cache
+      ├── src/lang/                ← config, PSR-4 autoload, docblock parser
+      └── src/{feature}/           ← one module per LSP feature
 ```
 
 ## Key modules
 
 | Module | Responsibility |
 |---|---|
-| `backend.rs` | Wires all modules; owns `DocumentStore`, `Psr4Map`, `PhpStormMeta`, `LspConfig` |
-| `document_store` | Text, parsed ASTs, diagnostics, LRU eviction (10k file cap) |
-| `type_map` | Variable→class inference; trait resolution; constructor-promoted props |
-| `use_resolver` | Resolve short class names to FQNs via `use` statements |
-| `autoload` | PSR-4 map from `composer.json` / `vendor/composer/installed.json` |
-| `completion` | Keyword, symbol, `->`, `::`, `\` namespace completions |
-| `hover` | Function/method/class/enum signatures + docblock annotations |
-| `definition` | Go-to-definition (cross-file + PSR-4 fallback) |
-| `references` | Find all usages including `use` statements |
-| `rename` | Rename across all indexed files |
-| `diagnostics` | Parse errors via php-parser-rs |
-| `semantic_diagnostics` | Bridges `mir_php::analyze` → LSP `Diagnostic` |
-| `docblock` | Parse `/** */` annotations (`@param`, `@return`, `@var`, …) |
-| `walk` | AST traversal helpers |
-| `util` | Shared utilities (`word_at`, `fuzzy_camel_match`, `selected_text_range`, …) |
+| `src/backend/` | Wires all modules; owns `DocumentStore`, `Psr4Map`, `PhpStormMeta`, `LspConfig` |
+| `src/document/` | Text, parsed ASTs, diagnostics, open-file state |
+| `src/db/` | Salsa-memoized queries: parse, index, codebase, semantic analysis |
+| `src/index/` | Workspace scan (background, parallel via rayon) + on-disk cache |
+| `src/lang/config` | `LspConfig` / `DiagnosticsConfig` / `FeaturesConfig` — all `initializationOptions` |
+| `src/lang/autoload` | PSR-4 map from `composer.json` / `vendor/composer/installed.json` |
+| `src/completion/` | Keyword, symbol, `->`, `::`, `\` namespace completions |
+| `src/hover/` | Function/method/class/enum signatures + docblock annotations |
+| `src/navigation/` | Go-to-definition, references, rename, call/type hierarchy |
+| `src/analysis/` | Parse errors, semantic tokens, inlay hints, code lens |
+| `src/actions/` | Code actions (extract, generate, implement, organize imports) |
+| `src/lang/docblock` | Parse `/** */` annotations (`@param`, `@return`, `@var`, `@template`, …) |
+| `src/navigation/walk` | AST traversal helpers |
 
 ## Design notes
 
-- **Async parsing** — edits are debounced 100 ms and parsed in `spawn_blocking`; version tokens discard stale results.
+- **Async parsing** — edits are debounced (default 100 ms, configurable via `initializationOptions.debounceMs`) and parsed in `spawn_blocking`; version tokens discard stale results.
 - **Text sync** — `FULL` sync mode; raw text is stored immediately on change for instant feature response before parsing completes.
-- **Workspace scan** — background task on `initialized`; 50k file cap; skips hidden dirs; includes `vendor/`; respects `excludePaths`.
-- **LRU eviction** — indexed-only files (not open in the editor) are evicted above 10k entries.
-- **Eager vs deferred code actions** — cheap actions (extract variable/method/constant, inline, organize imports) return full edits immediately; expensive actions (PHPDoc, constructor, getters/setters, return type) strip their edit and carry a `data` payload resolved by `codeAction/resolve` when the user selects them.
+- **Two-tier document model** — open files carry a full `ParsedDoc` (~100 KB with arena + AST); background files store a lightweight `FileIndex` (~2 KB, declarations only) via salsa-memoized queries.
+- **Workspace scan** — background task on `initialized`; 50k file cap; skips hidden dirs; includes `vendor/`; respects `excludePaths` and `includePaths`.
+- **On-disk cache** — `FileIndex` entries persisted under `~/.cache/php-lsp/`; warm starts skip re-parsing entirely.
+- **Eager vs deferred code actions** — cheap actions (extract variable/method/constant, inline, organize imports) return full edits immediately; expensive actions (PHPDoc, constructor, getters/setters, return type) carry a `data` payload resolved by `codeAction/resolve` when the user selects them.
 - **mir-php** — `mir_php::analyze(source, stmts, all)` accepts the current document as the first `all` entry for declaration-location tracking; the remaining entries are all other indexed documents.
