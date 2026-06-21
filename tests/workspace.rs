@@ -7,9 +7,9 @@ pub use common::render::{
     assert_linked_editing_ranges_share_text, assert_selection_range_invariant,
 };
 pub use common::{
-    TestServer, canonicalize_workspace_edit, lines_of, render_completion, render_document_symbols,
-    render_hover, render_inlay_hints, render_locations, render_semantic_tokens,
-    render_workspace_symbols,
+    TestServer, canonicalize_workspace_edit, lines_of, render_completion,
+    render_diagnostics_notification, render_document_symbols, render_hover, render_inlay_hints,
+    render_locations, render_pull_diagnostics, render_semantic_tokens, render_workspace_symbols,
 };
 
 #[path = "workspace/feature_configuration.rs"]

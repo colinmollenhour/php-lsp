@@ -400,7 +400,7 @@ pub fn render_completion_ordered(resp: &Value) -> String {
         .join("\n")
 }
 
-pub(crate) fn render_signature_help(resp: &Value) -> String {
+pub fn render_signature_help(resp: &Value) -> String {
     if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
         return format!("error: {err}");
     }
@@ -922,7 +922,7 @@ pub(crate) fn render_prepare_call_hierarchy(resp: &Value, root_uri: &str) -> Str
     rows.join("\n")
 }
 
-pub(crate) fn render_call_hierarchy(resp: &Value, side: &str, root_uri: &str) -> String {
+pub fn render_call_hierarchy(resp: &Value, side: &str, root_uri: &str) -> String {
     if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
         return format!("error: {err}");
     }
@@ -1257,6 +1257,40 @@ pub fn lines_of(items: &[Value]) -> Vec<u32> {
         .collect()
 }
 
+/// Render a `textDocument/documentHighlight` response as sorted `L:C-L:C [kind]` lines.
+/// kind: 1=text, 2=read, 3=write
+pub fn render_document_highlight(resp: &Value) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let arr = match resp["result"].as_array() {
+        Some(a) => a,
+        None => return "<no highlights>".to_owned(),
+    };
+    if arr.is_empty() {
+        return "<no highlights>".to_owned();
+    }
+    let kind_name = |k: u64| match k {
+        2 => "read",
+        3 => "write",
+        _ => "text",
+    };
+    let mut rows: Vec<String> = arr
+        .iter()
+        .map(|h| {
+            let r = &h["range"];
+            let sl = r["start"]["line"].as_u64().unwrap_or(0);
+            let sc = r["start"]["character"].as_u64().unwrap_or(0);
+            let el = r["end"]["line"].as_u64().unwrap_or(0);
+            let ec = r["end"]["character"].as_u64().unwrap_or(0);
+            let kind = kind_name(h["kind"].as_u64().unwrap_or(1));
+            format!("{sl}:{sc}-{el}:{ec} [{kind}]")
+        })
+        .collect();
+    rows.sort();
+    rows.join("\n")
+}
+
 // ---------- resolve roundtrip rendering ----------
 
 /// Render a resolved `completionItem/resolve` response as a snapshot-friendly string.
@@ -1503,4 +1537,67 @@ pub fn render_resolved_document_link(resp: &Value, root_uri: &str) -> String {
     };
 
     format!("L{line}:{char} -> {display_target}")
+}
+
+/// Render a `textDocument/diagnostic` (pull-diagnostics) response as one
+/// line per item: `L:C-L:C [severity] code: message`. Sorted for determinism.
+/// Returns `"<empty>"` when there are no items.
+pub fn render_pull_diagnostics(resp: &Value) -> String {
+    let items = resp["result"]["items"].as_array();
+    let Some(items) = items else {
+        return "<no items field>".to_owned();
+    };
+    if items.is_empty() {
+        return "<empty>".to_owned();
+    }
+    let mut rows: Vec<String> = items
+        .iter()
+        .map(|d| {
+            let r = &d["range"];
+            let sev = d["severity"].as_u64().unwrap_or(0);
+            let code = d["code"].as_str().unwrap_or("?");
+            let msg = d["message"].as_str().unwrap_or("");
+            format!(
+                "{}:{}-{}:{} [{sev}] {code}: {msg}",
+                r["start"]["line"].as_u64().unwrap_or(0),
+                r["start"]["character"].as_u64().unwrap_or(0),
+                r["end"]["line"].as_u64().unwrap_or(0),
+                r["end"]["character"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect();
+    rows.sort();
+    rows.join("\n")
+}
+
+/// Render a `textDocument/publishDiagnostics` notification as one line per
+/// diagnostic: `L:C-L:C [severity] code: message`. Sorted for determinism.
+/// Returns `"<empty>"` when there are no diagnostics, `"<no diagnostics field>"`
+/// when the notification has no `params.diagnostics` array.
+pub fn render_diagnostics_notification(notif: &Value) -> String {
+    let diags = notif["params"]["diagnostics"].as_array();
+    let Some(diags) = diags else {
+        return "<no diagnostics field>".to_owned();
+    };
+    if diags.is_empty() {
+        return "<empty>".to_owned();
+    }
+    let mut rows: Vec<String> = diags
+        .iter()
+        .map(|d| {
+            let r = &d["range"];
+            let sev = d["severity"].as_u64().unwrap_or(0);
+            let code = d["code"].as_str().unwrap_or("?");
+            let msg = d["message"].as_str().unwrap_or("");
+            format!(
+                "{}:{}-{}:{} [{sev}] {code}: {msg}",
+                r["start"]["line"].as_u64().unwrap_or(0),
+                r["start"]["character"].as_u64().unwrap_or(0),
+                r["end"]["line"].as_u64().unwrap_or(0),
+                r["end"]["character"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect();
+    rows.sort();
+    rows.join("\n")
 }

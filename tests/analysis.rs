@@ -7,8 +7,9 @@ pub use common::render::{
     assert_linked_editing_ranges_share_text, assert_selection_range_invariant,
 };
 pub use common::{
-    TestServer, lines_of, render_completion, render_document_symbols, render_hover,
-    render_inlay_hints, render_locations, render_resolved_inlay_hint, render_semantic_tokens,
+    TestServer, lines_of, render_completion, render_diagnostics_notification,
+    render_document_symbols, render_hover, render_inlay_hints, render_locations,
+    render_pull_diagnostics, render_resolved_inlay_hint, render_semantic_tokens,
     render_workspace_diagnostic, render_workspace_symbols,
 };
 
