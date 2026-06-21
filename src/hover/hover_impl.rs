@@ -190,9 +190,41 @@ fn hover_at_core(
             "throw" => {
                 Some("`throw` — throws an exception; can be used as an expression (PHP 8.0)")
             }
+            "void" => Some("`void` — return type indicating the function returns no value"),
+            "bool" => Some("`bool` — boolean type: `true` or `false`"),
+            "int" => Some("`int` — integer type"),
+            "float" => Some("`float` — floating-point number type"),
+            "string" => Some("`string` — string type"),
+            "mixed" => Some("`mixed` — any type (no type constraint)"),
+            "object" => Some("`object` — any class instance"),
+            "iterable" => Some("`iterable` — array or Traversable (PHP 7.1)"),
+            "array" => Some("`array` — ordered map type"),
+            "callable" => Some(
+                "`callable` — any callable: Closure, function-name string, or `[object, method]` array",
+            ),
             _ => None,
         };
         if let Some(doc_str) = keyword_doc {
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: doc_str.to_string(),
+                }),
+                range: hover_range,
+            });
+        }
+        let magic_doc: Option<&str> = match word.as_str() {
+            "__CLASS__" => Some("`__CLASS__` — name of the current class"),
+            "__DIR__" => Some("`__DIR__` — directory of the current file"),
+            "__FILE__" => Some("`__FILE__` — absolute path of the current file"),
+            "__FUNCTION__" => Some("`__FUNCTION__` — name of the current function or closure"),
+            "__LINE__" => Some("`__LINE__` — current line number in the file"),
+            "__METHOD__" => Some("`__METHOD__` — current method name (`ClassName::methodName`)"),
+            "__NAMESPACE__" => Some("`__NAMESPACE__` — name of the current namespace"),
+            "__TRAIT__" => Some("`__TRAIT__` — name of the current trait"),
+            _ => None,
+        };
+        if let Some(doc_str) = magic_doc {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,

@@ -444,6 +444,94 @@ async fn hover_keyword_true() {
 }
 
 #[tokio::test]
+async fn hover_keyword_void() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(): vo$0id {}"#,
+        expect![["`void` — return type indicating the function returns no value"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_bool() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(bo$0ol $x): void {}"#,
+        expect![["`bool` — boolean type: `true` or `false`"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_int() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(in$0t $x): void {}"#,
+        expect![["`int` — integer type"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_float() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(flo$0at $x): void {}"#,
+        expect![["`float` — floating-point number type"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_string() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(str$0ing $x): void {}"#,
+        expect![["`string` — string type"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_mixed() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(mix$0ed $x): void {}"#,
+        expect![["`mixed` — any type (no type constraint)"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_object() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(obj$0ect $x): void {}"#,
+        expect![["`object` — any class instance"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_iterable() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(iterab$0le $x): void {}"#,
+        expect![["`iterable` — array or Traversable (PHP 7.1)"]],
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn hover_named_arg_builtin_function() {
     // PHP 8.0 named arg on a user-defined function matching a known param name.
     let mut s = TestServer::new().await;
@@ -847,6 +935,118 @@ function run(QueryBuilder $qb): void {
         .await;
     // `find` is declared only via @method — hover currently shows nothing.
     expect!["<no hover>"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn hover_keyword_array() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(arr$0ay $x): void {}"#,
+        expect![["`array` — ordered map type"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_keyword_callable() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f(call$0able $x): void {}"#,
+        expect![[
+            "`callable` — any callable: Closure, function-name string, or `[object, method]` array"
+        ]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_magic_constant_class() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php class Foo { public function bar(): void { echo __CLAS$0S__; } }"#,
+        expect![["`__CLASS__` — name of the current class"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_magic_constant_dir() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php echo __DI$0R__;"#,
+        expect![["`__DIR__` — directory of the current file"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_magic_constant_file() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php echo __FIL$0E__;"#,
+        expect![["`__FILE__` — absolute path of the current file"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_magic_constant_function() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php function f() { echo __FUNCTI$0ON__; }"#,
+        expect![["`__FUNCTION__` — name of the current function or closure"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_magic_constant_line() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php echo __LIN$0E__;"#,
+        expect![["`__LINE__` — current line number in the file"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_magic_constant_method() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php class Foo { public function bar(): void { echo __METH$0OD__; } }"#,
+        expect![["`__METHOD__` — current method name (`ClassName::methodName`)"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_magic_constant_namespace() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php namespace App; echo __NAMESP$0ACE__;"#,
+        expect![["`__NAMESPACE__` — name of the current namespace"]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn hover_magic_constant_trait() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php trait Foo { public function bar(): void { echo __TRAI$0T__; } }"#,
+        expect![["`__TRAIT__` — name of the current trait"]],
+    )
+    .await;
 }
 
 // ── 2.4 PHP attribute hover ───────────────────────────────────────────────────
