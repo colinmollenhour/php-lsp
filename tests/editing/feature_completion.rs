@@ -313,6 +313,25 @@ func$0
     .assert_eq(&out);
 }
 
+/// PHP type keywords (soft reserved words) must appear in keyword completions so
+/// developers can type `vo` and get `void`, `bo` → `bool`, `str` → `string`, etc.
+#[tokio::test]
+async fn completion_type_keywords_suggested() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+vo$0
+"#,
+        )
+        .await;
+    assert!(
+        out.lines().any(|l| l.contains("void")),
+        "expected 'void' keyword in completions, got:\n{out}"
+    );
+}
+
 #[tokio::test]
 async fn completion_variable_in_scope() {
     let mut s = TestServer::new().await;

@@ -853,6 +853,18 @@ mod tests {
     }
 
     #[test]
+    fn type_keywords_present() {
+        let kws = keyword_completions();
+        let ls = labels(&kws);
+        for expected in &[
+            "bool", "float", "int", "iterable", "mixed", "never", "object", "string", "void",
+            "parent",
+        ] {
+            assert!(ls.contains(expected), "missing type keyword: {expected}");
+        }
+    }
+
+    #[test]
     fn all_keyword_items_have_keyword_kind() {
         for item in keyword_completions() {
             assert_eq!(item.kind, Some(CompletionItemKind::KEYWORD));
