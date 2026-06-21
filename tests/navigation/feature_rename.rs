@@ -1043,3 +1043,32 @@ async fn prepare_rename_on_magic_constants_returns_nothing() {
         );
     }
 }
+
+/// PHP soft reserved words (type keywords) cannot be used as class or function
+/// names in PHP 7+. `prepareRename` must block them so a misclick on a type
+/// hint does not launch a rename that would corrupt the file.
+#[tokio::test]
+async fn prepare_rename_on_type_keywords_returns_nothing() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    for (src, label) in &[
+        ("<?php\nfunction f(i$0nt $x): void {}", "int"),
+        ("<?php\nfunction f(flo$0at $x): void {}", "float"),
+        ("<?php\nfunction f(bo$0ol $x): void {}", "bool"),
+        ("<?php\nfunction f(str$0ing $x): void {}", "string"),
+        ("<?php\nfunction f(): vo$0id {}", "void"),
+        (
+            "<?php\nfunction f(): nev$0er { throw new \\Exception(); }",
+            "never",
+        ),
+        ("<?php\nfunction f(): mix$0ed {}", "mixed"),
+        ("<?php\nfunction f(): obj$0ect {}", "object"),
+        ("<?php\nfunction f(iterab$0le $x): void {}", "iterable"),
+    ] {
+        let out = s.check_prepare_rename(src).await;
+        assert_eq!(
+            out, "<not renameable>",
+            "prepare_rename should block type keyword {label}"
+        );
+    }
+}
