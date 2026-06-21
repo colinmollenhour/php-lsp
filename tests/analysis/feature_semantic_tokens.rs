@@ -107,7 +107,10 @@ async fn semantic_tokens_full_delta_returns_result() {
     let result = &resp["result"];
     let has_edits = result["edits"].is_array();
     let has_data = result["data"].is_array();
-    expect!["true"].assert_eq(&(has_edits || has_data).to_string());
+    assert!(
+        has_edits || has_data,
+        "delta result must have `edits` or `data` array, got: {result}"
+    );
 }
 
 /// Delta request with an unknown `previousResultId` must degrade gracefully
@@ -130,12 +133,14 @@ async fn semantic_tokens_delta_with_stale_previous_result_id_degrades_to_full() 
     assert!(resp["error"].is_null(), "delta error: {resp:?}");
     let result = &resp["result"];
     assert!(!result.is_null(), "expected a result payload, got null");
-    // Stale resultId must degrade to full response with data array
     let has_data = result["data"]
         .as_array()
         .map(|a| !a.is_empty())
         .unwrap_or(false);
-    expect!["true"].assert_eq(&has_data.to_string());
+    assert!(
+        has_data,
+        "stale resultId must degrade to full response with non-empty data, got: {result}"
+    );
 }
 
 #[tokio::test]
@@ -155,12 +160,14 @@ async fn semantic_tokens_delta_without_baseline_degrades_to_full() {
     assert!(resp["error"].is_null(), "delta error: {resp:?}");
     let result = &resp["result"];
     assert!(!result.is_null(), "expected a result, got null");
-    // Missing baseline must degrade to full response with data array
     let has_data = result["data"]
         .as_array()
         .map(|a| !a.is_empty())
         .unwrap_or(false);
-    expect!["true"].assert_eq(&has_data.to_string());
+    assert!(
+        has_data,
+        "missing baseline must degrade to full response with non-empty data, got: {result}"
+    );
 }
 
 /// After `didChange`, requesting delta with the pre-edit resultId must reflect
@@ -200,8 +207,10 @@ async fn semantic_tokens_delta_after_didchange_reflects_new_content() {
 
     let got_full = result["data"].is_array();
     let got_edits = result["edits"].is_array();
-    let has_result = got_full || got_edits;
-    expect!["true"].assert_eq(&has_result.to_string());
+    assert!(
+        got_full || got_edits,
+        "post-edit delta must have `edits` or `data` array, got: {result}"
+    );
 
     if got_full {
         let post_len = result["data"].as_array().unwrap().len();

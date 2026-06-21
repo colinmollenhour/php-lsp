@@ -1066,7 +1066,9 @@ async fn hover_keyword_static_return_type() {
     s.validate_syntax(false);
     s.check_hover_annotated(
         r#"<?php class Foo { public function make(): stat$0ic {} }"#,
-        expect![["`static` — the class on which the method was called (late static binding, PHP 5.3)"]],
+        expect![[
+            "`static` — the class on which the method was called (late static binding, PHP 5.3)"
+        ]],
     )
     .await;
 }

@@ -95,18 +95,12 @@ async fn will_create_files_outside_psr4_root_generates_minimal_stub() {
     let resp = server.will_create_files(vec![uri]).await;
 
     assert!(resp["error"].is_null(), "willCreateFiles error: {resp:?}");
-    let changes = resp["result"]["changes"]
-        .as_object()
-        .expect("expected a changes map");
-    assert_eq!(changes.len(), 1, "expected exactly one file in changes");
-
-    let edits = changes.values().next().unwrap().as_array().unwrap();
-    assert_eq!(edits.len(), 1);
-    let new_text = edits[0]["newText"].as_str().unwrap();
-    assert_eq!(
-        new_text, "<?php\n\n",
-        "expected minimal stub for non-PSR-4 path"
-    );
+    let root = server.uri("");
+    let snap = canonicalize_workspace_edit(&resp["result"], &root);
+    expect![[r#"
+        // scripts/bootstrap.php
+        0:0-0:0 → "<?php\n\n""#]]
+    .assert_eq(&snap);
 }
 
 #[tokio::test]
