@@ -1,7 +1,6 @@
-/// Comprehensive verification of LSP feature gaps and edge cases
-/// This test file verifies that the newly implemented features work correctly
-/// and don't have behavioral gaps or bugs.
+/// Comprehensive verification of LSP feature gaps and edge cases.
 use super::*;
+use expect_test::expect;
 use serde_json::json;
 
 // ============================================================================
@@ -33,15 +32,17 @@ const X
         )
         .await;
 
-    let items = &resp["result"]["items"];
-    let array = items.as_array().expect("items should be array");
-
-    // Should have multiple errors, not just the first one
-    assert!(
-        array.len() > 1,
-        "should capture multiple parse errors, got: {}",
-        array.len()
-    );
+    expect![[r#"
+        1:14-1:15 [1] ?: expected variable, found '{'
+        1:14-1:15 [1] ?: unclosed '')'' opened at Span { start: 18, end: 19 }
+        2:6-2:7 [1] ?: expected class name, found '{'
+        4:0-4:1 [1] ?: expected ';', found end of file
+        4:0-4:1 [1] ?: expected '=', found end of file
+        4:0-4:1 [1] ?: expected '}', found end of file
+        4:0-4:1 [1] ?: expected constant name, found end of file
+        4:0-4:1 [1] ?: expected expression
+        4:0-4:1 [1] ?: unclosed ''}'' opened at Span { start: 20, end: 21 }"#]]
+    .assert_eq(&render_pull_diagnostics(&resp));
 }
 
 #[tokio::test]
@@ -60,12 +61,7 @@ async fn pull_diagnostics_on_nonexistent_file_returns_empty() {
         )
         .await;
 
-    let items = &resp["result"]["items"];
-    // Should handle gracefully - either empty or no result
-    assert!(
-        items.is_null() || items.as_array().map(|a| a.is_empty()).unwrap_or(true),
-        "should handle nonexistent file gracefully"
-    );
+    expect!["<empty>"].assert_eq(&render_pull_diagnostics(&resp));
 }
 
 #[tokio::test]
@@ -96,32 +92,13 @@ class Foo {
         )
         .await;
 
-    let items = &resp["result"]["items"];
-    let array = items.as_array().expect("items should be array");
-
-    // Should have both parse and semantic errors
-    assert!(
-        !array.is_empty(),
-        "should have combined parse+semantic errors"
-    );
-
-    // Check that we have different error types
-    let has_parse_error = array.iter().any(|d| {
-        d.get("message")
-            .and_then(|m| m.as_str())
-            .map(|s| s.contains("expected") || s.contains("found"))
-            .unwrap_or(false)
-    });
-
-    let has_semantic_error = array.iter().any(|d| {
-        d.get("message")
-            .and_then(|m| m.as_str())
-            .map(|s| s.contains("not defined") || s.contains("undefined"))
-            .unwrap_or(false)
-    });
-
-    assert!(has_parse_error, "should have parse errors");
-    assert!(has_semantic_error, "should have semantic errors");
+    expect![[r#"
+        4:11-4:19 [1] ?: expected ')', found 'function'
+        4:11-4:19 [1] ?: expected ';', found 'function'
+        4:11-4:19 [1] ?: expected variable, found 'function'
+        4:4-4:10 [1] ?: Cannot declare promoted property outside a constructor
+        5:8-5:26 [1] UndefinedFunction: Function nonexistent_func() is not defined"#]]
+    .assert_eq(&render_pull_diagnostics(&resp));
 }
 
 #[tokio::test]
@@ -142,7 +119,6 @@ async fn pull_diagnostics_incremental_changes_update_result() {
         .await;
 
     let id1 = resp1["result"]["resultId"].clone();
-    let items1 = resp1["result"]["items"].as_array().unwrap();
 
     // Make a change that introduces an error
     s.client()
@@ -169,7 +145,6 @@ async fn pull_diagnostics_incremental_changes_update_result() {
         .await;
 
     let id2 = resp2["result"]["resultId"].clone();
-    let items2 = resp2["result"]["items"].as_array().unwrap();
 
     // Result ID should change when content changes
     assert_ne!(
@@ -177,9 +152,9 @@ async fn pull_diagnostics_incremental_changes_update_result() {
         "result_id should change after content modification"
     );
 
-    // Items should be different
-    assert!(items1.is_empty(), "original should have no errors");
-    assert!(!items2.is_empty(), "modified should have errors");
+    expect!["<empty>"].assert_eq(&render_pull_diagnostics(&resp1));
+    expect!["1:0-1:20 [1] UndefinedFunction: Function undefined_function() is not defined"]
+        .assert_eq(&render_pull_diagnostics(&resp2));
 }
 
 #[tokio::test]
@@ -211,18 +186,10 @@ class UserService {
         )
         .await;
 
-    let items = &resp["result"]["items"];
-    let array = items.as_array().unwrap();
-
-    // User class not defined should be detected as error
-    let has_undefined_class = array.iter().any(|d| {
-        d.get("message")
-            .and_then(|m| m.as_str())
-            .map(|s| s.contains("User") || s.contains("not defined"))
-            .unwrap_or(false)
-    });
-
-    assert!(has_undefined_class, "should detect undefined class User");
+    expect![[r#"
+        4:42-4:46 [1] UndefinedClass: Class App\Services\User does not exist
+        5:19-5:23 [1] UndefinedClass: Class App\Services\User does not exist"#]]
+    .assert_eq(&render_pull_diagnostics(&resp));
 }
 
 // ============================================================================
@@ -464,15 +431,9 @@ class {
         )
         .await;
 
-    let items = resp["result"]["items"].as_array().unwrap();
-
-    // All diagnostics should have a message
-    for item in items {
-        assert!(
-            item.get("message").is_some(),
-            "diagnostic should have message field"
-        );
-        let message = item["message"].as_str().unwrap();
-        assert!(!message.is_empty(), "message should not be empty");
-    }
+    let out = render_pull_diagnostics(&resp);
+    expect![[r#"
+        1:6-1:7 [1] ?: expected class name, found '{'
+        2:0-2:1 [1] ?: expected '}', found end of file"#]]
+    .assert_eq(&out);
 }

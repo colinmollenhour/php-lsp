@@ -1,53 +1,6 @@
-use super::common::TestServer;
+use super::common::{TestServer, render_diagnostics_notification};
 use expect_test::expect;
 use serde_json::json;
-
-// ── Helper functions for robust snapshot assertions ────────────────────────────
-
-/// Assert that a symbol exists in the snapshot output, ignoring line numbers.
-/// Example: assert_symbol_exists(&out, "UserController", "packages/api/src/Controller/UserController.php")
-fn assert_symbol_exists(output: &str, symbol_name: &str, file_path: &str) {
-    let pattern = format!("{} @", symbol_name);
-    assert!(
-        output.contains(&pattern),
-        "Expected to find symbol '{}' in output:\n{}",
-        symbol_name,
-        output
-    );
-    assert!(
-        output.contains(file_path),
-        "Expected to find file path '{}' for symbol '{}' in output:\n{}",
-        file_path,
-        symbol_name,
-        output
-    );
-}
-
-/// Assert that a symbol does NOT exist in the snapshot output.
-fn assert_symbol_not_exists(output: &str, symbol_name: &str) {
-    let pattern = format!("{} @", symbol_name);
-    assert!(
-        !output.contains(&pattern),
-        "Expected NOT to find symbol '{}' in output:\n{}",
-        symbol_name,
-        output
-    );
-}
-
-/// Assert that multiple symbols exist in the output.
-fn assert_all_symbols_exist(output: &str, symbols: &[(&str, &str)]) {
-    for (symbol, file_path) in symbols {
-        assert_symbol_exists(output, symbol, file_path);
-    }
-}
-
-/// Assert that specific symbols are present and others are absent.
-fn assert_workspace_symbols(output: &str, present: &[(&str, &str)], absent: &[&str]) {
-    assert_all_symbols_exist(output, present);
-    for symbol in absent {
-        assert_symbol_not_exists(output, symbol);
-    }
-}
 
 // ── Monorepo workspace scan ────────────────────────────────────────────────────
 
@@ -84,11 +37,8 @@ async fn monorepo_workspace_symbols_scoped_by_package() {
     s.wait_for_index_ready().await;
 
     let out = s.snapshot_workspace_symbols("UserController").await;
-    assert_symbol_exists(
-        &out,
-        "UserController",
-        "packages/api/src/Controller/UserController.php",
-    );
+    expect!["Class       UserController @ packages/api/src/Controller/UserController.php:6"]
+        .assert_eq(&out);
 }
 
 // ── Monorepo cross-package navigation ──────────────────────────────────────────
@@ -251,15 +201,15 @@ async fn multi_psr4_all_mappings_indexed() {
     s.wait_for_index_ready().await;
 
     let out = s.snapshot_workspace_symbols("").await;
-    // Verify that symbols from all PSR-4 mappings are indexed
-    assert_all_symbols_exist(
-        &out,
-        &[
-            ("Mailer", "src/Service/Mailer.php"),
-            ("MailerTest", "tests/Unit/MailerTest.php"),
-            ("SmtpClient", "lib/Transport/SmtpClient.php"),
-        ],
-    );
+    expect![[r#"
+        Class       Mailer @ src/Service/Mailer.php:5
+        Class       MailerTest @ tests/Unit/MailerTest.php:6
+        Class       SmtpClient @ lib/Transport/SmtpClient.php:3
+        Method      __construct @ src/Service/Mailer.php:6
+        Method      deliver @ lib/Transport/SmtpClient.php:4
+        Method      send @ src/Service/Mailer.php:10
+        Method      testSend @ tests/Unit/MailerTest.php:7"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -341,10 +291,13 @@ async fn multi_psr4_array_all_bases_indexed() {
     s.wait_for_index_ready().await;
 
     let out = s.snapshot_workspace_symbols("").await;
-    assert_all_symbols_exist(
-        &out,
-        &[("Alpha", "src/Alpha.php"), ("Beta", "lib/Beta.php")],
-    );
+    expect![[r#"
+        Class       Alpha @ src/Alpha.php:3
+        Class       Beta @ lib/Beta.php:3
+        Method      __construct @ lib/Beta.php:4
+        Method      describe @ src/Alpha.php:4
+        Method      run @ lib/Beta.php:8"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -446,14 +399,8 @@ async fn monorepo_php74_str_contains_error() {
             "<?php\nnamespace Acme\\Core\\Util;\nclass StringHelper {\n    public function hasSubstring(string $haystack, string $needle): bool {\n        return str_contains($haystack, $needle);\n    }\n}\n",
         )
         .await;
-    let empty = vec![];
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("str_contains")),
-        "Expected str_contains undefined error with PHP 7.4"
-    );
+    expect!["4:15-4:47 [1] UndefinedFunction: Function str_contains() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -500,23 +447,22 @@ async fn monorepo_exclude_one_package() {
     s.wait_for_index_ready().await;
 
     let out = s.snapshot_workspace_symbols("").await;
-    // Verify that Core, Api, and Tests are indexed but Cli is excluded
-    assert_workspace_symbols(
-        &out,
-        &[
-            ("User", "packages/core/src/Entity/User.php"),
-            (
-                "UserController",
-                "packages/api/src/Controller/UserController.php",
-            ),
-            (
-                "UserRepository",
-                "packages/core/src/Repository/UserRepository.php",
-            ),
-            ("UserTest", "packages/tests/src/Integration/UserTest.php"),
-        ],
-        &["ListUsersCommand"],
-    );
+    // ListUsersCommand (from packages/cli/) must be absent
+    expect![[r#"
+        Class       User @ packages/core/src/Entity/User.php:3
+        Class       UserController @ packages/api/src/Controller/UserController.php:6
+        Class       UserRepository @ packages/core/src/Repository/UserRepository.php:5
+        Class       UserTest @ packages/tests/src/Integration/UserTest.php:6
+        Method      __construct @ packages/api/src/Controller/UserController.php:7
+        Method      __construct @ packages/core/src/Entity/User.php:4
+        Method      findAll @ packages/core/src/Repository/UserRepository.php:18
+        Method      findById @ packages/core/src/Repository/UserRepository.php:9
+        Method      getDisplayName @ packages/core/src/Entity/User.php:10
+        Method      index @ packages/api/src/Controller/UserController.php:15
+        Method      save @ packages/core/src/Repository/UserRepository.php:22
+        Method      show @ packages/api/src/Controller/UserController.php:11
+        Method      testUserRepository @ packages/tests/src/Integration/UserTest.php:7"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -531,15 +477,14 @@ async fn multi_psr4_exclude_tests_dir() {
     s.wait_for_index_ready().await;
 
     let out = s.snapshot_workspace_symbols("").await;
-    // Verify that App and Lib are indexed but Tests is excluded
-    assert_workspace_symbols(
-        &out,
-        &[
-            ("Mailer", "src/Service/Mailer.php"),
-            ("SmtpClient", "lib/Transport/SmtpClient.php"),
-        ],
-        &["MailerTest"],
-    );
+    // MailerTest (from tests/) must be absent
+    expect![[r#"
+        Class       Mailer @ src/Service/Mailer.php:5
+        Class       SmtpClient @ lib/Transport/SmtpClient.php:3
+        Method      __construct @ src/Service/Mailer.php:6
+        Method      deliver @ lib/Transport/SmtpClient.php:4
+        Method      send @ src/Service/Mailer.php:10"#]]
+    .assert_eq(&out);
 }
 
 // ── Workspace structure edge cases ────────────────────────────────────────────
@@ -550,22 +495,14 @@ async fn monorepo_multiple_files_same_namespace_different_packages() {
     s.wait_for_index_ready().await;
 
     let out = s.snapshot_workspace_symbols("User").await;
-    // Verify that all User-related symbols are found across packages
-    assert_all_symbols_exist(
-        &out,
-        &[
-            ("User", "packages/core/src/Entity/User.php"),
-            (
-                "UserController",
-                "packages/api/src/Controller/UserController.php",
-            ),
-            (
-                "UserRepository",
-                "packages/core/src/Repository/UserRepository.php",
-            ),
-            ("UserTest", "packages/tests/src/Integration/UserTest.php"),
-        ],
-    );
+    expect![[r#"
+        Class       ListUsersCommand @ packages/cli/src/Command/ListUsersCommand.php:5
+        Class       User @ packages/core/src/Entity/User.php:3
+        Class       UserController @ packages/api/src/Controller/UserController.php:6
+        Class       UserRepository @ packages/core/src/Repository/UserRepository.php:5
+        Class       UserTest @ packages/tests/src/Integration/UserTest.php:6
+        Method      testUserRepository @ packages/tests/src/Integration/UserTest.php:7"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]

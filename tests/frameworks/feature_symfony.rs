@@ -1,25 +1,5 @@
 use super::*;
 use expect_test::expect;
-use serde_json::Value;
-use std::collections::HashSet;
-
-fn collect_names(resp: &Value) -> Vec<String> {
-    fn walk(out: &mut Vec<String>, items: &[Value]) {
-        for it in items {
-            if let Some(name) = it["name"].as_str() {
-                out.push(name.to_string());
-            }
-            if let Some(children) = it["children"].as_array() {
-                walk(out, children);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    if let Some(arr) = resp["result"].as_array() {
-        walk(&mut out, arr);
-    }
-    out
-}
 
 // ── Fast tests (no-vendor fixture, run by default) ─────────────────────
 
@@ -37,21 +17,8 @@ mod symbols {
             "workspace/symbol error: {:?}",
             resp
         );
-        let items = resp["result"].as_array().cloned().unwrap_or_default();
-        assert!(
-            !items.is_empty(),
-            "expected at least one symbol for query 'BlogController'"
-        );
-        let found_app_controller = items.iter().any(|it| {
-            it["location"]["uri"]
-                .as_str()
-                .map(|u| u.contains("/src/Controller/") && u.ends_with("BlogController.php"))
-                .unwrap_or(false)
-        });
-        assert!(
-            found_app_controller,
-            "expected BlogController from /src/Controller/; got {items:?}"
-        );
+        let out = render_workspace_symbols(&resp, &server.uri(""));
+        expect![""].assert_eq(&out);
     }
 
     #[tokio::test]
@@ -61,21 +28,9 @@ mod symbols {
 
         let resp = server.workspace_symbols("Blog").await;
         assert!(resp["error"].is_null());
-        let items = resp["result"].as_array().cloned().unwrap_or_default();
-        let names: HashSet<String> = items
-            .iter()
-            .filter_map(|it| it["name"].as_str().map(|s| s.to_string()))
-            .collect();
-        // The symfony-demo fixture has no class literally named "Blog";
-        // verify the prefix query surfaces the `Blog*` family.
-        assert!(
-            names.contains("BlogController"),
-            "expected BlogController in {names:?}"
-        );
-        assert!(
-            names.contains("BlogSearchComponent"),
-            "expected BlogSearchComponent in {names:?}"
-        );
+        let out = render_workspace_symbols(&resp, &server.uri(""));
+        // Prefix query "Blog" must surface the Blog* family (BlogController, BlogSearchComponent, etc.)
+        expect![""].assert_eq(&out);
     }
 
     #[tokio::test]
@@ -91,9 +46,9 @@ mod symbols {
         let resp = server
             .document_symbols("src/Controller/BlogController.php")
             .await;
-        let names = collect_names(&resp);
-        assert!(names.iter().any(|n| n.contains("BlogController")));
-        assert!(names.iter().any(|n| n.contains("index")));
+        let out = render_document_symbols(&resp);
+        // Must include class BlogController and its index method.
+        expect![""].assert_eq(&out);
     }
 }
 
@@ -188,8 +143,8 @@ mod call_hierarchy {
 
         let resp = server.incoming_calls(item).await;
         assert!(resp["error"].is_null());
-        let callers = resp["result"].as_array().cloned().unwrap_or_default();
-        assert!(!callers.is_empty(), "expected at least one caller");
+        let out = render_call_hierarchy(&resp, "from", &server.uri(""));
+        expect![""].assert_eq(&out);
     }
 }
 
@@ -314,18 +269,8 @@ mod implementation {
 
         let resp = server.implementation(path, line, ch).await;
         assert!(resp["error"].is_null());
-        let impls = resp["result"].as_array().cloned().unwrap_or_default();
-        assert!(
-            !impls.is_empty(),
-            "expected App\\Entity\\User in impls, got: {impls:?}"
-        );
-        let found = impls.iter().any(|loc| {
-            loc["uri"]
-                .as_str()
-                .map(|u| u.ends_with("src/Entity/User.php"))
-                .unwrap_or(false)
-        });
-        assert!(found, "App\\Entity\\User not in impls: {impls:?}");
+        let out = render_locations(&resp, &server.uri(""));
+        expect![""].assert_eq(&out);
     }
 
     /// Cursor on the `use` import line (`use A\B\Foo`) must also work — the
@@ -342,11 +287,8 @@ mod implementation {
 
         let resp = server.implementation(path, line, ch).await;
         assert!(resp["error"].is_null());
-        let impls = resp["result"].as_array().cloned().unwrap_or_default();
-        assert!(
-            !impls.is_empty(),
-            "cursor on use-statement should find implementations, got empty"
-        );
+        let out = render_locations(&resp, &server.uri(""));
+        expect![""].assert_eq(&out);
     }
 }
 
@@ -368,25 +310,9 @@ mod references {
 
         let resp = server.references(path, line, character, false).await;
         assert!(resp["error"].is_null(), "references error: {:?}", resp);
-        let locs = resp["result"].as_array().cloned().unwrap_or_default();
-
-        let files: HashSet<String> = locs
-            .iter()
-            .filter_map(|l| l["uri"].as_str().map(|s| s.to_string()))
-            .collect();
-
-        assert!(
-            files.len() >= 4,
-            "expected Post references across ≥4 files, got {} ({:?})",
-            files.len(),
-            files,
-        );
-        assert!(
-            files
-                .iter()
-                .any(|u| u.ends_with("/src/Repository/PostRepository.php")),
-            "PostRepository.php should be among references; files: {files:?}"
-        );
+        let out = render_locations(&resp, &server.uri(""));
+        // Must span ≥4 files including PostRepository.php
+        expect![""].assert_eq(&out);
     }
 }
 
@@ -415,12 +341,12 @@ mod type_hierarchy {
 
         let resp = server.supertypes(item).await;
         assert!(resp["error"].is_null());
-        let items = resp["result"].as_array().cloned().unwrap_or_default();
-        let names: Vec<&str> = items.iter().filter_map(|i| i["name"].as_str()).collect();
-        assert!(
-            names.contains(&"AbstractController"),
-            "expected AbstractController in supertypes; got {names:?}"
-        );
+        let names: Vec<&str> = resp["result"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|i| i["name"].as_str()).collect())
+            .unwrap_or_default();
+        // Supertypes must include AbstractController (vendor class via PSR-4 pre-load)
+        expect![""].assert_eq(&names.join(", "));
     }
 
     /// `BlogController extends AbstractController` — subtypes of AbstractController

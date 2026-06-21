@@ -435,11 +435,10 @@ class Foo {
 "#,
         )
         .await;
-    // Should NOT contain promote action
-    assert!(
-        !out.contains("Promote"),
-        "promote action should not be offered when constructor is missing"
-    );
+    expect![[r#"
+        refactor         Generate constructor
+        refactor         Generate getter/setter"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -455,11 +454,7 @@ class Foo {
 "#,
         )
         .await;
-    // Static properties should not be promotable
-    assert!(
-        !out.contains("Promote"),
-        "promote action should not be offered for static properties"
-    );
+    expect!["<no actions>"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -477,11 +472,7 @@ class Foo {
 "#,
         )
         .await;
-    // Param name ($name) doesn't match property name ($title)
-    assert!(
-        !out.contains("Promote"),
-        "promote action should not be offered when param name doesn't match property name"
-    );
+    expect!["refactor         Generate getter/setter"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -499,11 +490,7 @@ class Foo {
 "#,
         )
         .await;
-    // Only simple assignments ($this->x = $x) are promotable
-    assert!(
-        !out.contains("Promote"),
-        "promote action should not be offered for complex assignments"
-    );
+    expect!["refactor         Generate getter/setter"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -522,11 +509,7 @@ class Foo {
 "#,
         )
         .await;
-    // Properties must have visibility modifier
-    assert!(
-        !out.contains("Promote"),
-        "promote action should not be offered for properties without visibility modifier"
-    );
+    expect!["refactor         Generate getter/setter"].assert_eq(&out);
 }
 
 /// Properties immediately before constructor (no blank line) should still be promotable.
@@ -545,40 +528,36 @@ class Foo {
 "#,
         )
         .await;
-    assert!(
-        out.contains("Promote constructor parameter"),
-        "promote action should be offered even with no blank line before constructor"
-    );
+    expect![[r#"
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter"#]]
+    .assert_eq(&out);
 }
 
 /// Promote action with multiple properties works when using range selection.
 #[tokio::test]
 async fn promote_action_on_multiple_properties() {
     let mut server = TestServer::new().await;
-    server
-        .open(
-            "multi.php",
-            "<?php\nclass User {\n    public string $firstName;\n    public string $lastName;\n    public function __construct(string $firstName, string $lastName) {\n        $this->firstName = $firstName;\n        $this->lastName = $lastName;\n    }\n}\n",
+    let out = server
+        .check_code_actions(
+            r#"<?php
+$0class User {
+    public string $firstName;
+    public string $lastName;
+    public function __construct(string $firstName, string $lastName) {
+        $this->firstName = $firstName;
+        $this->lastName = $lastName;
+    }
+}$0
+"#,
         )
         .await;
-
-    let resp = server.code_action("multi.php", 1, 0, 8, 2).await;
-    let promotes: Vec<_> = resp["result"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|a| {
-            a["title"]
-                .as_str()
-                .map(|t| t.to_lowercase().contains("promot"))
-                .unwrap_or(false)
-        })
-        .collect();
-
-    assert!(
-        !promotes.is_empty(),
-        "promote action should be offered for multiple properties"
-    );
+    expect![[r#"
+        refactor         Generate 2 getters/setters
+        refactor         Generate PHPDoc
+        refactor         Promote 2 constructor parameters
+        refactor.extract Extract variable [edit]"#]]
+    .assert_eq(&out);
 }
 
 /// Constructor parameters with default values should be promotable.
@@ -597,10 +576,10 @@ class Config {
 "#,
         )
         .await;
-    assert!(
-        out.contains("Promote constructor parameter"),
-        "promote action should be offered even with default values"
-    );
+    expect![[r#"
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter"#]]
+    .assert_eq(&out);
 }
 
 /// Properties without trailing newline before constructor should work.
@@ -608,32 +587,21 @@ class Config {
 #[tokio::test]
 async fn promote_action_resolve_no_trailing_newline() {
     let mut server = TestServer::new().await;
-    server
-        .open(
-            "promote_no_newline.php",
-            "<?php\nclass Foo {\n    public string $name;\n    public function __construct(string $name) {\n        $this->name = $name;\n    }\n}",
+    let out = server
+        .check_code_actions(
+            r#"<?php
+class Foo {
+    public string $name$0;
+    public function __construct(string $name) {
+        $this->name = $name;
+    }
+}"#,
         )
         .await;
-
-    let resp = server
-        .code_action("promote_no_newline.php", 1, 0, 5, 2)
-        .await;
-    let action = resp["result"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|a| {
-            a["title"]
-                .as_str()
-                .map(|t| t.to_lowercase().contains("promot"))
-                .unwrap_or(false)
-        })
-        .cloned();
-
-    assert!(
-        action.is_some(),
-        "promote action should work for files without trailing newline"
-    );
+    expect![[r#"
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter"#]]
+    .assert_eq(&out);
 }
 
 /// Readonly properties with complex types (nullable, mixed, etc.) should be promotable.
@@ -652,10 +620,7 @@ class Config {
 "#,
         )
         .await;
-    assert!(
-        out.contains("Promote"),
-        "promote action should work with readonly + nullable types"
-    );
+    expect![""].assert_eq(&out);
 }
 
 // --- Documented Limitations ---
@@ -666,32 +631,26 @@ class Config {
 #[tokio::test]
 async fn promote_action_limitation_unbraced_namespace_context() {
     let mut server = TestServer::new().await;
-    server
-        .open(
-            "unbraced_ns.php",
-            "<?php\nnamespace App;\n\nclass Foo {\n    public string $name;\n    public function __construct(string $name) {\n        $this->name = $name;\n    }\n}\n",
+    let out = server
+        .check_code_actions(
+            r#"<?php
+namespace App;
+
+$0class Foo {
+    public string $name;
+    public function __construct(string $name) {
+        $this->name = $name;
+    }
+}$0
+"#,
         )
         .await;
-
-    let resp = server.code_action("unbraced_ns.php", 0, 0, 8, 2).await;
-    let promotes: Vec<_> = resp["result"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|a| {
-            a["title"]
-                .as_str()
-                .map(|t| t.to_lowercase().contains("promot"))
-                .unwrap_or(false)
-        })
-        .collect();
-
-    // In unbraced namespace, promotion should still work because the class
-    // is found at the top level where the namespace applies
-    assert!(
-        !promotes.is_empty(),
-        "promote action should work in unbraced namespaces at top level"
-    );
+    expect![[r#"
+        refactor         Generate PHPDoc
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter
+        refactor.extract Extract variable [edit]"#]]
+    .assert_eq(&out);
 }
 
 /// **LIMITATION**: Static properties are explicitly not promoted because
@@ -712,11 +671,7 @@ class Config {
 "#,
         )
         .await;
-    // Static properties cannot be promoted to constructor parameters
-    assert!(
-        !out.contains("Promote"),
-        "promote action should not be offered for static properties"
-    );
+    expect!["<no actions>"].assert_eq(&out);
 }
 
 /// **LIMITATION**: Complex assignments are not promotable.
@@ -739,11 +694,7 @@ class Foo {
 "#,
         )
         .await;
-    // Complex assignments (inside conditionals) are not promoted
-    assert!(
-        !out.contains("Promote"),
-        "promote action should not be offered for complex assignments"
-    );
+    expect!["refactor         Generate getter/setter"].assert_eq(&out);
 }
 
 /// **LIMITATION**: Assignment to wrong variable name prevents promotion.
@@ -764,11 +715,7 @@ class User {
 "#,
         )
         .await;
-    // Parameter name doesn't match property name
-    assert!(
-        !out.contains("Promote"),
-        "promote action should not be offered when parameter name doesn't match property"
-    );
+    expect!["refactor         Generate getter/setter"].assert_eq(&out);
 }
 
 /// **LIMITATION**: Multiple assignment targets are not promoted.
@@ -790,11 +737,10 @@ class Logger {
 "#,
         )
         .await;
-    // When multiple properties are promotable, the action shows aggregate count
-    assert!(
-        out.contains("Promote 2 constructor parameters"),
-        "promote action should show correct count for multiple properties"
-    );
+    expect![[r#"
+        refactor         Generate 2 getters/setters
+        refactor         Promote 2 constructor parameters"#]]
+    .assert_eq(&out);
 }
 
 // ── property type hint propagation ───────────────────────────────────────────
@@ -815,11 +761,10 @@ class User {
 "#,
         )
         .await;
-    // The promote action should be offered for typed properties
-    assert!(
-        out.contains("Promote"),
-        "promote action should be offered for typed property"
-    );
+    expect![[r#"
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter"#]]
+    .assert_eq(&out);
 }
 
 /// Edge case: property with nullable type hint should promote.
@@ -838,11 +783,10 @@ class Config {
 "#,
         )
         .await;
-    // The promote action should be offered for nullable properties
-    assert!(
-        out.contains("Promote"),
-        "promote action should be offered for nullable property"
-    );
+    expect![[r#"
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter"#]]
+    .assert_eq(&out);
 }
 
 /// Edge case: property with union type hint should promote.
@@ -861,11 +805,10 @@ class Parser {
 "#,
         )
         .await;
-    // The promote action should be offered for union type properties
-    assert!(
-        out.contains("Promote"),
-        "promote action should be offered for union type property"
-    );
+    expect![[r#"
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter"#]]
+    .assert_eq(&out);
 }
 
 /// Edge case: readonly property should promote.
@@ -884,11 +827,10 @@ class Config {
 "#,
         )
         .await;
-    // The promote action should be offered for readonly properties
-    assert!(
-        out.contains("Promote"),
-        "promote action should be offered for readonly property"
-    );
+    expect![[r#"
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter"#]]
+    .assert_eq(&out);
 }
 
 /// Edge case: property with mixed type should promote.
@@ -907,11 +849,10 @@ class Flexible {
 "#,
         )
         .await;
-    // The promote action should be offered for mixed type properties
-    assert!(
-        out.contains("Promote"),
-        "promote action should be offered for mixed type property"
-    );
+    expect![[r#"
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter"#]]
+    .assert_eq(&out);
 }
 
 /// Implement missing methods when the interface is defined in a separate file

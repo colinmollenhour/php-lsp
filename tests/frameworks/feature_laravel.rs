@@ -133,7 +133,7 @@ async fn laravel_definition_on_static_call() {
         .definition("Illuminate/Auth/Access/Gate.php", 855, 50)
         .await;
     let out = render_locations(&resp, &s.uri(""));
-    assert!(out.contains("Str.php"), "expected Str.php, got: {out}");
+    expect![""].assert_eq(&out);
 }
 
 /// GoToDef on `new RequestGuard(…)` navigates to `RequestGuard.php`.
@@ -157,10 +157,7 @@ async fn laravel_definition_on_new_expression() {
         .definition("Illuminate/Auth/AuthManager.php", 235, 25)
         .await;
     let out = render_locations(&resp, &s.uri(""));
-    assert!(
-        out.contains("RequestGuard.php"),
-        "expected RequestGuard.php, got: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 /// GoToDef on a trait in a `use` statement navigates to the trait file.
@@ -182,10 +179,7 @@ async fn laravel_definition_on_trait_use() {
     // Character 8 = start of "CreatesUserProviders".
     let resp = s.definition("Illuminate/Auth/AuthManager.php", 19, 8).await;
     let out = render_locations(&resp, &s.uri(""));
-    assert!(
-        out.contains("CreatesUserProviders.php"),
-        "expected CreatesUserProviders.php, got: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 /// GoToDef on a cross-file import (`use ... as`) resolves into the target file.
@@ -207,11 +201,7 @@ async fn laravel_definition_cross_file_use_import() {
     // Character 30 = start of "Factory" in the qualified name.
     let resp = s.definition("Illuminate/Auth/AuthManager.php", 5, 30).await;
     let out = render_locations(&resp, &s.uri(""));
-    // Navigates into Contracts/Auth/Factory.php.
-    assert!(
-        out.contains("Contracts/Auth/Factory.php"),
-        "expected Factory.php, got: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 /// GoToDef on an interface name in the `implements` clause navigates cross-file.
@@ -235,10 +225,7 @@ async fn laravel_definition_cross_file_implements() {
         .definition("Illuminate/Auth/AuthManager.php", 17, 29)
         .await;
     let out = render_locations(&resp, &s.uri(""));
-    assert!(
-        out.contains("Contracts/Auth/Factory.php"),
-        "expected Factory.php, got: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
@@ -261,14 +248,7 @@ async fn laravel_hover_class_declaration() {
     // Line 17 (0-based), character 6 = "AuthManager".
     let resp = s.hover("Illuminate/Auth/AuthManager.php", 17, 6).await;
     let out = render_hover(&resp);
-    assert!(
-        out.contains("AuthManager"),
-        "hover should contain class name, got: {out}"
-    );
-    assert!(
-        out.contains("```php"),
-        "hover should be markdown, got: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 /// Hover on a method name shows its signature and PHPDoc summary.
@@ -290,14 +270,7 @@ async fn laravel_hover_method_shows_signature_and_doc() {
     // Character 20 = "guard".
     let resp = s.hover("Illuminate/Auth/AuthManager.php", 69, 20).await;
     let out = render_hover(&resp);
-    assert!(
-        out.contains("guard"),
-        "hover should contain method name, got: {out}"
-    );
-    assert!(
-        out.contains("```php"),
-        "hover should be markdown, got: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 /// Hover on a property declaration shows its type and docblock.
@@ -349,14 +322,7 @@ async fn laravel_hover_on_call_site() {
     // Line 60 (0-based), character 59 = "guard" in `$this->guard($guard)`.
     let resp = s.hover("Illuminate/Auth/AuthManager.php", 60, 59).await;
     let out = render_hover(&resp);
-    assert!(
-        out.contains("guard"),
-        "hover on call site should show guard() signature, got: {out}"
-    );
-    assert!(
-        out.contains("```php"),
-        "hover should be markdown, got: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 /// Hover on a static method call (`Str::camel`) shows the camel() signature.
@@ -378,14 +344,7 @@ async fn laravel_hover_on_static_call() {
     // Line 855 (0-based), character 50 = "camel" in `Str::camel($ability)`.
     let resp = s.hover("Illuminate/Auth/Access/Gate.php", 855, 50).await;
     let out = render_hover(&resp);
-    assert!(
-        out.contains("camel"),
-        "hover on static call site should show camel() signature, got: {out}"
-    );
-    assert!(
-        out.contains("```php"),
-        "hover should be markdown, got: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 /// Hover on an interface name at an `implements` clause shows the interface.
@@ -405,10 +364,7 @@ async fn laravel_hover_implements_interface() {
     // Line 17, character 29 = "FactoryContract".
     let resp = s.hover("Illuminate/Auth/AuthManager.php", 17, 29).await;
     let out = render_hover(&resp);
-    assert!(
-        out.contains("Factory") || out.contains("interface"),
-        "hover on implements clause should show interface, got: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 // ── Find References ───────────────────────────────────────────────────────────
@@ -437,17 +393,9 @@ async fn laravel_references_static_method_cross_file() {
         .references("Illuminate/Support/Str.php", 755, 27, false)
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let locs = resp["result"].as_array().expect("array");
-    assert!(
-        locs.len() >= 8,
-        "expected ≥8 references to Str::lower, got {}",
-        locs.len()
-    );
-    let uris: Vec<&str> = locs.iter().map(|l| l["uri"].as_str().unwrap()).collect();
-    assert!(
-        uris.iter().any(|u| u.contains("QueriesRelationships")),
-        "QueriesRelationships.php missing from references: {uris:?}"
-    );
+    let out = render_locations(&resp, &s.uri(""));
+    // Must have ≥8 references spanning multiple files including QueriesRelationships.php
+    expect![""].assert_eq(&out);
 }
 
 /// References to the `guard()` method in AuthManager includes the declaration
@@ -472,11 +420,8 @@ async fn laravel_references_method_includes_declaration() {
         .references("Illuminate/Auth/AuthManager.php", 69, 20, true)
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let locs = resp["result"].as_array().expect("array");
-    assert!(
-        !locs.is_empty(),
-        "expected at least the declaration in references, got 0"
-    );
+    let out = render_locations(&resp, &s.uri(""));
+    expect![""].assert_eq(&out);
 }
 
 // ── Completion ────────────────────────────────────────────────────────────────
@@ -502,22 +447,9 @@ async fn laravel_completion_this_members() {
         .completion("Illuminate/Auth/AuthManager.php", 59, 15)
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let items = resp["result"]["items"]
-        .as_array()
-        .or_else(|| resp["result"].as_array())
-        .expect("completion items array");
-    assert!(
-        items.len() >= 5,
-        "expected ≥5 completion items for $this->, got {}",
-        items.len()
-    );
-    let labels: Vec<&str> = items.iter().filter_map(|i| i["label"].as_str()).collect();
-    // AuthManager has $app, $guards, $customCreators, guard(), resolve(), …
-    let has_guard = labels.iter().any(|l| *l == "guard" || *l == "guard()");
-    assert!(
-        has_guard,
-        "completion for $this-> should include 'guard', got: {labels:?}"
-    );
+    let out = render_completion(&resp);
+    // Must include guard, $app, $guards, $customCreators, resolve(), etc. (≥5 members)
+    expect![""].assert_eq(&out);
 }
 
 /// `Str::` triggers static member completion with camel, lower, upper, etc.
@@ -541,20 +473,9 @@ async fn laravel_completion_static_members() {
     // Line 2 (0-based), character 5 = immediately after `Str::` (S=0,t=1,r=2,:=3,:=4, cursor at 5).
     let resp = s.completion("__test_static_completion.php", 2, 5).await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let items = resp["result"]["items"]
-        .as_array()
-        .or_else(|| resp["result"].as_array())
-        .expect("completion items array");
-    assert!(
-        !items.is_empty(),
-        "expected static completion items for Str::, got 0"
-    );
-    let labels: Vec<&str> = items.iter().filter_map(|i| i["label"].as_str()).collect();
-    let has_camel = labels.iter().any(|l| l.contains("camel"));
-    assert!(
-        has_camel,
-        "static completion for Str:: should include 'camel', got: {labels:?}"
-    );
+    let out = render_completion(&resp);
+    // Must include camel() and other Str:: static members
+    expect![""].assert_eq(&out);
 }
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
@@ -714,21 +635,7 @@ async fn laravel_document_symbols_hierarchical() {
 
     let resp = s.document_symbols("Illuminate/Auth/AuthManager.php").await;
     let out = render_document_symbols(&resp);
-    // AuthManager is the top-level class; its members appear as children.
-    assert!(
-        out.contains("AuthManager"),
-        "document symbols should contain 'AuthManager', got: {out}"
-    );
-    assert!(
-        out.contains("guard"),
-        "document symbols should include 'guard' method, got: {out}"
-    );
-    // At least the class + several methods/properties.
-    let line_count = out.lines().count();
-    assert!(
-        line_count >= 10,
-        "expected ≥10 symbols (class + members), got {line_count}: {out}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 /// `documentSymbol` for the Eloquent Model (a large file with ~200 members)
@@ -751,16 +658,7 @@ async fn laravel_document_symbols_large_file() {
         .document_symbols("Illuminate/Database/Eloquent/Model.php")
         .await;
     let out = render_document_symbols(&resp);
-    assert!(
-        out.contains("Model"),
-        "document symbols should contain 'Model' class, got: {out}"
-    );
-    // Model.php has ~200 methods + properties; at least 50 should appear.
-    let line_count = out.lines().count();
-    assert!(
-        line_count >= 50,
-        "expected ≥50 symbols for Model.php, got {line_count}"
-    );
+    expect![""].assert_eq(&out);
 }
 
 // ── Workspace Symbols ─────────────────────────────────────────────────────────
@@ -777,16 +675,8 @@ async fn laravel_workspace_symbols_class_name() {
 
     let resp = s.workspace_symbols("AuthManager").await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let items = resp["result"].as_array().expect("array");
-    assert!(
-        !items.is_empty(),
-        "expected ≥1 symbol for 'AuthManager', got 0"
-    );
-    let names: Vec<&str> = items.iter().filter_map(|i| i["name"].as_str()).collect();
-    assert!(
-        names.contains(&"AuthManager"),
-        "expected 'AuthManager' in results, got: {names:?}"
-    );
+    let out = render_workspace_symbols(&resp, &s.uri(""));
+    expect![""].assert_eq(&out);
 }
 
 /// `workspace/symbol` for "Guard" returns multiple guard-related symbols.
@@ -801,12 +691,8 @@ async fn laravel_workspace_symbols_partial_query() {
 
     let resp = s.workspace_symbols("Guard").await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let items = resp["result"].as_array().expect("array");
-    assert!(
-        items.len() >= 3,
-        "expected ≥3 symbols matching 'Guard', got {}",
-        items.len()
-    );
+    let out = render_workspace_symbols(&resp, &s.uri(""));
+    expect![""].assert_eq(&out);
 }
 
 /// `workspace/symbol` for the `Str` class returns the class from Support.
@@ -821,15 +707,8 @@ async fn laravel_workspace_symbols_str_class() {
 
     let resp = s.workspace_symbols("Str").await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let items = resp["result"].as_array().expect("array");
-    let uris: Vec<&str> = items
-        .iter()
-        .filter_map(|i| i["location"]["uri"].as_str())
-        .collect();
-    assert!(
-        uris.iter().any(|u| u.contains("Support/Str.php")),
-        "expected Support/Str.php in workspace symbols for 'Str', got: {uris:?}"
-    );
+    let out = render_workspace_symbols(&resp, &s.uri(""));
+    expect![""].assert_eq(&out);
 }
 
 // ── Code Actions ──────────────────────────────────────────────────────────────
@@ -884,18 +763,8 @@ async fn laravel_signature_help_inside_call() {
         .signature_help("Illuminate/Auth/__test_sighel.php", 3, 16)
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let sigs = resp["result"]["signatures"]
-        .as_array()
-        .expect("signatures array");
-    assert!(
-        !sigs.is_empty(),
-        "expected ≥1 signature inside make_guard(, got 0"
-    );
-    let label = sigs[0]["label"].as_str().unwrap_or("");
-    assert!(
-        label.contains("make_guard"),
-        "signature label should contain function name, got: {label}"
-    );
+    let out = render_signature_help(&resp);
+    expect![""].assert_eq(&out);
 }
 
 // ── Inlay Hints ───────────────────────────────────────────────────────────────
@@ -978,18 +847,8 @@ async fn laravel_rename_class_declaration() {
         .rename("Illuminate/Auth/AuthManager.php", 17, 6, "AuthManagerV2")
         .await;
     assert!(resp["error"].is_null(), "rename returned error: {resp:#}");
-    let result = &resp["result"];
-    assert!(
-        !result.is_null(),
-        "rename should return a workspace edit, got null"
-    );
-    // The edit must touch at least the declaration file.
-    let changes = result["changes"]
-        .as_object()
-        .map(|o| o.len())
-        .or_else(|| result["documentChanges"].as_array().map(|a| a.len()))
-        .unwrap_or(0);
-    assert!(changes >= 1, "rename should affect ≥1 file, got {changes}");
+    let out = canonicalize_workspace_edit(&resp["result"], &s.uri(""));
+    expect![""].assert_eq(&out);
 }
 
 // ── Find Implementations ─────────────────────────────────────────────────────
@@ -1019,16 +878,8 @@ async fn laravel_find_implementations_interface_method() {
         .implementation("Illuminate/Contracts/Auth/Factory.php", 12, 20)
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let locs = resp["result"].as_array().unwrap_or(&vec![]).to_vec();
-    assert!(
-        !locs.is_empty(),
-        "expected ≥1 implementation of Factory::guard(), got 0"
-    );
-    let uris: Vec<&str> = locs.iter().filter_map(|l| l["uri"].as_str()).collect();
-    assert!(
-        uris.iter().any(|u| u.contains("AuthManager")),
-        "expected AuthManager::guard() among implementations, got: {uris:?}"
-    );
+    let out = render_locations(&resp, &s.uri(""));
+    expect![""].assert_eq(&out);
 }
 
 // ── Type Hierarchy ───────────────────────────────────────────────────────────
@@ -1064,15 +915,11 @@ async fn laravel_type_hierarchy_supertypes() {
 
     let supers = s.supertypes(items[0].clone()).await;
     assert!(supers["error"].is_null(), "supertypes error: {supers:#}");
-    let super_items = supers["result"].as_array().unwrap_or(&vec![]).to_vec();
-    let names: Vec<&str> = super_items
-        .iter()
-        .filter_map(|i| i["name"].as_str())
-        .collect();
-    assert!(
-        names.iter().any(|n| n.contains("Factory")),
-        "supertypes of AuthManager should include Factory, got: {names:?}"
-    );
+    let names: Vec<&str> = supers["result"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|i| i["name"].as_str()).collect())
+        .unwrap_or_default();
+    expect![""].assert_eq(&names.join(", "));
 }
 
 /// Subtypes of the `Factory` interface includes `AuthManager`.
@@ -1103,15 +950,11 @@ async fn laravel_type_hierarchy_subtypes() {
 
     let subs = s.subtypes(items[0].clone()).await;
     assert!(subs["error"].is_null(), "subtypes error: {subs:#}");
-    let sub_items = subs["result"].as_array().unwrap_or(&vec![]).to_vec();
-    let names: Vec<&str> = sub_items
-        .iter()
-        .filter_map(|i| i["name"].as_str())
-        .collect();
-    assert!(
-        names.iter().any(|n| n.contains("AuthManager")),
-        "subtypes of Factory should include AuthManager, got: {names:?}"
-    );
+    let names: Vec<&str> = subs["result"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|i| i["name"].as_str()).collect())
+        .unwrap_or_default();
+    expect![""].assert_eq(&names.join(", "));
 }
 
 /// `textDocument/implementation` on the `Factory` interface name returns
@@ -1138,16 +981,8 @@ async fn laravel_find_implementations_interface_name() {
         .implementation("Illuminate/Contracts/Auth/Factory.php", 4, 10)
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    let locs = resp["result"].as_array().unwrap_or(&vec![]).to_vec();
-    assert!(
-        !locs.is_empty(),
-        "expected ≥1 implementation of Factory interface, got 0"
-    );
-    let uris: Vec<&str> = locs.iter().filter_map(|l| l["uri"].as_str()).collect();
-    assert!(
-        uris.iter().any(|u| u.contains("AuthManager")),
-        "expected AuthManager among Factory implementations, got: {uris:?}"
-    );
+    let out = render_locations(&resp, &s.uri(""));
+    expect![""].assert_eq(&out);
 }
 
 // ── Under-load stability ──────────────────────────────────────────────────────

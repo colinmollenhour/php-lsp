@@ -401,7 +401,6 @@ async fn code_lens_resolve_all_lenses_preserve_structure() {
         .as_array()
         .cloned()
         .expect("expected code lens array");
-    assert!(!lenses.is_empty(), "expected code lenses");
 
     let mut rendered = Vec::new();
     for lens in &lenses {
@@ -524,13 +523,10 @@ enum Suit {
 "#,
         )
         .await;
-    // check_code_lens renders positions, not names. Two lenses expected:
-    // one for the enum declaration, one for the enum method.
-    let lens_count = out.lines().count();
-    assert!(
-        lens_count >= 2,
-        "expected lenses for both enum and enum method, got {lens_count} lens(es):\n{out}"
-    );
+    expect![[r#"
+        L1:5-L1:9: 0 references [editor.action.showReferences]
+        L2:20-L2:25: 0 references [editor.action.showReferences]"#]]
+    .assert_eq(&out);
 }
 
 /// Every lens that fires `editor.action.showReferences` must supply exactly

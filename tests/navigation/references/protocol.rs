@@ -9,12 +9,7 @@ async fn references_on_unopened_uri_returns_empty() {
     let mut s = TestServer::new().await;
     let resp = s.references("ghost.php", 0, 0, false).await;
     assert!(resp["error"].is_null(), "references errored: {resp:?}");
-    let result = &resp["result"];
-    let is_empty = result.is_null() || result.as_array().map(|a| a.is_empty()).unwrap_or(false);
-    assert!(
-        is_empty,
-        "references on unopened file should be empty, got: {result:?}"
-    );
+    expect!["<none>"].assert_eq(&render_locations(&resp, &s.uri("")));
 }
 
 /// Find-references on `class User` must surface `use App\Model\User` imports in
@@ -32,25 +27,10 @@ async fn references_include_use_imports_across_files() {
         .references("src/Model/User.php", line, ch + 6, false)
         .await;
 
-    let refs = resp["result"].as_array().expect("references array");
-    assert!(
-        refs.len() >= 2,
-        "expected at least 2 cross-file references, got {}",
-        refs.len()
-    );
-    let ref_uris: Vec<&str> = refs.iter().filter_map(|r| r["uri"].as_str()).collect();
-    assert!(
-        ref_uris
-            .iter()
-            .any(|u| u.ends_with("src/Service/Registry.php")),
-        "expected a reference in Registry.php, got: {ref_uris:?}"
-    );
-    assert!(
-        ref_uris
-            .iter()
-            .any(|u| u.ends_with("src/Service/Greeter.php")),
-        "expected a reference in Greeter.php, got: {ref_uris:?}"
-    );
+    expect![[r#"
+        src/Service/Greeter.php:8:26-8:30
+        src/Service/Registry.php:11:29-11:33"#]]
+    .assert_eq(&render_locations(&resp, &server.uri("")));
 }
 
 #[tokio::test]

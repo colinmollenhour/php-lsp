@@ -1,4 +1,5 @@
 use super::*;
+use expect_test::expect;
 use serde_json::json;
 
 #[tokio::test]
@@ -24,13 +25,11 @@ class {
         )
         .await;
 
-    // Extract the result from the JSON-RPC response envelope
-    let result = &resp["result"];
-    let items = &result["items"];
-    assert!(
-        !items.as_array().unwrap_or(&vec![]).is_empty(),
-        "should have parse error"
-    );
+    let out = render_pull_diagnostics(&resp);
+    expect![[r#"
+        1:6-1:7 [1] ?: expected class name, found '{'
+        2:0-2:1 [1] ?: expected '}', found end of file"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -58,22 +57,8 @@ function foo() {
         )
         .await;
 
-    let result = &resp["result"];
-    let items = &result["items"];
-    let array = items.as_array().expect("items should be an array");
-
-    // Should have at least one diagnostic for undefined_function
-    assert!(
-        !array.is_empty(),
-        "should have semantic error for undefined function"
-    );
-    let has_undefined = array.iter().any(|d| {
-        d.get("message")
-            .and_then(|m| m.as_str())
-            .map(|s| s.contains("undefined") || s.contains("not defined"))
-            .unwrap_or(false)
-    });
-    assert!(has_undefined, "should contain undefined function error");
+    expect!["2:9-2:29 [1] UndefinedFunction: Function undefined_function() is not defined"]
+        .assert_eq(&render_pull_diagnostics(&resp));
 }
 
 #[tokio::test]
@@ -101,12 +86,7 @@ function foo(): int {
         )
         .await;
 
-    let result = &resp["result"];
-    let items = &result["items"];
-    assert!(
-        items.as_array().map(|a| a.is_empty()).unwrap_or(true),
-        "should have no diagnostics for valid code"
-    );
+    expect!["<empty>"].assert_eq(&render_pull_diagnostics(&resp));
 }
 
 #[tokio::test]

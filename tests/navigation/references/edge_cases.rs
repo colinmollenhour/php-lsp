@@ -274,20 +274,8 @@ $obj->add();
 
     let resp = s.references(&c.path, c.line, c.character, false).await;
     assert!(resp["error"].is_null(), "references error: {resp:?}");
-    let lines: Vec<u32> = resp["result"]
-        .as_array()
-        .expect("expected array")
-        .iter()
-        .map(|l| l["range"]["start"]["line"].as_u64().unwrap() as u32)
-        .collect();
-    assert!(
-        !lines.contains(&2),
-        "interface method declaration (line 2) must be excluded with includeDeclaration=false: {lines:?}"
-    );
-    assert!(
-        lines.contains(&4),
-        "call site (line 4) must be present: {lines:?}"
-    );
+    use expect_test::expect;
+    expect!["main.php:4:6-4:9"].assert_eq(&render_locations(&resp, &s.uri("")));
 }
 
 #[tokio::test]

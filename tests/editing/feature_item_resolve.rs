@@ -46,25 +46,26 @@ function array_map()
 #[tokio::test]
 async fn completion_resolve_idempotent_when_resolved() {
     let mut s = TestServer::new().await;
-    s.open("file.php", "<?php\n$x = strlen$0").await;
+    s.open("file.php", "<?php\nstrlen").await;
 
-    let resp = s.completion("file.php", 1, 12).await;
+    let resp = s.completion("file.php", 1, 6).await;
     let items: Vec<_> = resp["result"]
         .as_array()
         .or_else(|| resp["result"]["items"].as_array())
         .map(|a| a.to_vec())
         .unwrap_or_default();
 
-    if !items.is_empty() {
-        let item = items[0].clone();
-        let resolved1 = s.completion_resolve(item).await;
-        let resolved2 = s.completion_resolve(resolved1["result"].clone()).await;
+    assert!(
+        !items.is_empty(),
+        "completions must be available at position 1:6"
+    );
+    let item = items[0].clone();
+    let resolved1 = s.completion_resolve(item).await;
+    let resolved2 = s.completion_resolve(resolved1["result"].clone()).await;
 
-        // Resolving twice should be idempotent
-        let out1 = render_resolved_completion_item(&resolved1);
-        let out2 = render_resolved_completion_item(&resolved2);
-        assert_eq!(out1, out2, "resolve should be idempotent");
-    }
+    let out1 = render_resolved_completion_item(&resolved1);
+    let out2 = render_resolved_completion_item(&resolved2);
+    assert_eq!(out1, out2, "resolve should be idempotent");
 }
 
 // ============================================================================
@@ -194,28 +195,14 @@ class TestCase {
     let mut results = Vec::new();
     for lens in lenses {
         let resolved = s.code_lens_resolve(lens.clone()).await;
-        let out = render_resolved_code_lens(&resolved);
-        results.push(out);
+        results.push(render_resolved_code_lens(&resolved));
     }
 
-    // Verify lenses resolved with command information
-    assert!(!results.is_empty(), "should have at least one lens");
-
-    for result in &results {
-        // All results should have valid command information, not error or unresolved
-        assert!(
-            !result.contains("error:") && !result.contains("<unresolved>"),
-            "lens should resolve: {result}"
-        );
-    }
-
-    // Snapshot the rendered lenses
-    let snapshot = results.join("\n");
     expect![[r#"L1:6 0 references [editor.action.showReferences]
 L2:20 1 reference [editor.action.showReferences]
 L2:20 ▶ Run test [php-lsp.runTest]
 L4:20 0 references [editor.action.showReferences]"#]]
-    .assert_eq(&snapshot);
+    .assert_eq(&results.join("\n"));
 }
 
 #[tokio::test]
@@ -266,18 +253,12 @@ async fn document_link_resolve_returns_target() {
     let mut results = Vec::new();
     for link in links {
         let resolved = s.document_link_resolve(link.clone()).await;
-        let out = render_resolved_document_link(&resolved, &s.uri(""));
-        results.push(out);
+        results.push(render_resolved_document_link(&resolved, &s.uri("")));
     }
 
-    // Verify links resolved with targets
-    assert!(!results.is_empty(), "should have at least one link");
-
-    // Snapshot all resolved links
-    let snapshot = results.join("\n");
     expect![[r#"L1:14 -> vendor/autoload.php
 L2:9 -> lib/config.php"#]]
-    .assert_eq(&snapshot);
+    .assert_eq(&results.join("\n"));
 }
 
 #[tokio::test]
@@ -416,18 +397,12 @@ class Database {}
         .as_array()
         .map(|a| a.to_vec())
         .unwrap_or_default();
+    assert!(!symbols.is_empty(), "Database symbol not found");
 
-    if !symbols.is_empty() {
-        let symbol = symbols[0].clone();
-        let resolved = s.workspace_symbol_resolve(symbol).await;
-        let out = render_resolved_workspace_symbol(&resolved, &s.uri(""));
-
-        // Verify output contains location information (ranges may vary)
-        assert!(
-            out.contains("Database") && out.contains("Class"),
-            "resolved symbol should have info: {out}"
-        );
-    }
+    let symbol = symbols[0].clone();
+    let resolved = s.workspace_symbol_resolve(symbol).await;
+    let out = render_resolved_workspace_symbol(&resolved, &s.uri(""));
+    expect!["Database (Class) @ main.php:1:0-1:0"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -459,8 +434,6 @@ function tested() {}
             resolved["error"].is_null(),
             "all symbols should resolve: {symbol:?}"
         );
-
-        // Name and kind should be preserved after resolve
         assert_eq!(
             symbol["name"], resolved["result"]["name"],
             "resolve should preserve name"
@@ -468,14 +441,6 @@ function tested() {}
         assert_eq!(
             symbol["kind"], resolved["result"]["kind"],
             "resolve should preserve kind"
-        );
-
-        let out = render_resolved_workspace_symbol(&resolved, &s.uri(""));
-
-        // Verify each symbol resolved successfully with location information
-        assert!(
-            !out.contains("error:"),
-            "symbol should resolve without error: {out}"
         );
     }
 }

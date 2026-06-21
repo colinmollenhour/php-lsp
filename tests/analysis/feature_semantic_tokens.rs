@@ -423,14 +423,12 @@ async fn semantic_tokens_with_parse_error() {
         .await;
 
     let resp = server.semantic_tokens_full("broken.php").await;
-    // Parse errors should not cause a protocol error
     assert!(resp["error"].is_null(), "error: {resp:?}");
     let out = render_semantic_tokens(&resp, &legend_types);
-    // Should have some tokens despite the parse error
-    assert!(
-        !out.is_empty() && !out.contains("malformed"),
-        "expected tokens even with parse error, got: {out}"
-    );
+    expect![[r#"
+        0:0 len=7 type=parameter mods=0b1
+        1:9 len=6 type=function mods=0b1"#]]
+    .assert_eq(&out);
 }
 
 /// Verify that class properties are tokenized as property type.
@@ -1109,12 +1107,16 @@ async fn semantic_tokens_foreach_with_reference() {
 
     let resp = server.semantic_tokens_full("foreach_ref.php").await;
     let out = render_semantic_tokens(&resp, &legend_types);
-    // $items and $item (with reference binding) should both be tokenized
-    assert!(
-        out.contains("type=variable"),
-        "Should contain variable tokens, got:\n{}",
-        out
-    );
+    expect![[r#"
+        1:0 len=6 type=variable mods=0b0
+        1:10 len=1 type=number mods=0b0
+        1:13 len=1 type=number mods=0b0
+        1:16 len=1 type=number mods=0b0
+        2:9 len=6 type=variable mods=0b0
+        2:20 len=5 type=variable mods=0b0
+        3:4 len=5 type=variable mods=0b0
+        3:13 len=1 type=number mods=0b0"#]]
+    .assert_eq(&out);
 }
 
 /// Verify that function call sites emit function tokens without the declaration modifier.

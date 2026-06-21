@@ -223,14 +223,7 @@ async fn did_create_files_adds_new_class_to_index() {
     let mut server = TestServer::with_fixture("psr4-mini").await;
     server.wait_for_index_ready().await;
 
-    let pre = server.workspace_symbols("OrderRepo").await;
-    assert!(
-        pre["result"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(true),
-        "OrderRepo must not be indexed before creation"
-    );
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("OrderRepo").await);
 
     server.write_file(
         "src/Repository/OrderRepo.php",
@@ -263,31 +256,16 @@ async fn did_delete_files_removes_class_and_clears_diagnostics() {
     let diag_notif = &results[0];
     let notif_uri = diag_notif["params"]["uri"].as_str().unwrap_or("");
     assert!(
-        notif_uri.contains("Model/User.php"),
+        notif_uri.ends_with("Model/User.php"),
         "publishDiagnostics must be for User.php, got URI: {notif_uri}"
     );
-    let diagnostics = diag_notif["params"]["diagnostics"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    assert!(
-        diagnostics.is_empty(),
-        "publishDiagnostics after deletion must be empty, got: {diagnostics:?}"
-    );
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(diag_notif));
 
     server
         .wait_until_symbol_absent("User", Duration::from_secs(3))
         .await;
 
-    let post = server.workspace_symbols("User").await;
-    assert!(
-        post["result"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(true),
-        "User must be removed from workspace symbols after deletion: {:?}",
-        post["result"]
-    );
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("User").await);
 }
 
 // ── didChangeWatchedFiles edge cases ──────────────────────────────────────────

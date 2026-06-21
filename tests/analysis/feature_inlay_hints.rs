@@ -120,7 +120,6 @@ async fn inlay_hint_resolve_populates_tooltip() {
     .await;
     let hints_resp = s.inlay_hints("resolve.php", 0, 0, 4, 0).await;
     let hints = hints_resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(!hints.is_empty(), "expected inlay hints");
     let resp = s.inlay_hint_resolve(hints[0].clone()).await;
     let out = render_resolved_inlay_hint(&resp);
     expect![[r#"
@@ -141,7 +140,6 @@ async fn inlay_hint_resolve_with_docblock_includes_docs() {
     .await;
     let hints_resp = s.inlay_hints("resolve.php", 0, 0, 5, 0).await;
     let hints = hints_resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(!hints.is_empty(), "expected inlay hints");
     let resp = s.inlay_hint_resolve(hints[0].clone()).await;
     let out = render_resolved_inlay_hint(&resp);
     expect![[r#"
@@ -249,7 +247,6 @@ async fn inlay_hint_resolve_is_idempotent() {
 
     let hints_resp = s.inlay_hints("idempotent.php", 0, 0, 4, 0).await;
     let hints = hints_resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(!hints.is_empty());
 
     let resolved_once = s.inlay_hint_resolve(hints[0].clone()).await;
     let resolved_twice = s.inlay_hint_resolve(resolved_once["result"].clone()).await;
@@ -1090,14 +1087,5 @@ async fn inlay_hints_empty_file_returns_array_not_null() {
     let mut s = TestServer::new().await;
     s.open("empty.php", "<?php\n$x = 1;\n").await;
     let resp = s.inlay_hints("empty.php", 0, 0, 3, 0).await;
-    assert!(
-        resp["result"].is_array(),
-        "inlayHint result for an open file with no hints must be an array, got: {}",
-        resp["result"]
-    );
-    assert_eq!(
-        resp["result"].as_array().unwrap().len(),
-        0,
-        "array must be empty for a file with no hints"
-    );
+    expect!["<no hints>"].assert_eq(&render_inlay_hints(&resp));
 }

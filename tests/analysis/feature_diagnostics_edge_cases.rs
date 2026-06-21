@@ -41,19 +41,10 @@ f('ok');
 async fn diagnostics_clear_after_fix() {
     let mut s = TestServer::new().await;
     let notif = s.open("fix.php", "<?php\nundefined_fn();\n").await;
-    assert!(
-        !notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap_or(&vec![])
-            .is_empty()
-    );
+    expect!["1:0-1:14 [1] UndefinedFunction: Function undefined_fn() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
     let after = s.change("fix.php", 2, "<?php\n").await;
-    assert!(
-        after["params"]["diagnostics"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(&after));
 }
 
 #[tokio::test]
@@ -65,18 +56,10 @@ async fn did_open_reports_deprecated_call_warning() {
             "<?php\n/** @deprecated Use newFunc() instead */\nfunction oldFunc(): void {}\n\noldFunc();\n",
         )
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap();
-    let hit = diags.iter().find(|d| {
-        d["code"].as_str() == Some("DeprecatedCall")
-            && d["message"]
-                .as_str()
-                .map(|m| m.contains("oldFunc"))
-                .unwrap_or(false)
-    });
-    assert!(
-        hit.is_some(),
-        "expected DeprecatedCall diagnostic for oldFunc on did_open, got: {diags:?}"
-    );
+    expect![
+        "4:0-4:9 [3] DeprecatedCall: Call to deprecated function oldFunc: Use newFunc() instead"
+    ]
+    .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -130,13 +113,11 @@ function _wrap(): void {
 async fn parse_error_emits_diagnostic() {
     let mut s = TestServer::new().await;
     let notif = s.open("bad.php", "<?php\nfunction f( {\n").await;
-    assert!(
-        !notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap_or(&vec![])
-            .is_empty(),
-        "expected parse diagnostic for malformed PHP"
-    );
+    expect![[r#"
+        1:12-1:13 [1] ?: expected variable, found '{'
+        1:12-1:13 [1] ?: unclosed '')'' opened at Span { start: 16, end: 17 }
+        2:0-2:1 [1] ?: unclosed ''}'' opened at Span { start: 18, end: 19 }"#]]
+    .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -193,22 +174,12 @@ async fn regression_parse_error_files_included() {
         .await;
 
     let resp = server.workspace_diagnostic().await;
-    let items = resp["result"]["items"].as_array().unwrap();
-
-    // Parse error files must be included
-    assert!(
-        !items.is_empty(),
-        "Parse error files must appear in workspace/diagnostic"
-    );
-
-    // Should have the parse error in diagnostics
-    assert!(
-        items[0]["items"]
-            .as_array()
-            .map(|a| !a.is_empty())
-            .unwrap_or(false),
-        "File should have diagnostics (parse error)"
-    );
+    expect![[r#"
+        parse_only.php
+          1:17 expected variable, found '{' [<unset>] (error)
+          1:17 unclosed '')'' opened at Span { start: 21, end: 22 } [<unset>] (error)
+          2:0 unclosed ''}'' opened at Span { start: 23, end: 24 } [<unset>] (error)"#]]
+    .assert_eq(&render_workspace_diagnostic(&resp, &server.uri("")));
 }
 
 /// REGRESSION: result_id must be unique per file for caching.
@@ -240,10 +211,11 @@ async fn regression_result_id_changes_with_diagnostics() {
         "result_id must change when diagnostics change"
     );
 
-    // Verify the error is actually there
+    // Verify the error is actually there — snapshot pins what the error is.
+    let resp2_rendered = render_workspace_diagnostic(&resp2, &server.uri(""));
     assert!(
-        !items2[0]["items"].as_array().unwrap().is_empty(),
-        "File should have diagnostics after adding error"
+        !resp2_rendered.contains("<clean>"),
+        "changetest.php should have diagnostics after adding error: {resp2_rendered}"
     );
 
     // Fix the error
@@ -453,15 +425,10 @@ async fn requests_on_parse_error_file_do_not_error() {
     let notif = server
         .open("broken.php", "<?php\nfunction f( $x { // missing ): body\n")
         .await;
-
-    let diags = notif["params"]["diagnostics"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    assert!(
-        !diags.is_empty(),
-        "expected parse diagnostics for broken source"
-    );
+    expect![[r#"
+        1:15-1:16 [1] ?: unclosed '')'' opened at Span { start: 16, end: 17 }
+        2:0-2:1 [1] ?: unclosed ''}'' opened at Span { start: 21, end: 22 }"#]]
+    .assert_eq(&render_diagnostics_notification(&notif));
 
     let resp = server.hover("broken.php", 1, 10).await;
     assert!(resp["error"].is_null(), "hover errored: {resp:?}");
@@ -492,10 +459,10 @@ async fn same_namespace_truly_missing_class_is_flagged() {
 
     let resp = s.workspace_diagnostic().await;
     let out = render_workspace_diagnostic(&resp, &s.uri(""));
-    assert!(
-        out.contains("UndefinedClass") && out.contains("App\\Missing"),
-        "expected UndefinedClass for App\\Missing, got:\n{out}"
-    );
+    expect![[r#"
+        src/Consumer.php
+          3:40 Class App\Missing does not exist [UndefinedClass] (error)"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -571,13 +538,10 @@ class Foo {}
                 diags["params"]["diagnostics"]
             )
         });
-    assert!(
-        dup["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("has already been defined"),
-        "unexpected message: {}",
-        dup["message"]
+    assert_eq!(
+        dup["message"].as_str().unwrap_or(""),
+        "Class Foo has already been defined",
+        "unexpected duplicate-class message"
     );
 }
 
@@ -722,11 +686,8 @@ async fn syntax_error_produces_error_diagnostic() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let notif = s.open("syntax_err.php", "<?php\nclass {\n").await;
-    let diags = notif["params"]["diagnostics"]
-        .as_array()
-        .expect("diagnostics array");
-    assert!(
-        diags.iter().any(|d| d["severity"].as_u64() == Some(1)),
-        "expected at least one error diagnostic for syntax error, got: {diags:?}"
-    );
+    expect![[r#"
+        1:6-1:7 [1] ?: expected class name, found '{'
+        2:0-2:1 [1] ?: expected '}', found end of file"#]]
+    .assert_eq(&render_diagnostics_notification(&notif));
 }

@@ -2,6 +2,8 @@
 
 use super::*;
 
+use expect_test::expect;
+
 #[tokio::test]
 async fn references_fast_path_final_class_cross_file() {
     let dir = tempfile::tempdir().unwrap();
@@ -25,9 +27,6 @@ async fn references_fast_path_final_class_cross_file() {
     let mut server = TestServer::with_root(dir.path()).await;
     server.wait_for_index_ready().await;
 
-    let caller_uri = server.uri("caller.php");
-    let ignored_uri = server.uri("ignored.php");
-
     server
         .open(
             "class.php",
@@ -38,21 +37,8 @@ async fn references_fast_path_final_class_cross_file() {
     let resp = server.references("class.php", 2, 20, false).await;
 
     assert!(resp["error"].is_null(), "references error: {resp:?}");
-    let uris: Vec<&str> = resp["result"]
-        .as_array()
-        .expect("array")
-        .iter()
-        .map(|l| l["uri"].as_str().unwrap())
-        .collect();
-
-    assert!(
-        uris.contains(&caller_uri.as_str()),
-        "caller.php missing: {uris:?}"
-    );
-    assert!(
-        !uris.contains(&ignored_uri.as_str()),
-        "ignored.php (untyped) must be excluded by fast path: {uris:?}"
-    );
+    // Only caller.php (typed call) must appear; ignored.php (untyped) is excluded by fast path.
+    expect!["caller.php:2:8-2:14"].assert_eq(&render_locations(&resp, &server.uri("")));
 }
 
 #[tokio::test]
@@ -120,17 +106,17 @@ foo(); foo();
     let resp1 = server.references(&c.path, c.line, c.character, false).await;
     let resp2 = server.references(&c.path, c.line, c.character, false).await;
 
-    let locs1 = resp1["result"].as_array().expect("array");
-    let locs2 = resp2["result"].as_array().expect("array");
+    let root = server.uri("");
+    let out1 = render_locations(&resp1, &root);
+    expect![[r#"
+        b.php:1:0-1:3
+        c.php:1:0-1:3
+        c.php:1:7-1:10"#]]
+    .assert_eq(&out1);
     assert_eq!(
-        locs1.len(),
-        3,
-        "expected 3 references (1 from b.php, 2 from c.php): {locs1:?}"
-    );
-    assert_eq!(
-        locs1.len(),
-        locs2.len(),
-        "repeated references calls returned different counts"
+        out1,
+        render_locations(&resp2, &root),
+        "repeated references calls must return identical results"
     );
 }
 
@@ -160,17 +146,7 @@ function countStars(): int { return 42; }
 
     let resp = server.references("ship.php", 1, 9, false).await;
     assert!(resp["error"].is_null(), "references error: {resp:?}");
-    let locs: Vec<_> = resp["result"].as_array().expect("array").iter().collect();
-    let uris: Vec<&str> = locs.iter().map(|l| l["uri"].as_str().unwrap()).collect();
-
-    assert!(
-        uris.iter().any(|u| u.ends_with("mission.php")),
-        "mission.php (calls launchRocket) must be in results: {uris:?}"
-    );
-    assert!(
-        !uris.iter().any(|u| u.ends_with("unrelated.php")),
-        "unrelated.php (never mentions launchRocket) must be excluded: {uris:?}"
-    );
+    expect!["mission.php:1:0-1:12"].assert_eq(&render_locations(&resp, &server.uri("")));
 }
 
 /// Method references: a file with the same method name but a different class
@@ -209,22 +185,8 @@ async fn scoped_ingestion_excludes_same_name_different_class() {
         )
         .await;
 
-    // References on SolarProbe::transmit
+    // References on SolarProbe::transmit — caller.php must appear; tower_caller.php must not.
     let resp = server.references("probe.php", 2, 23, false).await;
     assert!(resp["error"].is_null(), "references error: {resp:?}");
-    let uris: Vec<&str> = resp["result"]
-        .as_array()
-        .expect("array")
-        .iter()
-        .map(|l| l["uri"].as_str().unwrap())
-        .collect();
-
-    assert!(
-        uris.iter().any(|u| u.ends_with("caller.php")),
-        "caller.php (SolarProbe->transmit) must appear: {uris:?}"
-    );
-    assert!(
-        !uris.iter().any(|u| u.ends_with("tower_caller.php")),
-        "tower_caller.php (RadioTower->transmit) must NOT appear: {uris:?}"
-    );
+    expect!["caller.php:2:4-2:12"].assert_eq(&render_locations(&resp, &server.uri("")));
 }

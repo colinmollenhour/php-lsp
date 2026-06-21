@@ -2,6 +2,8 @@
 
 use super::*;
 
+use expect_test::expect;
+
 /// Two classes in the same file share the same property name. References for one
 /// must NOT include the declaration of the other — previously `str_offset` found
 /// the first occurrence in the file, mapping both declarations to class A's span.
@@ -175,26 +177,8 @@ async fn references_on_promoted_property_cross_file() {
 
     let resp = server.references("entity.php", 2, 56, false).await;
     assert!(resp["error"].is_null(), "references error: {resp:?}");
-
-    let service_uri = server.uri("service.php");
-    let hits: Vec<(String, u32)> = resp["result"]
-        .as_array()
-        .unwrap_or_else(|| panic!("expected array: {resp:?}"))
-        .iter()
-        .map(|l| {
-            (
-                l["uri"].as_str().unwrap().to_string(),
-                l["range"]["start"]["line"].as_u64().unwrap() as u32,
-            )
-        })
-        .collect();
-
-    assert!(
-        hits.contains(&(service_uri.clone(), 2)),
-        "`$u->email` (service.php:2) missing: {hits:?}"
-    );
-    assert!(
-        hits.contains(&(service_uri.clone(), 3)),
-        "`$u?->email` (service.php:3) missing: {hits:?}"
-    );
+    expect![[r#"
+        service.php:2:13-2:18
+        service.php:3:14-3:19"#]]
+    .assert_eq(&render_locations(&resp, &server.uri("")));
 }

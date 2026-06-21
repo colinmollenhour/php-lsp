@@ -241,12 +241,8 @@ async fn hidden_directories_are_excluded_from_scan() {
     server.wait_for_index_ready().await;
 
     // Verify a known class from the fixture works
-    let resp = server.workspace_symbols("Greeter").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        !symbols.is_empty(),
-        "Greeter should be indexed from fixture"
-    );
+    expect!["Class       Greeter @ src/Service/Greeter.php:6"]
+        .assert_eq(&server.snapshot_workspace_symbols("Greeter").await);
 
     // Create hidden directories with PHP files that should be ignored
     server.write_file(
@@ -259,29 +255,8 @@ async fn hidden_directories_are_excluded_from_scan() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
     // Hidden directories should NOT appear in workspace symbols
-    let resp = server.workspace_symbols("ClassInGit").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        !symbols.iter().any(|s| {
-            s["name"]
-                .as_str()
-                .map(|n| n == "ClassInGit")
-                .unwrap_or(false)
-        }),
-        ".git/ClassInGit.php should not be indexed"
-    );
-
-    let resp = server.workspace_symbols("VscodeSetting").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        !symbols.iter().any(|s| {
-            s["name"]
-                .as_str()
-                .map(|n| n == "VscodeSetting")
-                .unwrap_or(false)
-        }),
-        ".vscode/VscodeSetting.php should not be indexed"
-    );
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("ClassInGit").await);
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("VscodeSetting").await);
 }
 
 // ── vendor directory ──────────────────────────────────────────────────────────
@@ -367,12 +342,7 @@ async fn vendor_directory_excluded_when_configured() {
 
     server.wait_for_index_ready().await;
 
-    let resp = server.workspace_symbols("HttpKernel").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        symbols.is_empty(),
-        "vendor/HttpKernel.php should NOT be indexed when excluded, got: {symbols:?}"
-    );
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("HttpKernel").await);
 }
 
 // ── file cap ──────────────────────────────────────────────────────────────────
@@ -489,23 +459,10 @@ async fn deeply_nested_directory_structure_is_indexed() {
 
     server.wait_for_index_ready().await;
 
-    let deep = server.workspace_symbols("DeepClass").await;
-    assert!(
-        !deep["result"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(true),
-        "DeepClass in deeply nested dirs should be indexed, got: {deep:?}"
-    );
-
-    let shallow = server.workspace_symbols("ShallowClass").await;
-    assert!(
-        !shallow["result"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(true),
-        "ShallowClass should be indexed, got: {shallow:?}"
-    );
+    expect!["Class       DeepClass @ src/Level1/Level2/Level3/Level4/Level5/DeepClass.php:3"]
+        .assert_eq(&server.snapshot_workspace_symbols("DeepClass").await);
+    expect!["Class       ShallowClass @ src/Shallow/ShallowClass.php:3"]
+        .assert_eq(&server.snapshot_workspace_symbols("ShallowClass").await);
 }
 
 #[serial_test::serial]
@@ -545,42 +502,15 @@ async fn multiple_top_level_directories_with_different_patterns() {
     server.wait_for_index_ready().await;
 
     // All workspace packages should be indexed
-    let api = server.workspace_symbols("ApiService").await;
-    assert!(
-        !api["result"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(true),
-        "ApiService should be indexed"
-    );
-
-    let web = server.workspace_symbols("WebService").await;
-    assert!(
-        !web["result"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(true),
-        "WebService should be indexed"
-    );
-
-    let shared = server.workspace_symbols("SharedUtil").await;
-    assert!(
-        !shared["result"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(true),
-        "SharedUtil should be indexed"
-    );
-
-    // Vendor in subdirectory should also be indexed by default
-    let external = server.workspace_symbols("External").await;
-    assert!(
-        !external["result"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(true),
-        "External in packages/api/vendor should be indexed by default"
-    );
+    expect!["Class       ApiService @ packages/api/src/ApiService.php:3"]
+        .assert_eq(&server.snapshot_workspace_symbols("ApiService").await);
+    expect!["Class       WebService @ packages/web/src/WebService.php:3"]
+        .assert_eq(&server.snapshot_workspace_symbols("WebService").await);
+    expect!["Class       SharedUtil @ packages/shared/src/SharedUtil.php:3"]
+        .assert_eq(&server.snapshot_workspace_symbols("SharedUtil").await);
+    // Vendor in subdirectory should also be indexed (indexVendor: true)
+    expect!["Class       External @ packages/api/vendor/external/External.php:1"]
+        .assert_eq(&server.snapshot_workspace_symbols("External").await);
 }
 
 #[tokio::test]
@@ -596,30 +526,11 @@ async fn exclude_specific_package_in_monorepo_structure() {
     server.wait_for_index_ready().await;
 
     // Excluded classes from src/Service/ should NOT be indexed
-    let resp = server.workspace_symbols("Greeter").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        !symbols.iter().any(|s| {
-            s["location"]["uri"]
-                .as_str()
-                .map(|u| u.contains("src/Service/Greeter.php"))
-                .unwrap_or(false)
-        }),
-        "Greeter in excluded src/Service/ should NOT be indexed"
-    );
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("Greeter").await);
 
     // But classes in src/Model/ SHOULD be indexed
-    let resp = server.workspace_symbols("User").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        symbols.iter().any(|s| {
-            s["location"]["uri"]
-                .as_str()
-                .map(|u| u.contains("src/Model/User.php"))
-                .unwrap_or(false)
-        }),
-        "User in src/Model/ should still be indexed"
-    );
+    expect!["Class       User @ src/Model/User.php:4"]
+        .assert_eq(&server.snapshot_workspace_symbols("User").await);
 }
 
 // ── pattern matching edge cases ───────────────────────────────────────────────
@@ -698,17 +609,8 @@ async fn exclude_paths_does_not_substring_match_intermediate_dirs() {
     server.wait_for_index_ready().await;
 
     // ClassInTestSrc should be indexed because pattern "src/" doesn't match "test_src/"
-    let resp = server.workspace_symbols("ClassInTestSrc").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        symbols.iter().any(|s| {
-            s["name"]
-                .as_str()
-                .map(|n| n == "ClassInTestSrc")
-                .unwrap_or(false)
-        }),
-        "ClassInTestSrc in test_src/ should be indexed (pattern 'src/' should not match 'test_src/')"
-    );
+    expect!["Class       ClassInTestSrc @ test_src/ClassInTestSrc.php:1"]
+        .assert_eq(&server.snapshot_workspace_symbols("ClassInTestSrc").await);
 }
 
 #[tokio::test]
@@ -719,9 +621,7 @@ async fn empty_workspace_returns_zero_files() {
     server.wait_for_index_ready().await;
 
     // Querying an empty workspace should return no symbols
-    let resp = server.workspace_symbols("NonExistent").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(symbols.is_empty(), "Empty workspace should have no symbols");
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("NonExistent").await);
 }
 
 #[serial_test::serial]
@@ -740,12 +640,7 @@ async fn exclude_all_paths_leaves_nothing_indexed() {
 
     // When excluding all real code (src and vendor), even the fixture classes should be missing
     // (Though psr4-mini fixture has code in src/, so it will all be excluded)
-    let resp = server.workspace_symbols("Greeter").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        symbols.is_empty(),
-        "When src/ is excluded, fixture classes should not be indexed"
-    );
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("Greeter").await);
 }
 
 // ── includePaths (override excludePaths) ──────────────────────────────────────
@@ -766,20 +661,11 @@ async fn include_paths_override_exclude_paths() {
     server.wait_for_index_ready().await;
 
     // Files under vendor/noyiisoft should be excluded...
-    let resp = server.workspace_symbols("Fish").await;
-    let symbols: Vec<serde_json::Value> = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        symbols.is_empty(),
-        "vendor/noyiisoft/Fish.php should be excluded by vendor/* — got: {symbols:?}"
-    );
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("Fish").await);
 
     // ...except the explicitly included subdirectory.
-    let resp = server.workspace_symbols("Translator").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        !symbols.is_empty(),
-        "vendor/yiisoft/Translator.php should be indexed despite vendor/* exclusion, got: {symbols:?}"
-    );
+    expect!["Class       Translator @ vendor/yiisoft/Translator.php:4"]
+        .assert_eq(&server.snapshot_workspace_symbols("Translator").await);
 }
 
 #[serial_test::serial]
@@ -798,28 +684,15 @@ async fn include_paths_only_affects_matched_entries() {
     server.wait_for_index_ready().await;
 
     // Greeter should be indexed (included).
-    let resp = server.workspace_symbols("Greeter").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        !symbols.is_empty(),
-        "Greeter should be indexed via includePaths, got: {symbols:?}"
-    );
+    expect!["Class       Greeter @ src/Service/Greeter.php:6"]
+        .assert_eq(&server.snapshot_workspace_symbols("Greeter").await);
 
     // Registry (also in src/Service/) should NOT be indexed.
-    let resp = server.workspace_symbols("Registry").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        symbols.is_empty(),
-        "Registry is excluded and not included — must not appear, got: {symbols:?}"
-    );
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("Registry").await);
 
     // User (in src/Model/) should still be indexed.
-    let resp = server.workspace_symbols("User").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        !symbols.is_empty(),
-        "User is not excluded — must appear, got: {symbols:?}"
-    );
+    expect!["Class       User @ src/Model/User.php:4"]
+        .assert_eq(&server.snapshot_workspace_symbols("User").await);
 }
 
 #[serial_test::serial]
@@ -852,20 +725,11 @@ async fn include_paths_from_php_lsp_json() {
     server.wait_for_index_ready().await;
 
     // Greeter included via includePaths.
-    let resp = server.workspace_symbols("Greeter").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        !symbols.is_empty(),
-        "Greeter should be indexed via includePaths in .php-lsp.json, got: {symbols:?}"
-    );
+    expect!["Class       Greeter @ src/Service/Greeter.php:6"]
+        .assert_eq(&server.snapshot_workspace_symbols("Greeter").await);
 
     // Registry excluded.
-    let resp = server.workspace_symbols("Registry").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        symbols.is_empty(),
-        "Registry is excluded and not included, got: {symbols:?}"
-    );
+    expect!["<no symbols>"].assert_eq(&server.snapshot_workspace_symbols("Registry").await);
 }
 
 // ── Chunked scan completeness ─────────────────────────────────────────────────
@@ -898,15 +762,10 @@ async fn all_scanned_files_appear_in_workspace_index_after_index_ready() {
     server.wait_for_index_ready().await;
 
     for (_, name) in &classes {
-        let resp = server.workspace_symbols(name).await;
-        let found = resp["result"]
-            .as_array()
-            .map(|a| !a.is_empty())
-            .unwrap_or(false);
+        let out = server.snapshot_workspace_symbols(name).await;
         assert!(
-            found,
-            "class {name} should appear in workspace index after indexReady, got: {:?}",
-            resp["result"]
+            out != "<no symbols>",
+            "class {name} should appear in workspace index after indexReady"
         );
     }
 }
@@ -965,12 +824,6 @@ async fn unreadable_file_does_not_truncate_workspace_index() {
     s.validate_syntax(false);
     s.wait_for_index_ready().await;
 
-    let resp = s.workspace_symbols("BigKlass").await;
-    let symbols = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        symbols
-            .iter()
-            .any(|sym| sym["name"].as_str() == Some("BigKlass")),
-        "BigKlass must be indexed despite the unreadable file truncating Phase 2a; got: {symbols:?}"
-    );
+    expect!["Class       BigKlass @ src/BigKlass.php:3"]
+        .assert_eq(&s.snapshot_workspace_symbols("BigKlass").await);
 }

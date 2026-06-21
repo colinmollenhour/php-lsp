@@ -96,10 +96,10 @@ async fn same_namespace_trait_use_truly_missing_is_flagged() {
 
     let resp = s.workspace_diagnostic().await;
     let out = render_workspace_diagnostic(&resp, &s.uri(""));
-    assert!(
-        out.contains("MissingTrait"),
-        "expected a diagnostic mentioning MissingTrait, got:\n{out}"
-    );
+    expect![[r#"
+        src/Person.php
+          3:8 Trait MissingTrait does not exist [UndefinedTrait] (error)"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]

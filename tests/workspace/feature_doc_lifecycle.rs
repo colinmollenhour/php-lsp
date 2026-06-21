@@ -8,38 +8,6 @@ use serde_json::Value;
 
 use crate::common::render_text_edits;
 
-/// Render a `publishDiagnostics` notification (or a `didSave` /
-/// `didChange` reply that has the same shape) as one line per diagnostic:
-/// `L:C-L:C [severity] code: message`. Severity is the LSP enum
-/// (1=Error, 2=Warning, 3=Info, 4=Hint). Sorted for determinism.
-fn render_diagnostics_notification(notif: &Value) -> String {
-    let diags = notif["params"]["diagnostics"].as_array();
-    let Some(diags) = diags else {
-        return "<no diagnostics field>".to_owned();
-    };
-    if diags.is_empty() {
-        return "<empty>".to_owned();
-    }
-    let mut rows: Vec<String> = diags
-        .iter()
-        .map(|d| {
-            let r = &d["range"];
-            let sev = d["severity"].as_u64().unwrap_or(0);
-            let code = d["code"].as_str().unwrap_or("?");
-            let msg = d["message"].as_str().unwrap_or("");
-            format!(
-                "{}:{}-{}:{} [{sev}] {code}: {msg}",
-                r["start"]["line"].as_u64().unwrap_or(0),
-                r["start"]["character"].as_u64().unwrap_or(0),
-                r["end"]["line"].as_u64().unwrap_or(0),
-                r["end"]["character"].as_u64().unwrap_or(0),
-            )
-        })
-        .collect();
-    rows.sort();
-    rows.join("\n")
-}
-
 // --- did_close ---
 
 #[tokio::test]
@@ -48,23 +16,15 @@ async fn did_close_clears_diagnostics() {
     let uri = server.uri("close_test.php");
 
     let open_notif = server.open("close_test.php", "<?php function() {}\n").await;
-    assert!(
-        !open_notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap_or(&vec![])
-            .is_empty(),
-        "expected parse errors before close: {open_notif:?}"
-    );
+    let open_rendered = render_diagnostics_notification(&open_notif);
+    expect![[r#"
+        0:6-0:19 [3] MissingClosureReturnType: Closure has no return type annotation
+        1:0-1:1 [1] ?: expected ';' after expression"#]]
+    .assert_eq(&open_rendered);
 
     server.close("close_test.php").await;
     let close_notif = server.client().wait_for_diagnostics(&uri).await;
-    assert!(
-        close_notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap()
-            .is_empty(),
-        "expected empty diagnostics after close: {close_notif:?}"
-    );
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(&close_notif));
 }
 
 #[tokio::test]
@@ -74,13 +34,7 @@ async fn did_close_unopened_does_not_crash() {
 
     server.close("never_opened.php").await;
     let notif = server.client().wait_for_diagnostics(&uri).await;
-    assert!(
-        notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap()
-            .is_empty(),
-        "expected empty diagnostics for never-opened file: {notif:?}"
-    );
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(&notif));
 }
 
 // --- did_save ---
@@ -91,13 +45,7 @@ async fn did_save_republishes_empty_diagnostics_for_clean_file() {
     server.open("save_clean.php", "<?php\n").await;
 
     let save_notif = server.save("save_clean.php").await;
-    assert!(
-        save_notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap()
-            .is_empty(),
-        "expected no diagnostics after save of clean file: {save_notif:?}"
-    );
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(&save_notif));
 }
 
 #[tokio::test]
@@ -109,22 +57,12 @@ async fn did_save_republishes_diagnostics_for_duplicate_functions() {
             "<?php\nfunction doWork() {}\nfunction doWork() {}\n",
         )
         .await;
-    assert!(
-        !open_notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap_or(&vec![])
-            .is_empty(),
-        "expected duplicate-declaration diagnostic on open: {open_notif:?}"
-    );
+    expect!["2:0-2:20 [1] DuplicateFunction: Function doWork() has already been defined"]
+        .assert_eq(&render_diagnostics_notification(&open_notif));
 
     let save_notif = server.save("save_dup.php").await;
-    assert!(
-        !save_notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap()
-            .is_empty(),
-        "expected >=1 diagnostic after save with duplicate functions: {save_notif:?}"
-    );
+    expect!["2:0-2:20 [1] DuplicateFunction: Function doWork() has already been defined"]
+        .assert_eq(&render_diagnostics_notification(&save_notif));
 }
 
 #[tokio::test]
@@ -139,22 +77,12 @@ async fn did_save_republishes_semantic_diagnostics() {
             "<?php\nfunction _wrap(): void {\n    nonexistent_fn();\n}\n",
         )
         .await;
-    assert!(
-        !open_notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap_or(&vec![])
-            .is_empty(),
-        "expected semantic diagnostic on open: {open_notif:?}"
-    );
+    expect!["2:4-2:20 [1] UndefinedFunction: Function nonexistent_fn() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&open_notif));
 
     let save_notif = server.save("save_semantic.php").await;
-    assert!(
-        !save_notif["params"]["diagnostics"]
-            .as_array()
-            .unwrap()
-            .is_empty(),
-        "did_save must republish semantic diagnostics, got empty list: {save_notif:?}"
-    );
+    expect!["2:4-2:20 [1] UndefinedFunction: Function nonexistent_fn() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&save_notif));
 }
 
 // --- willSave ---
@@ -429,10 +357,28 @@ async fn document_link_returns_array() {
     let links = resp["result"]
         .as_array()
         .expect("documentLink must return an array");
-    assert!(
-        !links.is_empty(),
-        "expected at least one link for require_once path"
-    );
+    let out = if links.is_empty() {
+        "<empty>".to_owned()
+    } else {
+        links
+            .iter()
+            .map(|l| {
+                let start = &l["range"]["start"];
+                let line = start["line"].as_u64().unwrap_or(0);
+                let col = start["character"].as_u64().unwrap_or(0);
+                let target = l["target"].as_str().unwrap_or("?");
+                // Replace absolute file path with a stable placeholder.
+                let display = if let Some(rest) = target.rfind('/').map(|i| &target[i + 1..]) {
+                    rest.to_owned()
+                } else {
+                    target.to_owned()
+                };
+                format!("{line}:{col} -> {display}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    expect!["1:14 -> autoload.php"].assert_eq(&out);
 }
 
 // --- cross-file analysis cache invalidation ---
@@ -463,14 +409,7 @@ async fn dependency_edit_refreshes_cross_file_hover_type() {
     // Hover `$x` (the use on line 3) — its type comes from Maker::make() in the
     // other file.
     let before = server.hover("use_maker.php", 3, 5).await;
-    let before_val = before["result"]["contents"]["value"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    assert!(
-        before_val.contains("Apple"),
-        "expected cross-file type Apple, got {before_val:?}"
-    );
+    expect!["`$x` `Apple`"].assert_eq(&render_hover(&before));
 
     // Change ONLY maker.php so make() returns Banana; use_maker.php is untouched.
     server
@@ -482,32 +421,13 @@ async fn dependency_edit_refreshes_cross_file_hover_type() {
         .await;
 
     let after = server.hover("use_maker.php", 3, 5).await;
-    let after_val = after["result"]["contents"]["value"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    assert!(
-        after_val.contains("Banana"),
-        "dependency edit must refresh cross-file type to Banana, got {after_val:?} (stale cache?)"
-    );
+    expect!["`$x` `Banana`"].assert_eq(&render_hover(&after));
 }
 
 /// Same cross-file freshness guard as the hover test, but for the *completion*
 /// surface (a separate code path that also reads `cached_analysis`).
 #[tokio::test]
 async fn dependency_edit_refreshes_cross_file_completion_members() {
-    fn labels(v: &Value) -> Vec<String> {
-        v["result"]
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|i| i["label"].as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
     let mut server = TestServer::new().await;
     server
         .open(
@@ -523,11 +443,7 @@ async fn dependency_edit_refreshes_cross_file_completion_members() {
         .await;
 
     let before = server.completion("uses.php", 3, 4).await;
-    assert!(
-        labels(&before).iter().any(|l| l == "alpha"),
-        "expected Alpha::alpha before edit, got {:?}",
-        labels(&before)
-    );
+    expect!["Method      alpha"].assert_eq(&render_completion(&before));
 
     // make() now returns Beta; uses.php is untouched.
     server
@@ -539,9 +455,5 @@ async fn dependency_edit_refreshes_cross_file_completion_members() {
         .await;
 
     let after = server.completion("uses.php", 3, 4).await;
-    assert!(
-        labels(&after).iter().any(|l| l == "beta"),
-        "dependency edit must refresh cross-file completion members to Beta::beta, got {:?} (stale cache?)",
-        labels(&after)
-    );
+    expect!["Method      beta"].assert_eq(&render_completion(&after));
 }

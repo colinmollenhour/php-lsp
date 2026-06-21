@@ -149,39 +149,10 @@ async fn references_on_constructor_are_scoped_to_owning_class() {
 
     let resp = server.references("a.php", 2, 22, true).await;
     assert!(resp["error"].is_null(), "references error: {resp:?}");
-
-    let a_uri = server.uri("a.php");
-    let b_uri = server.uri("b.php");
-    let c_uri = server.uri("c.php");
-
-    let hits: Vec<(String, u32)> = resp["result"]
-        .as_array()
-        .unwrap_or_else(|| panic!("expected array of references, got: {resp:?}"))
-        .iter()
-        .map(|l| {
-            (
-                l["uri"].as_str().unwrap().to_string(),
-                l["range"]["start"]["line"].as_u64().unwrap() as u32,
-            )
-        })
-        .collect();
-
-    assert!(
-        !hits.contains(&(b_uri.clone(), 2)),
-        "Bar::__construct decl on b.php:2 must be excluded — got {hits:?}"
-    );
-    assert!(
-        !hits.contains(&(c_uri.clone(), 2)),
-        "`new Bar('x')` on c.php:2 must be excluded — got {hits:?}"
-    );
-    assert!(
-        hits.iter().any(|(u, _)| u == &a_uri),
-        "Foo::__construct decl missing — got {hits:?}"
-    );
-    assert!(
-        hits.contains(&(c_uri.clone(), 1)),
-        "`new Foo(1)` missing from c.php:1 — got {hits:?}"
-    );
+    expect![[r#"
+        a.php:2:20-2:31
+        c.php:1:11-1:14"#]]
+    .assert_eq(&render_locations(&resp, &server.uri("")));
 }
 
 #[tokio::test]
@@ -215,34 +186,10 @@ async fn references_on_constructor_scoped_by_namespace_fqn() {
 
     let resp = server.references("a.php", 3, 22, true).await;
     assert!(resp["error"].is_null(), "references error: {resp:?}");
-
-    let c_uri = server.uri("c.php");
-    let b_uri = server.uri("b.php");
-
-    let hits: Vec<(String, u32)> = resp["result"]
-        .as_array()
-        .unwrap_or_else(|| panic!("expected array, got: {resp:?}"))
-        .iter()
-        .map(|l| {
-            (
-                l["uri"].as_str().unwrap().to_string(),
-                l["range"]["start"]["line"].as_u64().unwrap() as u32,
-            )
-        })
-        .collect();
-
-    assert!(
-        hits.contains(&(c_uri.clone(), 1)),
-        "`new \\Alpha\\Widget(1)` missing: {hits:?}"
-    );
-    assert!(
-        !hits.contains(&(c_uri.clone(), 2)),
-        "`new \\Beta\\Widget('x')` must not appear: {hits:?}"
-    );
-    assert!(
-        !hits.iter().any(|(u, _)| u == &b_uri),
-        "Beta::Widget::__construct must not appear: {hits:?}"
-    );
+    expect![[r#"
+        a.php:3:20-3:31
+        c.php:1:9-1:22"#]]
+    .assert_eq(&render_locations(&resp, &server.uri("")));
 }
 
 /// Cursor on `parent::__construct()` in a child constructor must resolve to

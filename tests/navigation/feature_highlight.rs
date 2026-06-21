@@ -395,17 +395,11 @@ echo 'call foo here';
     let c = opened.cursor();
     let resp = s.document_highlight(&c.path, c.line, c.character).await;
     assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let highlights = resp["result"].as_array().expect("array");
-    assert_eq!(
-        highlights.len(),
-        2,
-        "should highlight decl + call, not the string"
-    );
-    let lines = lines_of(highlights);
-    assert!(
-        !lines.contains(&3),
-        "line 3 (string literal) should not be highlighted: {lines:?}"
-    );
+    use expect_test::expect;
+    expect![[r#"
+        1:9-1:12 [text]
+        2:0-2:3 [text]"#]]
+    .assert_eq(&render_document_highlight(&resp));
 }
 
 /// Array-destructuring assignment: `[$a, $b] = expr` — both `$a` and `$b` on

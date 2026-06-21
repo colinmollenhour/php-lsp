@@ -1865,10 +1865,11 @@ async fn hover_on_implements_target_from_index() {
     let (_, line, ch) = s.locate("Circle.php", "Shape {}", 0);
     let resp = s.hover("Circle.php", line, ch).await;
     let out = render_hover(&resp);
-    assert!(
-        out.contains("Shape"),
-        "hover on the implements-clause interface should mention it, got: {out:?}"
-    );
+    expect![[r#"
+        ```php
+        interface Shape
+        ```"#]]
+    .assert_eq(&out);
 }
 
 /// PSR-4 vendor class resolves from the index.

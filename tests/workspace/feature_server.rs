@@ -5,6 +5,7 @@
 
 // Every (feature-flag key, ServerCapabilities JSON field) pair.
 use super::*;
+use expect_test::expect;
 
 const FEATURE_CAP_PAIRS: &[(&str, &str)] = &[
     ("completion", "completionProvider"),
@@ -149,9 +150,10 @@ async fn sustained_hover_volley_all_succeed() {
     for _ in 0..20 {
         let resp = server.hover("pipe.php", 1, 10).await;
         assert!(resp["error"].is_null(), "hover errored in volley: {resp:?}");
+        let out = render_hover(&resp);
         assert!(
-            resp["result"]["contents"].to_string().contains("pipeHover"),
-            "hover content must stay correct across volley"
+            out.contains("pipeHover"),
+            "hover content must stay correct across volley, got: {out}"
         );
     }
 }
@@ -204,15 +206,11 @@ async fn request_after_close_and_reopen_returns_fresh_data() {
         .await;
 
     let resp = server.hover("ro.php", 1, 10).await;
-    let contents = resp["result"]["contents"].to_string();
-    assert!(
-        contents.contains("second"),
-        "hover after close+reopen must see new content, got: {contents}"
-    );
-    assert!(
-        !contents.contains("first"),
-        "hover must NOT see stale `first` from closed session, got: {contents}"
-    );
+    expect![[r#"
+        ```php
+        function second(): void
+        ```"#]]
+    .assert_eq(&render_hover(&resp));
 }
 
 // ── $/cancelRequest ──────────────────────────────────────────────────────────

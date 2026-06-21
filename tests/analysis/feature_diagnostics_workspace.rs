@@ -33,23 +33,14 @@ async fn pull_diagnostics_returns_report() {
         "textDocument/diagnostic error: {:?}",
         resp
     );
-    let result = &resp["result"];
-    assert!(!result.is_null(), "expected non-null diagnostic report");
     // First pull on a freshly-opened file must be a full report, not unchanged.
     assert_eq!(
-        result["kind"].as_str(),
+        resp["result"]["kind"].as_str(),
         Some("full"),
         "first pull must return kind='full', got: {:?}",
-        result["kind"]
+        resp["result"]["kind"]
     );
-    // Clean file has no diagnostics.
-    let items = result["items"]
-        .as_array()
-        .expect("'items' array in full report");
-    assert!(
-        items.is_empty(),
-        "clean file should have zero diagnostics, got: {items:?}"
-    );
+    expect!["<empty>"].assert_eq(&render_pull_diagnostics(&resp));
 }
 
 #[tokio::test]
@@ -167,19 +158,12 @@ async fn workspace_diagnostic_empty_workspace() {
     let mut server = TestServer::new().await;
 
     let resp = server.workspace_diagnostic().await;
-
     assert!(
         resp["error"].is_null(),
         "workspace/diagnostic error: {:?}",
         resp
     );
-    let items = resp["result"]["items"]
-        .as_array()
-        .expect("expected 'items' array in workspace diagnostic report");
-    assert!(
-        items.is_empty(),
-        "empty workspace should have no diagnostic items, got: {items:?}"
-    );
+    expect!["<no items>"].assert_eq(&render_workspace_diagnostic(&resp, &server.uri("")));
 }
 
 #[tokio::test]
@@ -433,19 +417,27 @@ async fn edge_case_workspace_diagnostic_many_files() {
     }
 
     let resp = server.workspace_diagnostic().await;
-    let items = resp["result"]["items"].as_array().unwrap();
-
-    assert_eq!(
-        items.len(),
-        10,
-        "workspace_diagnostic should return diagnostics for all open files"
-    );
-
-    // All should be clean
-    for item in items {
-        assert!(
-            item["items"].as_array().unwrap().is_empty(),
-            "Clean files should have empty diagnostics array"
-        );
-    }
+    let out = render_workspace_diagnostic(&resp, &server.uri(""));
+    expect![[r#"
+        file0.php
+          <clean>
+        file1.php
+          <clean>
+        file2.php
+          <clean>
+        file3.php
+          <clean>
+        file4.php
+          <clean>
+        file5.php
+          <clean>
+        file6.php
+          <clean>
+        file7.php
+          <clean>
+        file8.php
+          <clean>
+        file9.php
+          <clean>"#]]
+    .assert_eq(&out);
 }

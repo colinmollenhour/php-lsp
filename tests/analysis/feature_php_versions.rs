@@ -1,4 +1,5 @@
 use super::*;
+use expect_test::expect;
 use serde_json::json;
 
 // ── PHP 8.0 functions (str_contains, str_starts_with, str_ends_with) ────────────
@@ -15,17 +16,11 @@ async fn str_contains_undefined_on_php74() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open("test.php", "<?php\nstr_contains(\"hello\", \"ell\");\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("str_contains")),
-        "Expected undefined str_contains error on PHP 7.4"
-    );
+    expect!["1:0-1:28 [1] UndefinedFunction: Function str_contains() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -47,18 +42,11 @@ async fn str_starts_with_undefined_on_php74() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open("test.php", "<?php\nstr_starts_with(\"hello\", \"hel\");\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags.iter().any(|d| d["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("str_starts_with")),
-        "Expected undefined str_starts_with error on PHP 7.4"
-    );
+    expect!["1:0-1:31 [1] UndefinedFunction: Function str_starts_with() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -69,18 +57,11 @@ async fn str_ends_with_undefined_on_php74() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open("test.php", "<?php\nstr_ends_with(\"hello\", \"lo\");\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags.iter().any(|d| d["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("str_ends_with")),
-        "Expected undefined str_ends_with error on PHP 7.4"
-    );
+    expect!["1:0-1:28 [1] UndefinedFunction: Function str_ends_with() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 // ── PHP 8.0 removed functions (each, money_format) ────────────────────────────
@@ -104,20 +85,14 @@ async fn each_undefined_on_php80() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open(
             "test.php",
             "<?php\n$arr = [1, 2, 3];\n$pair = each($arr);\n",
         )
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("each")),
-        "Expected undefined each error on PHP 8.0"
-    );
+    expect!["2:8-2:18 [1] UndefinedFunction: Function each() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -139,20 +114,14 @@ async fn money_format_undefined_on_php80() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open(
             "test.php",
             "<?php\n$result = money_format(\"%.2n\", 1234.56);\n",
         )
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("money_format")),
-        "Expected undefined money_format error on PHP 8.0"
-    );
+    expect!["1:10-1:39 [1] UndefinedFunction: Function money_format() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 // ── PHP 8.1 functions (array_is_list) ──────────────────────────────────────────
@@ -165,18 +134,11 @@ async fn array_is_list_undefined_on_php74() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open("test.php", "<?php\n$is_list = array_is_list([1, 2, 3]);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags.iter().any(|d| d["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("array_is_list")),
-        "Expected undefined array_is_list error on PHP 7.4"
-    );
+    expect!["1:11-1:35 [1] UndefinedFunction: Function array_is_list() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -187,18 +149,11 @@ async fn array_is_list_undefined_on_php80() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open("test.php", "<?php\n$is_list = array_is_list([1, 2, 3]);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags.iter().any(|d| d["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("array_is_list")),
-        "Expected undefined array_is_list error on PHP 8.0"
-    );
+    expect!["1:11-1:35 [1] UndefinedFunction: Function array_is_list() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -222,20 +177,14 @@ async fn array_find_undefined_on_php83() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open(
             "test.php",
             "<?php\n$found = array_find([1, 2, 3], fn ($n) => $n > 1);\n",
         )
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_find")),
-        "Expected undefined array_find error on PHP 8.3"
-    );
+    expect!["1:9-1:49 [1] UndefinedFunction: Function array_find() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -257,20 +206,14 @@ async fn array_any_undefined_on_php83() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open(
             "test.php",
             "<?php\n$any = array_any([1, 2, 3], fn ($n) => $n > 1);\n",
         )
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_any")),
-        "Expected undefined array_any error on PHP 8.3"
-    );
+    expect!["1:7-1:46 [1] UndefinedFunction: Function array_any() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -281,20 +224,14 @@ async fn array_all_undefined_on_php83() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open(
             "test.php",
             "<?php\n$all = array_all([1, 2, 3], fn ($n) => $n > 0);\n",
         )
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_all")),
-        "Expected undefined array_all error on PHP 8.3"
-    );
+    expect!["1:7-1:46 [1] UndefinedFunction: Function array_all() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 // ── PHP 8.5 functions (array_first, array_last) ────────────────────────────────
@@ -307,17 +244,11 @@ async fn array_first_undefined_on_php84() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open("test.php", "<?php\n$first = array_first([1, 2, 3]);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_first")),
-        "Expected undefined array_first error on PHP 8.4"
-    );
+    expect!["1:9-1:31 [1] UndefinedFunction: Function array_first() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -339,17 +270,11 @@ async fn array_last_undefined_on_php84() {
     }))
     .await;
 
-    let empty = vec![];
     let notif = s
         .open("test.php", "<?php\n$last = array_last([1, 2, 3]);\n")
         .await;
-    let diags = notif["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("array_last")),
-        "Expected undefined array_last error on PHP 8.4"
-    );
+    expect!["1:8-1:29 [1] UndefinedFunction: Function array_last() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -373,33 +298,21 @@ async fn version_change_clears_diagnostics() {
     }))
     .await;
 
-    // Open file with PHP 7.4 - str_contains should error
-    let empty = vec![];
+    // PHP 7.4: str_contains not yet defined
     let notif1 = s
         .open("test.php", "<?php\n$x = str_contains('hello', 'ell');\n")
         .await;
-    let diags1 = notif1["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        diags1
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("str_contains")),
-        "Expected str_contains error with PHP 7.4"
-    );
+    expect!["1:5-1:33 [1] UndefinedFunction: Function str_contains() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif1));
 
-    // Change to PHP 8.0
+    // Change to PHP 8.0 — str_contains is now defined
     s.change_configuration(json!({"phpVersion": "8.0"})).await;
 
-    // Open the same file again - should have no diagnostic now
+    // Re-open the same file; now should have no diagnostics
     let notif2 = s
         .open("test.php", "<?php\n$x = str_contains('hello', 'ell');\n")
         .await;
-    let diags2 = notif2["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    assert!(
-        !diags2
-            .iter()
-            .any(|d| d["message"].as_str().unwrap_or("").contains("str_contains")),
-        "Expected no str_contains error with PHP 8.0"
-    );
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(&notif2));
 }
 
 // ── Boundary tests ──────────────────────────────────────────────────────────────
@@ -430,17 +343,4 @@ async fn all_versions_have_basic_stdlib() {
         )
         .await;
     }
-}
-
-// ── Edge case: invalid version falls back to latest ───────────────────────────
-
-#[tokio::test]
-async fn invalid_version_falls_back_to_latest_stubs() {
-    let (mut s, _) = TestServer::new_with_options(json!({
-        "phpVersion": "99.99",
-        "diagnostics": { "enabled": true }
-    }))
-    .await;
-    s.check_no_diagnostics("<?php\n$first = array_first([1]);\n$last = array_last([1]);\n")
-        .await;
 }

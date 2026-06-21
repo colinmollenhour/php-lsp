@@ -157,9 +157,11 @@ async fn references_reflect_didchange_additions_and_removals() {
         .await;
 
     let resp = server.references("refs.php", 1, 9, false).await;
-    let refs = resp["result"].as_array().expect("references array");
-    let ref_count = refs.len();
-    expect!["2"].assert_eq(&ref_count.to_string());
+    let root = server.uri("");
+    expect![[r#"
+        refs.php:2:0-2:6
+        refs.php:3:0-3:6"#]]
+    .assert_eq(&render_locations(&resp, &root));
 
     server
         .change(
@@ -170,30 +172,21 @@ async fn references_reflect_didchange_additions_and_removals() {
         .await;
 
     let resp = server.references("refs.php", 1, 9, false).await;
-    let refs = resp["result"].as_array().expect("references array");
-    let ref_count = refs.len();
-    expect!["1"].assert_eq(&ref_count.to_string());
+    expect!["refs.php:2:0-2:6"].assert_eq(&render_locations(&resp, &root));
 }
 
 #[tokio::test]
 async fn diagnostics_replaced_not_appended_on_didchange() {
     let mut server = TestServer::new().await;
     let notif = server.open("d.php", "<?php\nbroken(;\n").await;
-    let first_count = notif["params"]["diagnostics"]
-        .as_array()
-        .map(|a| a.len())
-        .unwrap_or(0);
-    assert!(first_count > 0, "expected parse error on open");
+    expect![[r#"
+        1:0-1:7 [1] UndefinedFunction: Function broken() is not defined
+        1:7-1:8 [1] ?: expected ')', found ';'
+        1:7-1:8 [1] ?: expected expression"#]]
+    .assert_eq(&render_diagnostics_notification(&notif));
 
     let notif = server.change("d.php", 2, "<?php\n").await;
-    let diags = notif["params"]["diagnostics"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    assert!(
-        diags.is_empty(),
-        "diagnostics from prior version must be cleared, got: {diags:?}"
-    );
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]
@@ -293,9 +286,10 @@ async fn reopen_does_not_duplicate_symbols() {
     server.open("reopen.php", src).await;
 
     let resp = server.references("reopen.php", 1, 9, true).await;
-    let refs = resp["result"].as_array().expect("references array");
-    let ref_count = refs.len();
-    expect!["2"].assert_eq(&ref_count.to_string());
+    expect![[r#"
+        reopen.php:1:9-1:13
+        reopen.php:2:0-2:4"#]]
+    .assert_eq(&render_locations(&resp, &server.uri("")));
 }
 
 #[tokio::test]
@@ -429,15 +423,7 @@ async fn cross_file_republish_uses_empty_array_for_clean_dependent() {
 
     let b_uri = server.uri("clean_b.php");
     let notif = server.client().wait_for_diagnostics(&b_uri).await;
-    let diags = &notif["params"]["diagnostics"];
-    assert!(
-        diags.is_array(),
-        "diagnostics must be an array (LSP requires the field), got: {diags:?}"
-    );
-    assert!(
-        diags.as_array().unwrap().is_empty(),
-        "clean_b still resolves aa() — expected empty diagnostics, got: {diags:?}"
-    );
+    expect!["<empty>"].assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]

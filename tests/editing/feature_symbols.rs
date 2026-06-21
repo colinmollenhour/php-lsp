@@ -107,18 +107,10 @@ async fn workspace_symbols_returns_empty_array_not_null_on_no_match() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     s.open("main.php", "<?php\nclass Foo {}\n").await;
-    let resp = s.workspace_symbols("ThisQueryMatchesNothing").await;
-    assert!(
-        resp["result"].is_array(),
-        "expected result to be an array, got: {}",
-        resp["result"]
-    );
-    assert_eq!(
-        resp["result"].as_array().unwrap().len(),
-        0,
-        "expected empty array, got: {}",
-        resp["result"]
-    );
+    let out = s
+        .snapshot_workspace_symbols("ThisQueryMatchesNothing")
+        .await;
+    expect!["<no symbols>"].assert_eq(&out);
 }
 
 // --- workspaceSymbol/resolve ---
@@ -290,7 +282,8 @@ async fn symbols_range_start_lte_selection_range_start() {
     .await;
     let resp = s.document_symbols("test.php").await;
     let syms = resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(!syms.is_empty(), "expected at least one symbol");
+    assert!(!syms.is_empty(), "expected at least one symbol for hello()");
+    // Verify LSP invariant: range.start must be ≤ selectionRange.start for every symbol.
     for sym in &syms {
         let range_start_line = sym["range"]["start"]["line"].as_u64().unwrap_or(u64::MAX);
         let sel_start_line = sym["selectionRange"]["start"]["line"]
@@ -317,10 +310,10 @@ class {
 "#,
         )
         .await;
-    assert!(
-        out.contains("valid"),
-        "expected 'valid' symbol despite parse error: {out}"
-    );
+    expect![[r#"
+        Function valid @L1
+        Class <error> @L0"#]]
+    .assert_eq(&out);
 }
 
 /// The function symbol's `range.start.line` must be the line where the

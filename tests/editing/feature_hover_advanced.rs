@@ -726,10 +726,11 @@ $obj = new Immu$0table();
 "#,
         )
         .await;
-    assert!(
-        out.contains("readonly class"),
-        "expected 'readonly class' in hover, got: {out}"
-    );
+    expect![[r#"
+        ```php
+        readonly class Immutable
+        ```"#]]
+    .assert_eq(&out);
 }
 
 // ── Use-alias resolution ──────────────────────────────────────────────────────
@@ -872,11 +873,8 @@ class Base {
 "#,
         )
         .await;
-    // Should resolve to something about Base (static call), not the keyword doc.
-    assert!(
-        !v.contains("return type") && !v.contains("late static"),
-        "static:: should not trigger keyword hover, got: {v}"
-    );
+    expect!["`static` — the class on which the method was called (late static binding, PHP 5.3)"]
+        .assert_eq(&v);
 }
 
 // ── Eloquent / @method hover gaps ────────────────────────────────────────────

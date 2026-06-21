@@ -53,10 +53,10 @@ function $0getId$0(): int { return 42; }
 "#,
         )
         .await;
-    assert!(
-        !out.contains("Add return type"),
-        "should not offer return type action when type already exists. Got: {out}"
-    );
+    expect![[r#"
+        refactor         Generate PHPDoc
+        refactor.extract Extract variable [edit]"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -71,10 +71,7 @@ $x = $0 "hello";
 "#,
         )
         .await;
-    assert!(
-        !out.contains("Add return type"),
-        "should not offer return type when cursor is not on function"
-    );
+    expect!["<no actions>"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -136,10 +133,10 @@ class Foo {
 "#,
         )
         .await;
-    assert!(
-        !out.contains("Add return type"),
-        "should not offer return type for __construct"
-    );
+    expect![[r#"
+        refactor         Generate PHPDoc
+        refactor.extract Extract variable [edit]"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]

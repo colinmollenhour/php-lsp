@@ -14,12 +14,8 @@ async fn diagnostics_published_on_did_change_for_undefined_function() {
     let notif = server
         .change("change_test.php", 2, "<?php\nnonexistent_function();\n")
         .await;
-    let has = notif["params"]["diagnostics"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|d| d["code"].as_str() == Some("UndefinedFunction"));
-    assert!(has, "expected UndefinedFunction after didChange: {notif:?}");
+    expect!["1:0-1:22 [1] UndefinedFunction: Function nonexistent_function() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 }
 
 #[tokio::test]

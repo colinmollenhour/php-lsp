@@ -371,14 +371,8 @@ async fn will_rename_file_same_psr4_fqn_produces_no_edits() {
 
     let resp = server.will_rename_files(vec![(old_uri, new_uri)]).await;
     assert!(resp["error"].is_null(), "willRenameFiles error: {resp:?}");
-    let changes = resp["result"]["changes"]
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
-    assert!(
-        changes.is_empty(),
-        "rename-to-self must not produce edits, got: {changes:?}"
-    );
+    let snap = canonicalize_workspace_edit(&resp["result"], &server.uri(""));
+    expect!["<no `changes` map in null>"].assert_eq(&snap);
 }
 
 /// Deleting the file that defines `App\Model\User` must strip the `use` line

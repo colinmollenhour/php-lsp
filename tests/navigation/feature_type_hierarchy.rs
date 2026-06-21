@@ -212,10 +212,7 @@ class AnimalHouse extends Creature {}
 "#,
         )
         .await;
-    assert!(
-        !out.contains("AnimalHouse"),
-        "AnimalHouse does not implement Animal: {out}"
-    );
+    expect!["<empty>"].assert_eq(&out);
 }
 
 /// Anonymous classes have no name and must be skipped silently — the server

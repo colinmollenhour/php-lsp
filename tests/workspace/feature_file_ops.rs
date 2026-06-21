@@ -35,17 +35,11 @@ async fn will_create_files_returns_workspace_edit_with_stub() {
     let resp = server.will_create_files(vec![uri]).await;
 
     assert!(resp["error"].is_null(), "willCreateFiles error: {:?}", resp);
-    assert!(
-        resp["result"].is_object(),
-        "expected WorkspaceEdit object, got: {:?}",
-        resp["result"]
-    );
-    assert!(
-        resp["result"]["changes"].is_object()
-            && !resp["result"]["changes"].as_object().unwrap().is_empty(),
-        "expected non-empty changes map in WorkspaceEdit, got: {:?}",
-        resp["result"]
-    );
+    let snap = canonicalize_workspace_edit(&resp["result"], &server.uri(""));
+    expect![[r#"
+        // new_created.php
+        0:0-0:0 → "<?php\n\n""#]]
+    .assert_eq(&snap);
 }
 
 #[tokio::test]
