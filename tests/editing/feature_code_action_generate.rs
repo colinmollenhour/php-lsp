@@ -248,3 +248,33 @@ class S$0ettings$0 {
     "#]]
     .assert_eq(&out);
 }
+
+#[tokio::test]
+async fn generate_skips_existing_getter_generates_missing_setter() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class U$0ser$0 {
+    private string $name;
+    public function getName(): string { return $this->name; }
+}
+"#,
+            "Generate getter/setter",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        class User {
+            private string $name;
+            public function getName(): string { return $this->name; }
+            public function setName(string $name): void
+            {
+                $this->name = $name;
+            }
+
+        }
+    "#]]
+    .assert_eq(&out);
+}
