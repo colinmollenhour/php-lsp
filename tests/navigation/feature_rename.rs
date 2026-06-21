@@ -1004,3 +1004,42 @@ echo $q->x$0;
     )
     .await;
 }
+
+/// PHP magic constants (__CLASS__, __FILE__, etc.) are compiler-generated and
+/// cannot be renamed. `prepareRename` must return nothing for all of them.
+#[tokio::test]
+async fn prepare_rename_on_magic_constants_returns_nothing() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    for (src, label) in &[
+        (
+            "<?php\nclass Foo { public function bar(): void { echo __CL$0ASS__; } }",
+            "__CLASS__",
+        ),
+        ("<?php\necho __FI$0LE__;", "__FILE__"),
+        ("<?php\necho __DI$0R__;", "__DIR__"),
+        (
+            "<?php\nfunction f() { return __FUNC$0TION__; }",
+            "__FUNCTION__",
+        ),
+        (
+            "<?php\nclass Foo { public function bar() { return __METH$0OD__; } }",
+            "__METHOD__",
+        ),
+        (
+            "<?php\nnamespace App; echo __NAMES$0PACE__;",
+            "__NAMESPACE__",
+        ),
+        (
+            "<?php\ntrait T { public function f() { echo __TR$0AIT__; } }",
+            "__TRAIT__",
+        ),
+        ("<?php\necho __LI$0NE__;", "__LINE__"),
+    ] {
+        let out = s.check_prepare_rename(src).await;
+        assert_eq!(
+            out, "<not renameable>",
+            "prepare_rename should block {label}"
+        );
+    }
+}
