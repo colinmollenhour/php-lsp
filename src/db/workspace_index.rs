@@ -82,8 +82,7 @@ pub struct WorkspaceIndexData {
     pub subtypes_of: HashMap<Arc<str>, Vec<ClassRef>>,
     /// `declared_name → [DeclRef]` over every function, class, method,
     /// property (stored without `$`), class constant, and enum case in the
-    /// workspace. Replaces the O(workspace) linear scan in the go-to-definition
-    /// index fallback with an O(1) lookup.
+    /// workspace; enables O(1) go-to-definition lookups.
     pub decls_by_name: HashMap<String, Vec<DeclRef>>,
 }
 

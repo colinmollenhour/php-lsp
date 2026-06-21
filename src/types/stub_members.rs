@@ -6,9 +6,6 @@ use crate::types::type_map::ClassMembers;
 /// Look up class members for a built-in PHP class by querying phpstorm-stubs
 /// through the mir-analyzer session. Returns `None` when `fqcn` is not a
 /// known built-in class.
-///
-/// Replaces the old hardcoded `stubs.rs` lookup with a live query against the
-/// phpstorm-stubs embedded in mir-analyzer.
 pub fn stub_class_members(session: &AnalysisSession, fqcn: &str) -> Option<ClassMembers> {
     let normalized = fqcn.strip_prefix('\\').unwrap_or(fqcn);
     mir_analyzer::stub_path_for_class(normalized)?;

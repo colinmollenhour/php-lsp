@@ -92,8 +92,7 @@ pub fn find_method_implementations_from_workspace(
 /// Uses the pre-built `subtypes_of[word]` reverse map for O(matches) lookups,
 /// with an additional pass over the FQN's `subtypes_of` entry when the caller
 /// supplied one (covers classes that wrote out the fully-qualified form in
-/// their `extends`/`implements` clause). Replaces the old
-/// `find_implementations_from_index` which walked every file's classes.
+/// their `extends`/`implements` clause).
 pub fn find_implementations_from_workspace(
     word: &str,
     fqn: Option<&str>,
