@@ -620,7 +620,10 @@ class Config {
 "#,
         )
         .await;
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        refactor         Generate getter/setter
+        refactor         Promote constructor parameter"#]]
+    .assert_eq(&out);
 }
 
 // --- Documented Limitations ---

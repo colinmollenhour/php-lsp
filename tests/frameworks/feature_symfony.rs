@@ -18,7 +18,12 @@ mod symbols {
             resp
         );
         let out = render_workspace_symbols(&resp, &server.uri(""));
-        expect![""].assert_eq(&out);
+        expect![[r#"
+            Class       BlogController @ src/Controller/Admin/BlogController.php:42
+            Class       BlogController @ src/Controller/BlogController.php:39
+            Class       BlogControllerTest @ tests/Controller/Admin/BlogControllerTest.php:36
+            Class       BlogControllerTest @ tests/Controller/BlogControllerTest.php:28"#]]
+        .assert_eq(&out);
     }
 
     #[tokio::test]
@@ -30,7 +35,14 @@ mod symbols {
         assert!(resp["error"].is_null());
         let out = render_workspace_symbols(&resp, &server.uri(""));
         // Prefix query "Blog" must surface the Blog* family (BlogController, BlogSearchComponent, etc.)
-        expect![""].assert_eq(&out);
+        expect![[r#"
+            Class       BlogController @ src/Controller/Admin/BlogController.php:42
+            Class       BlogController @ src/Controller/BlogController.php:39
+            Class       BlogControllerTest @ tests/Controller/Admin/BlogControllerTest.php:36
+            Class       BlogControllerTest @ tests/Controller/BlogControllerTest.php:28
+            Class       BlogSearchComponent @ src/Twig/Components/BlogSearchComponent.php:27
+            Method      testPublicBlogPost @ tests/Controller/DefaultControllerTest.php:55"#]]
+        .assert_eq(&out);
     }
 
     #[tokio::test]
@@ -48,7 +60,14 @@ mod symbols {
             .await;
         let out = render_document_symbols(&resp);
         // Must include class BlogController and its index method.
-        expect![""].assert_eq(&out);
+        expect![[r#"
+            Class BlogController @L39
+              Method index @L47
+              Method postShow @L80
+              Method commentNew @L107
+              Method commentForm @L150
+              Method search @L160"#]]
+        .assert_eq(&out);
     }
 }
 
@@ -144,7 +163,7 @@ mod call_hierarchy {
         let resp = server.incoming_calls(item).await;
         assert!(resp["error"].is_null());
         let out = render_call_hierarchy(&resp, "from", &server.uri(""));
-        expect![""].assert_eq(&out);
+        expect!["index @ src/Controller/BlogController.php:47"].assert_eq(&out);
     }
 }
 
@@ -270,7 +289,7 @@ mod implementation {
         let resp = server.implementation(path, line, ch).await;
         assert!(resp["error"].is_null());
         let out = render_locations(&resp, &server.uri(""));
-        expect![""].assert_eq(&out);
+        expect!["src/Entity/User.php:32:6-32:10"].assert_eq(&out);
     }
 
     /// Cursor on the `use` import line (`use A\B\Foo`) must also work — the
@@ -288,7 +307,7 @@ mod implementation {
         let resp = server.implementation(path, line, ch).await;
         assert!(resp["error"].is_null());
         let out = render_locations(&resp, &server.uri(""));
-        expect![""].assert_eq(&out);
+        expect!["src/Entity/User.php:32:6-32:10"].assert_eq(&out);
     }
 }
 
@@ -312,7 +331,24 @@ mod references {
         assert!(resp["error"].is_null(), "references error: {:?}", resp);
         let out = render_locations(&resp, &server.uri(""));
         // Must span ≥4 files including PostRepository.php
-        expect![""].assert_eq(&out);
+        expect![[r#"
+            src/Controller/Admin/BlogController.php:122:25-122:29
+            src/Controller/Admin/BlogController.php:138:43-138:47
+            src/Controller/Admin/BlogController.php:161:45-161:49
+            src/Controller/Admin/BlogController.php:79:20-79:24
+            src/Controller/BlogController.php:110:54-110:58
+            src/Controller/BlogController.php:150:32-150:36
+            src/Controller/BlogController.php:80:29-80:33
+            src/DataFixtures/AppFixtures.php:73:24-73:28
+            src/Entity/Comment.php:101:32-101:36
+            src/Entity/Comment.php:106:28-106:32
+            src/Entity/Comment.php:37:34-37:38
+            src/Entity/Comment.php:39:13-39:17
+            src/Form/PostType.php:88:28-88:32
+            src/Repository/PostRepository.php:38:39-38:43
+            src/Security/PostVoter.php:40:35-40:39
+            tests/Controller/DefaultControllerTest.php:64:45-64:49"#]]
+        .assert_eq(&out);
     }
 }
 
@@ -346,7 +382,7 @@ mod type_hierarchy {
             .map(|a| a.iter().filter_map(|i| i["name"].as_str()).collect())
             .unwrap_or_default();
         // Supertypes must include AbstractController (vendor class via PSR-4 pre-load)
-        expect![""].assert_eq(&names.join(", "));
+        expect!["AbstractController, AbstractController"].assert_eq(&names.join(", "));
     }
 
     /// `BlogController extends AbstractController` — subtypes of AbstractController

@@ -133,7 +133,7 @@ async fn laravel_definition_on_static_call() {
         .definition("Illuminate/Auth/Access/Gate.php", 855, 50)
         .await;
     let out = render_locations(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect!["Illuminate/Support/Str.php:225:27-225:32"].assert_eq(&out);
 }
 
 /// GoToDef on `new RequestGuard(…)` navigates to `RequestGuard.php`.
@@ -157,7 +157,7 @@ async fn laravel_definition_on_new_expression() {
         .definition("Illuminate/Auth/AuthManager.php", 235, 25)
         .await;
     let out = render_locations(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect!["Illuminate/Auth/RequestGuard.php:9:6-9:18"].assert_eq(&out);
 }
 
 /// GoToDef on a trait in a `use` statement navigates to the trait file.
@@ -179,7 +179,7 @@ async fn laravel_definition_on_trait_use() {
     // Character 8 = start of "CreatesUserProviders".
     let resp = s.definition("Illuminate/Auth/AuthManager.php", 19, 8).await;
     let out = render_locations(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect!["Illuminate/Auth/CreatesUserProviders.php:6:6-6:26"].assert_eq(&out);
 }
 
 /// GoToDef on a cross-file import (`use ... as`) resolves into the target file.
@@ -201,7 +201,7 @@ async fn laravel_definition_cross_file_use_import() {
     // Character 30 = start of "Factory" in the qualified name.
     let resp = s.definition("Illuminate/Auth/AuthManager.php", 5, 30).await;
     let out = render_locations(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect!["Illuminate/Contracts/Auth/Factory.php:4:10-4:17"].assert_eq(&out);
 }
 
 /// GoToDef on an interface name in the `implements` clause navigates cross-file.
@@ -225,7 +225,7 @@ async fn laravel_definition_cross_file_implements() {
         .definition("Illuminate/Auth/AuthManager.php", 17, 29)
         .await;
     let out = render_locations(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect!["Illuminate/Contracts/Auth/Factory.php:4:10-4:17"].assert_eq(&out);
 }
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
@@ -248,7 +248,16 @@ async fn laravel_hover_class_declaration() {
     // Line 17 (0-based), character 6 = "AuthManager".
     let resp = s.hover("Illuminate/Auth/AuthManager.php", 17, 6).await;
     let out = render_hover(&resp);
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        ```php
+        class AuthManager implements FactoryContract
+        ```
+
+        ---
+
+        **@mixin** `\Illuminate\Contracts\Auth\Guard`
+        **@mixin** `\Illuminate\Contracts\Auth\StatefulGuard`"#]]
+    .assert_eq(&out);
 }
 
 /// Hover on a method name shows its signature and PHPDoc summary.
@@ -270,7 +279,18 @@ async fn laravel_hover_method_shows_signature_and_doc() {
     // Character 20 = "guard".
     let resp = s.hover("Illuminate/Auth/AuthManager.php", 69, 20).await;
     let out = render_hover(&resp);
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        ```php
+        public function guard($name = null)
+        ```
+
+        ---
+
+        Attempt to get the guard from the local cache.
+
+        **@return** `\Illuminate\Contracts\Auth\Guard|\Illuminate\Contracts\Auth\StatefulGuard`
+        **@param** `\UnitEnum|string|null` `$name`"#]]
+    .assert_eq(&out);
 }
 
 /// Hover on a property declaration shows its type and docblock.
@@ -322,7 +342,17 @@ async fn laravel_hover_on_call_site() {
     // Line 60 (0-based), character 59 = "guard" in `$this->guard($guard)`.
     let resp = s.hover("Illuminate/Auth/AuthManager.php", 60, 59).await;
     let out = render_hover(&resp);
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        ```php
+        AuthManager::guard($name = null): Illuminate\Contracts\Auth\Guard|Illuminate\Contracts\Auth\StatefulGuard
+        ```
+
+        ---
+
+        Attempt to get the guard from the local cache.
+
+        **@return** `\Illuminate\Contracts\Auth\Guard|\Illuminate\Contracts\Auth\StatefulGuard`
+        **@param** `\UnitEnum|string|null` `$name`"#]].assert_eq(&out);
 }
 
 /// Hover on a static method call (`Str::camel`) shows the camel() signature.
@@ -344,7 +374,18 @@ async fn laravel_hover_on_static_call() {
     // Line 855 (0-based), character 50 = "camel" in `Str::camel($ability)`.
     let resp = s.hover("Illuminate/Auth/Access/Gate.php", 855, 50).await;
     let out = render_hover(&resp);
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        ```php
+        Str::camel($value)
+        ```
+
+        ---
+
+        Convert a value to camel case.
+
+        **@return** `($value is "" ? "" : string)` — is '' ? '' : string)
+        **@param** `string` `$value`"#]]
+    .assert_eq(&out);
 }
 
 /// Hover on an interface name at an `implements` clause shows the interface.
@@ -364,7 +405,11 @@ async fn laravel_hover_implements_interface() {
     // Line 17, character 29 = "FactoryContract".
     let resp = s.hover("Illuminate/Auth/AuthManager.php", 17, 29).await;
     let out = render_hover(&resp);
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        ```php
+        class Factory
+        ```"#]]
+    .assert_eq(&out);
 }
 
 // ── Find References ───────────────────────────────────────────────────────────
@@ -395,7 +440,20 @@ async fn laravel_references_static_method_cross_file() {
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_locations(&resp, &s.uri(""));
     // Must have ≥8 references spanning multiple files including QueriesRelationships.php
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        Illuminate/Database/Eloquent/Concerns/QueriesRelationships.php:869:47-869:52
+        Illuminate/Foundation/Console/DocsCommand.php:239:25-239:30
+        Illuminate/Foundation/Console/DocsCommand.php:241:58-241:63
+        Illuminate/Foundation/Console/DocsCommand.php:241:78-241:83
+        Illuminate/Foundation/Console/DocsCommand.php:247:61-247:66
+        Illuminate/Foundation/Console/ViewMakeCommand.php:184:29-184:34
+        Illuminate/Support/Str.php:1568:87-1568:92
+        Illuminate/Support/Str.php:1594:29-1594:34
+        Illuminate/Support/Str.php:1850:23-1850:28
+        Illuminate/Support/Stringable.php:486:31-486:36
+        Illuminate/Validation/Concerns/ValidatesAttributes.php:1459:41-1459:46
+        Illuminate/Validation/Concerns/ValidatesAttributes.php:2486:24-2486:29"#]]
+    .assert_eq(&out);
 }
 
 /// References to the `guard()` method in AuthManager includes the declaration
@@ -421,7 +479,12 @@ async fn laravel_references_method_includes_declaration() {
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_locations(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        Illuminate/Auth/AuthManager.php:211:58-211:63
+        Illuminate/Auth/AuthManager.php:347:22-347:27
+        Illuminate/Auth/AuthManager.php:60:59-60:64
+        Illuminate/Auth/AuthManager.php:69:20-69:25"#]]
+    .assert_eq(&out);
 }
 
 // ── Completion ────────────────────────────────────────────────────────────────
@@ -449,7 +512,378 @@ async fn laravel_completion_this_members() {
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_completion(&resp);
     // Must include guard, $app, $guards, $customCreators, resolve(), etc. (≥5 members)
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        Variable    $GLOBALS
+        Variable    $_COOKIE
+        Variable    $_ENV
+        Variable    $_FILES
+        Variable    $_GET
+        Variable    $_POST
+        Variable    $_REQUEST
+        Variable    $_SERVER
+        Variable    $_SESSION
+        Property    $app
+        Property    $customCreators
+        Property    $guards
+        Property    $userResolver
+        Class       AuthManager
+        Constant    __CLASS__
+        Constant    __DIR__
+        Constant    __FILE__
+        Constant    __FUNCTION__
+        Constant    __LINE__
+        Constant    __METHOD__
+        Constant    __NAMESPACE__
+        Constant    __TRAIT__
+        Method      __call
+        Method      __call(method:, parameters:)
+        Method      __callStatic
+        Method      __clone
+        Method      __construct
+        Method      __construct(app:)
+        Method      __debugInfo
+        Method      __destruct
+        Method      __get
+        Method      __invoke
+        Method      __isset
+        Method      __serialize
+        Method      __set
+        Method      __sleep
+        Method      __toString
+        Method      __unserialize
+        Method      __unset
+        Method      __wakeup
+        Function    abs
+        Keyword     abstract
+        Function    acos
+        Function    addslashes
+        Keyword     and
+        Keyword     array
+        Function    array_chunk
+        Function    array_combine
+        Function    array_diff
+        Function    array_fill
+        Function    array_fill_keys
+        Function    array_filter
+        Function    array_flip
+        Function    array_intersect
+        Function    array_key_exists
+        Function    array_keys
+        Function    array_map
+        Function    array_merge
+        Function    array_pad
+        Function    array_pop
+        Function    array_push
+        Function    array_reduce
+        Function    array_replace
+        Function    array_reverse
+        Function    array_search
+        Function    array_shift
+        Function    array_slice
+        Function    array_splice
+        Function    array_unique
+        Function    array_unshift
+        Function    array_values
+        Function    array_walk
+        Function    array_walk_recursive
+        Function    arsort
+        Keyword     as
+        Function    asin
+        Function    asort
+        Function    atan
+        Function    atan2
+        Function    base64_decode
+        Function    base64_encode
+        Function    basename
+        Keyword     bool
+        Function    boolval
+        Keyword     break
+        Method      callCustomCreator
+        Method      callCustomCreator(name:, config:)
+        Function    call_user_func
+        Function    call_user_func_array
+        Keyword     callable
+        Keyword     case
+        Keyword     catch
+        Function    ceil
+        Function    checkdate
+        Keyword     class
+        Function    class_exists
+        Keyword     clone
+        Function    closedir
+        Function    compact
+        Keyword     const
+        Function    constant
+        Keyword     continue
+        Function    copy
+        Function    cos
+        Function    count
+        Method      createSessionDriver
+        Method      createSessionDriver(name:, config:)
+        Method      createTokenDriver
+        Method      createTokenDriver(name:, config:)
+        Function    date
+        Function    date_add
+        Function    date_create
+        Function    date_diff
+        Function    date_format
+        Function    date_sub
+        Keyword     declare
+        Keyword     default
+        Function    define
+        Function    defined
+        Keyword     die
+        Function    dirname
+        Keyword     do
+        Keyword     echo
+        Keyword     else
+        Keyword     elseif
+        Keyword     empty
+        Keyword     enddeclare
+        Keyword     endfor
+        Keyword     endforeach
+        Keyword     endif
+        Keyword     endswitch
+        Keyword     endwhile
+        Keyword     enum
+        Keyword     eval
+        Keyword     exit
+        Function    exp
+        Function    explode
+        Method      extend
+        Method      extend(driver:, callback:)
+        Keyword     extends
+        Function    extract
+        Keyword     false
+        Function    fclose
+        Function    feof
+        Function    fgets
+        Function    file_exists
+        Function    file_get_contents
+        Function    file_put_contents
+        Keyword     final
+        Keyword     finally
+        Keyword     float
+        Function    floatval
+        Function    floor
+        Function    fmod
+        Keyword     fn
+        Function    fopen
+        Keyword     for
+        Keyword     foreach
+        Method      forgetGuards
+        Function    fputs
+        Function    fread
+        Function    fseek
+        Function    ftell
+        Keyword     function
+        Function    function_exists
+        Function    fwrite
+        Method      getConfig
+        Method      getConfig(name:)
+        Method      getDefaultDriver
+        Function    get_class
+        Function    get_parent_class
+        Function    gettype
+        Function    glob
+        Keyword     global
+        Keyword     goto
+        Method      guard
+        Method      guard(name:)
+        Method      hasResolvedGuards
+        Function    hash
+        Function    header
+        Function    headers_sent
+        Function    htmlentities
+        Function    htmlspecialchars
+        Function    http_build_query
+        Keyword     if
+        Keyword     implements
+        Function    implode
+        Function    in_array
+        Keyword     include
+        Keyword     include_once
+        Keyword     instanceof
+        Keyword     insteadof
+        Keyword     int
+        Function    intdiv
+        Keyword     interface
+        Function    interface_exists
+        Function    intval
+        Function    is_a
+        Function    is_array
+        Function    is_bool
+        Function    is_callable
+        Function    is_dir
+        Function    is_double
+        Function    is_file
+        Function    is_finite
+        Function    is_float
+        Function    is_infinite
+        Function    is_int
+        Function    is_integer
+        Function    is_long
+        Function    is_nan
+        Function    is_null
+        Function    is_numeric
+        Function    is_object
+        Function    is_readable
+        Function    is_string
+        Function    is_subclass_of
+        Function    is_writable
+        Keyword     isset
+        Keyword     iterable
+        Function    join
+        Function    json_decode
+        Function    json_encode
+        Function    krsort
+        Function    ksort
+        Function    lcfirst
+        Keyword     list
+        Function    log
+        Function    ltrim
+        Keyword     match
+        Function    max
+        Function    md5
+        Function    method_exists
+        Function    microtime
+        Function    min
+        Keyword     mixed
+        Function    mkdir
+        Function    mktime
+        Function    mt_rand
+        Keyword     namespace
+        Keyword     never
+        Keyword     new
+        Function    nl2br
+        Keyword     null
+        Function    number_format
+        Function    ob_end_clean
+        Function    ob_get_clean
+        Function    ob_start
+        Keyword     object
+        Function    opendir
+        Keyword     or
+        Keyword     parent
+        Function    parse_str
+        Function    parse_url
+        Function    pathinfo
+        Function    pi
+        Function    pow
+        Function    preg_match
+        Function    preg_match_all
+        Function    preg_quote
+        Function    preg_replace
+        Function    preg_split
+        Keyword     print
+        Function    print_r
+        Function    printf
+        Keyword     private
+        Function    property_exists
+        Keyword     protected
+        Method      provider
+        Method      provider(name:, callback:)
+        Keyword     public
+        Function    rand
+        Function    random_int
+        Function    range
+        Function    rawurldecode
+        Function    rawurlencode
+        Function    readdir
+        Keyword     readonly
+        Function    realpath
+        Function    rename
+        Keyword     require
+        Keyword     require_once
+        Method      resolve
+        Method      resolve(name:)
+        Method      resolveUsersUsing
+        Method      resolveUsersUsing(userResolver:)
+        Keyword     return
+        Function    rewind
+        Function    rmdir
+        Function    round
+        Function    rsort
+        Function    rtrim
+        Function    scandir
+        Keyword     self
+        Function    serialize
+        Function    session_destroy
+        Function    session_start
+        Method      setApplication
+        Method      setApplication(app:)
+        Method      setDefaultDriver
+        Method      setDefaultDriver(name:)
+        Function    setcookie
+        Function    settype
+        Function    sha1
+        Method      shouldUse
+        Method      shouldUse(name:)
+        Function    sin
+        Function    sleep
+        Function    sort
+        Function    sprintf
+        Function    sqrt
+        Keyword     static
+        Function    str_contains
+        Function    str_ends_with
+        Function    str_pad
+        Function    str_repeat
+        Function    str_replace
+        Function    str_split
+        Function    str_starts_with
+        Function    str_word_count
+        Function    strcasecmp
+        Function    strcmp
+        Keyword     string
+        Function    strip_tags
+        Function    stripslashes
+        Function    stristr
+        Function    strlen
+        Function    strncasecmp
+        Function    strncmp
+        Function    strpos
+        Function    strrpos
+        Function    strstr
+        Function    strtolower
+        Function    strtotime
+        Function    strtoupper
+        Function    strval
+        Function    substr
+        Function    substr_count
+        Function    substr_replace
+        Keyword     switch
+        Function    tan
+        Keyword     throw
+        Function    time
+        Keyword     trait
+        Function    trim
+        Keyword     true
+        Keyword     try
+        Function    uasort
+        Function    ucfirst
+        Function    ucwords
+        Function    uksort
+        Function    unlink
+        Function    unserialize
+        Function    unset
+        Function    urldecode
+        Function    urlencode
+        Keyword     use
+        Method      userResolver
+        Function    usleep
+        Function    usort
+        Keyword     var
+        Function    var_dump
+        Function    var_export
+        Method      viaRequest
+        Method      viaRequest(driver:, callback:)
+        Keyword     void
+        Function    vsprintf
+        Keyword     while
+        Keyword     xor
+        Keyword     yield"#]]
+    .assert_eq(&out);
 }
 
 /// `Str::` triggers static member completion with camel, lower, upper, etc.
@@ -475,7 +909,131 @@ async fn laravel_completion_static_members() {
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_completion(&resp);
     // Must include camel() and other Str:: static members
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        Property    $camelCache
+        Property    $macros
+        Property    $randomStringFactory
+        Property    $snakeCache
+        Property    $studlyCache
+        Property    $ulidFactory
+        Property    $uuidFactory
+        Constant    INVISIBLE_CHARACTERS
+        Method      __callStatic
+        Method      after
+        Method      afterLast
+        Method      apa
+        Method      ascii
+        Method      before
+        Method      beforeLast
+        Method      between
+        Method      betweenFirst
+        Method      camel
+        Method      charAt
+        Method      chopEnd
+        Method      chopStart
+        Method      contains
+        Method      containsAll
+        Method      convertCase
+        Method      createRandomStringsNormally
+        Method      createRandomStringsUsing
+        Method      createRandomStringsUsingSequence
+        Method      createUlidsNormally
+        Method      createUlidsUsing
+        Method      createUlidsUsingSequence
+        Method      createUuidsNormally
+        Method      createUuidsUsing
+        Method      createUuidsUsingSequence
+        Method      deduplicate
+        Method      doesntContain
+        Method      doesntEndWith
+        Method      doesntStartWith
+        Method      endsWith
+        Method      excerpt
+        Method      finish
+        Method      flushCache
+        Method      flushMacros
+        Method      freezeUlids
+        Method      freezeUuids
+        Method      fromBase64
+        Method      hasMacro
+        Method      headline
+        Method      initials
+        Method      inlineMarkdown
+        Method      is
+        Method      isAscii
+        Method      isJson
+        Method      isMatch
+        Method      isUlid
+        Method      isUrl
+        Method      isUuid
+        Method      kebab
+        Method      lcfirst
+        Method      length
+        Method      limit
+        Method      lower
+        Method      ltrim
+        Method      macro
+        Method      markdown
+        Method      mask
+        Method      match
+        Method      matchAll
+        Method      mixin
+        Method      numbers
+        Method      of
+        Method      orderedUuid
+        Method      padBoth
+        Method      padLeft
+        Method      padRight
+        Method      parseCallback
+        Method      pascal
+        Method      password
+        Method      plural
+        Method      pluralPascal
+        Method      pluralStudly
+        Method      position
+        Method      random
+        Method      remove
+        Method      repeat
+        Method      replace
+        Method      replaceArray
+        Method      replaceEnd
+        Method      replaceFirst
+        Method      replaceLast
+        Method      replaceMatches
+        Method      replaceStart
+        Method      resetFactoryState
+        Method      reverse
+        Method      rtrim
+        Method      singular
+        Method      slug
+        Method      snake
+        Method      squish
+        Method      start
+        Method      startsWith
+        Method      studly
+        Method      substr
+        Method      substrCount
+        Method      substrReplace
+        Method      swap
+        Method      take
+        Method      title
+        Method      toBase64
+        Method      toStringOr
+        Method      transliterate
+        Method      trim
+        Method      ucfirst
+        Method      ucsplit
+        Method      ucwords
+        Method      ulid
+        Method      unwrap
+        Method      upper
+        Method      uuid
+        Method      uuid7
+        Method      wordCount
+        Method      wordWrap
+        Method      words
+        Method      wrap"#]]
+    .assert_eq(&out);
 }
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
@@ -635,7 +1193,32 @@ async fn laravel_document_symbols_hierarchical() {
 
     let resp = s.document_symbols("Illuminate/Auth/AuthManager.php").await;
     let out = render_document_symbols(&resp);
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        Class AuthManager @L17
+          Property $app @L26
+          Property $customCreators @L33
+          Property $guards @L40
+          Property $userResolver @L49
+          Method __construct @L56
+          Method guard @L69
+          Method resolve @L84
+          Method callCustomCreator @L114
+          Method createSessionDriver @L126
+          Method createTokenDriver @L160
+          Method getConfig @L184
+          Method getDefaultDriver @L194
+          Method shouldUse @L205
+          Method setDefaultDriver @L220
+          Method viaRequest @L232
+          Method userResolver @L248
+          Method resolveUsersUsing @L259
+          Method extend @L276
+          Method provider @L296
+          Method hasResolvedGuards @L308
+          Method forgetGuards @L318
+          Method setApplication @L331
+          Method __call @L345"#]]
+    .assert_eq(&out);
 }
 
 /// `documentSymbol` for the Eloquent Model (a large file with ~200 members)
@@ -658,7 +1241,207 @@ async fn laravel_document_symbols_large_file() {
         .document_symbols("Illuminate/Database/Eloquent/Model.php")
         .await;
     let out = render_document_symbols(&resp);
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        Class Model @L41
+          Property $connection @L62
+          Property $table @L69
+          Property $primaryKey @L76
+          Property $keyType @L83
+          Property $incrementing @L90
+          Property $with @L97
+          Property $withCount @L104
+          Property $preventsLazyLoading @L111
+          Property $perPage @L118
+          Property $exists @L125
+          Property $wasRecentlyCreated @L132
+          Property $escapeWhenCastingToString @L139
+          Property $resolver @L146
+          Property $dispatcher @L153
+          Property $booting @L160
+          Property $booted @L167
+          Property $bootedCallbacks @L174
+          Property $traitInitializers @L181
+          Property $globalScopes @L188
+          Property $ignoreOnTouch @L195
+          Property $modelsShouldPreventLazyLoading @L202
+          Property $modelsShouldAutomaticallyEagerLoadRelationships @L209
+          Property $lazyLoadingViolationCallback @L216
+          Property $modelsShouldPreventSilentlyDiscardingAttributes @L223
+          Property $discardedAttributeViolationCallback @L230
+          Property $modelsShouldPreventAccessingMissingAttributes @L237
+          Property $missingAttributeViolationCallback @L244
+          Property $isBroadcasting @L251
+          Property $builder @L258
+          Property $collectionClass @L265
+          Property $isSoftDeletable @L272
+          Property $isPrunable @L279
+          Property $isMassPrunable @L286
+          Property $classAttributes @L293
+          Constant CREATED_AT @L300
+          Constant UPDATED_AT @L307
+          Method __construct @L314
+          Method bootIfNotBooted @L330
+          Method booting @L364
+          Method boot @L374
+          Method bootTraits @L384
+          Method initializeTraits @L421
+          Method initializeModelAttributes @L433
+          Method booted @L470
+          Method whenBooted @L481
+          Method clearBootedModels @L493
+          Method withoutTouching @L507
+          Method withoutTouchingOn @L519
+          Method isIgnoringTouch @L536
+          Method shouldBeStrict @L566
+          Method preventLazyLoading @L579
+          Method automaticallyEagerLoadRelationships @L590
+          Method handleLazyLoadingViolationUsing @L601
+          Method preventSilentlyDiscardingAttributes @L612
+          Method handleDiscardedAttributeViolationUsing @L623
+          Method preventAccessingMissingAttributes @L634
+          Method handleMissingAttributeViolationUsing @L645
+          Method withoutBroadcasting @L656
+          Method fill @L677
+          Method forceFill @L725
+          Method qualifyColumn @L736
+          Method qualifyColumns @L751
+          Method newInstance @L765
+          Method newFromBuilder @L794
+          Method on @L813
+          Method onWriteConnection @L826
+          Method all @L837
+          Method with @L850
+          Method load @L863
+          Method loadMorph @L881
+          Method loadMissing @L900
+          Method loadAggregate @L917
+          Method loadCount @L930
+          Method loadMax @L944
+          Method loadMin @L956
+          Method loadSum @L968
+          Method loadAvg @L980
+          Method loadExists @L991
+          Method loadMorphAggregate @L1005
+          Method loadMorphCount @L1025
+          Method loadMorphMax @L1038
+          Method loadMorphMin @L1051
+          Method loadMorphSum @L1064
+          Method loadMorphAvg @L1077
+          Method increment @L1090
+          Method decrement @L1103
+          Method incrementOrDecrement @L1117
+          Method update @L1153
+          Method updateOrFail @L1171
+          Method updateQuietly @L1187
+          Method incrementQuietly @L1204
+          Method decrementQuietly @L1219
+          Method incrementEach @L1233
+          Method decrementEach @L1245
+          Method incrementOrDecrementEach @L1258
+          Method push @L1301
+          Method pushQuietly @L1332
+          Method saveQuietly @L1343
+          Method save @L1354
+          Method saveOrIgnore @L1404
+          Method saveOrFail @L1440
+          Method finishSave @L1451
+          Method performUpdate @L1468
+          Method setKeysForSelectQuery @L1506
+          Method getKeyForSelectQuery @L1518
+          Method setKeysForSaveQuery @L1529
+          Method getKeyForSaveQuery @L1541
+          Method performInsert @L1552
+          Method performInsertOrIgnore @L1608
+          Method insertAndSetId @L1657
+          Method destroy @L1670
+          Method delete @L1709
+          Method deleteQuietly @L1748
+          Method deleteOrFail @L1760
+          Method forceDelete @L1776
+          Method forceDestroy @L1789
+          Method performDeleteOnModel @L1799
+          Method query @L1811
+          Method newQuery @L1821
+          Method newModelQuery @L1831
+          Method newQueryWithoutRelationships @L1843
+          Method registerGlobalScopes @L1854
+          Method newQueryWithoutScopes @L1868
+          Method newQueryWithoutScope @L1881
+          Method newQueryForRestoration @L1892
+          Method newEloquentBuilder @L1903
+          Method resolveCustomBuilderClass @L1919
+          Method newBaseQueryBuilder @L1934
+          Method newPivot @L1949
+          Method hasNamedScope @L1961
+          Method callNamedScope @L1974
+          Method isScopeMethodWithAttribute @L1989
+          Method toArray @L2001
+          Method toJson @L2017
+          Method toPrettyJson @L2036
+          Method jsonSerialize @L2046
+          Method fresh @L2057
+          Method refresh @L2074
+          Method replicate @L2103
+          Method replicateQuietly @L2132
+          Method is @L2143
+          Method isNot @L2157
+          Method getConnection @L2167
+          Method getConnectionName @L2177
+          Method setConnection @L2188
+          Method resolveConnection @L2201
+          Method getConnectionResolver @L2211
+          Method setConnectionResolver @L2222
+          Method unsetConnectionResolver @L2232
+          Method getTable @L2242
+          Method setTable @L2253
+          Method getKeyName @L2265
+          Method setKeyName @L2276
+          Method getQualifiedKeyName @L2288
+          Method getKeyType @L2298
+          Method setKeyType @L2309
+          Method getIncrementing @L2321
+          Method setIncrementing @L2332
+          Method getKey @L2344
+          Method getQueueableId @L2354
+          Method getQueueableRelations @L2364
+          Method getQueueableConnection @L2398
+          Method getRouteKey @L2408
+          Method getRouteKeyName @L2418
+          Method resolveRouteBinding @L2430
+          Method resolveSoftDeletableRouteBinding @L2442
+          Method resolveChildRouteBinding @L2455
+          Method resolveSoftDeletableChildRouteBinding @L2468
+          Method resolveChildRouteBindingQuery @L2481
+          Method childRouteBindingRelationshipName @L2503
+          Method resolveRouteBindingQuery @L2516
+          Method getForeignKey @L2526
+          Method getPerPage @L2536
+          Method setPerPage @L2547
+          Method isSoftDeletable @L2557
+          Method isPrunable @L2565
+          Method isMassPrunable @L2573
+          Method preventsLazyLoading @L2583
+          Method isAutomaticallyEagerLoadingRelationships @L2593
+          Method preventsSilentlyDiscardingAttributes @L2603
+          Method preventsAccessingMissingAttributes @L2613
+          Method broadcastChannelRoute @L2623
+          Method broadcastChannel @L2633
+          Method resolveClassAttribute @L2648
+          Method __get @L2683
+          Method __set @L2695
+          Method offsetExists @L2706
+          Method offsetGet @L2725
+          Method offsetSet @L2737
+          Method offsetUnset @L2748
+          Method __isset @L2764
+          Method __unset @L2775
+          Method __call @L2787
+          Method __callStatic @L2812
+          Method __toString @L2826
+          Method escapeWhenCastingToString @L2839
+          Method __sleep @L2851
+          Method __wakeup @L2878"#]]
+    .assert_eq(&out);
 }
 
 // ── Workspace Symbols ─────────────────────────────────────────────────────────
@@ -676,7 +1459,7 @@ async fn laravel_workspace_symbols_class_name() {
     let resp = s.workspace_symbols("AuthManager").await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_workspace_symbols(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect!["Class       AuthManager @ Illuminate/Auth/AuthManager.php:17"].assert_eq(&out);
 }
 
 /// `workspace/symbol` for "Guard" returns multiple guard-related symbols.
@@ -692,7 +1475,36 @@ async fn laravel_workspace_symbols_partial_query() {
     let resp = s.workspace_symbols("Guard").await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_workspace_symbols(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        Class       FrameGuard @ Illuminate/Http/Middleware/FrameGuard.php:6
+        Class       GuardHelpers @ Illuminate/Auth/GuardHelpers.php:10
+        Class       Guarded @ Illuminate/Database/Eloquent/Attributes/Guarded.php:7
+        Class       GuardsAttributes @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:9
+        Class       RequestGuard @ Illuminate/Auth/RequestGuard.php:9
+        Class       SessionGuard @ Illuminate/Auth/SessionGuard.php:29
+        Class       TokenGuard @ Illuminate/Auth/TokenGuard.php:9
+        Class       Unguarded @ Illuminate/Database/Eloquent/Attributes/Unguarded.php:7
+        Interface   Guard @ Illuminate/Contracts/Auth/Guard.php:4
+        Interface   StatefulGuard @ Illuminate/Contracts/Auth/StatefulGuard.php:4
+        Method      forgetGuards @ Illuminate/Auth/AuthManager.php:318
+        Method      getGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:99
+        Method      guard @ Illuminate/Auth/AuthManager.php:69
+        Method      guard @ Illuminate/Contracts/Auth/Factory.php:12
+        Method      guard @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:112
+        Method      guard @ Illuminate/Session/Middleware/AuthenticateSession.php:142
+        Method      guards @ Illuminate/Auth/AuthenticationException.php:50
+        Method      hasResolvedGuards @ Illuminate/Auth/AuthManager.php:308
+        Method      initializeGuardsAttributes @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:44
+        Method      isGuardableColumn @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:240
+        Method      isGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:223
+        Method      isGuardedChannel @ Illuminate/Broadcasting/Broadcasters/AblyBroadcaster.php:161
+        Method      isGuardedChannel @ Illuminate/Broadcasting/Broadcasters/UsePusherChannelConventions.php:14
+        Method      isUnguarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:158
+        Method      mergeGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:125
+        Method      reguard @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:148
+        Method      totallyGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:266
+        Method      unguard @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:138
+        Method      unguarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:171"#]].assert_eq(&out);
 }
 
 /// `workspace/symbol` for the `Str` class returns the class from Support.
@@ -708,7 +1520,1013 @@ async fn laravel_workspace_symbols_str_class() {
     let resp = s.workspace_symbols("Str").await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_workspace_symbols(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        Class       AbstractCursorPaginator @ Illuminate/Pagination/AbstractCursorPaginator.php:27
+        Class       AbstractHasher @ Illuminate/Hashing/AbstractHasher.php:4
+        Class       AbstractPaginator @ Illuminate/Pagination/AbstractPaginator.php:22
+        Class       AbstractRouteCollection @ Illuminate/Routing/AbstractRouteCollection.php:17
+        Class       AsHtmlString @ Illuminate/Database/Eloquent/Casts/AsHtmlString.php:8
+        Class       AsStringable @ Illuminate/Database/Eloquent/Casts/AsStringable.php:8
+        Class       AssertableJsonString @ Illuminate/Testing/AssertableJsonString.php:16
+        Class       CompilesTranslations @ Illuminate/View/Compilers/Concerns/CompilesTranslations.php:4
+        Class       ConvertEmptyStringsToNull @ Illuminate/Foundation/Http/Middleware/ConvertEmptyStringsToNull.php:6
+        Class       CreatesPotentiallyTranslatedStrings @ Illuminate/Translation/CreatesPotentiallyTranslatedStrings.php:4
+        Class       CreatesRegularExpressionRouteConstraints @ Illuminate/Routing/CreatesRegularExpressionRouteConstraints.php:8
+        Class       EncodedHtmlString @ Illuminate/Support/EncodedHtmlString.php:8
+        Class       HasUniqueStringIds @ Illuminate/Database/Eloquent/Concerns/HasUniqueStringIds.php:6
+        Class       HtmlString @ Illuminate/Support/HtmlString.php:7
+        Class       ManagesTransactions @ Illuminate/Database/Concerns/ManagesTransactions.php:12
+        Class       ManagesTranslations @ Illuminate/View/Concerns/ManagesTranslations.php:4
+        Class       PendingResourceRegistration @ Illuminate/Routing/PendingResourceRegistration.php:7
+        Class       PendingSingletonResourceRegistration @ Illuminate/Routing/PendingSingletonResourceRegistration.php:7
+        Class       PotentiallyTranslatedString @ Illuminate/Translation/PotentiallyTranslatedString.php:6
+        Class       ResourceRegistrar @ Illuminate/Routing/ResourceRegistrar.php:6
+        Class       RouteFileRegistrar @ Illuminate/Routing/RouteFileRegistrar.php:4
+        Class       RouteRegistrar @ Illuminate/Routing/RouteRegistrar.php:34
+        Class       SesTransport @ Illuminate/Mail/Transport/SesTransport.php:14
+        Class       Str @ Illuminate/Support/Str.php:22
+        Class       StrayRequestException @ Illuminate/Http/Client/StrayRequestException.php:6
+        Class       StreamedEvent @ Illuminate/Http/StreamedEvent.php:4
+        Class       StreamedResponseException @ Illuminate/Routing/Exceptions/StreamedResponseException.php:8
+        Class       StringRule @ Illuminate/Validation/Rules/StringRule.php:8
+        Class       StringType @ Illuminate/JsonSchema/Types/StringType.php:4
+        Class       Stringable @ Illuminate/Support/Stringable.php:14
+        Class       TestResponse @ Illuminate/Testing/TestResponse.php:36
+        Class       TestResponseAssert @ Illuminate/Testing/TestResponseAssert.php:14
+        Class       TrimStrings @ Illuminate/Foundation/Http/Middleware/TrimStrings.php:8
+        Class       UniqueConstraintViolationException @ Illuminate/Database/UniqueConstraintViolationException.php:4
+        Class       UriQueryString @ Illuminate/Support/UriQueryString.php:9
+        Interface   BindingRegistrar @ Illuminate/Contracts/Routing/BindingRegistrar.php:4
+        Interface   CanBeEscapedWhenCastToString @ Illuminate/Contracts/Support/CanBeEscapedWhenCastToString.php:4
+        Interface   Registrar @ Illuminate/Contracts/Routing/Registrar.php:4
+        Interface   StringEncrypter @ Illuminate/Contracts/Encryption/StringEncrypter.php:4
+        Method      __construct @ Illuminate/Auth/Access/AuthorizationException.php:30
+        Method      __construct @ Illuminate/Auth/Access/Events/GateEvaluated.php:42
+        Method      __construct @ Illuminate/Auth/Access/Gate.php:98
+        Method      __construct @ Illuminate/Auth/Access/Response.php:44
+        Method      __construct @ Illuminate/Auth/AuthManager.php:56
+        Method      __construct @ Illuminate/Auth/AuthenticationException.php:37
+        Method      __construct @ Illuminate/Auth/DatabaseUserProvider.php:41
+        Method      __construct @ Illuminate/Auth/EloquentUserProvider.php:39
+        Method      __construct @ Illuminate/Auth/Events/Attempting.php:13
+        Method      __construct @ Illuminate/Auth/Events/Authenticated.php:16
+        Method      __construct @ Illuminate/Auth/Events/CurrentDeviceLogout.php:16
+        Method      __construct @ Illuminate/Auth/Events/Failed.php:13
+        Method      __construct @ Illuminate/Auth/Events/Lockout.php:20
+        Method      __construct @ Illuminate/Auth/Events/Login.php:17
+        Method      __construct @ Illuminate/Auth/Events/Logout.php:16
+        Method      __construct @ Illuminate/Auth/Events/OtherDeviceLogout.php:16
+        Method      __construct @ Illuminate/Auth/Events/PasswordReset.php:15
+        Method      __construct @ Illuminate/Auth/Events/PasswordResetLinkSent.php:15
+        Method      __construct @ Illuminate/Auth/Events/Registered.php:15
+        Method      __construct @ Illuminate/Auth/Events/Validated.php:16
+        Method      __construct @ Illuminate/Auth/Events/Verified.php:15
+        Method      __construct @ Illuminate/Auth/GenericUser.php:20
+        Method      __construct @ Illuminate/Auth/Middleware/Authenticate.php:31
+        Method      __construct @ Illuminate/Auth/Middleware/AuthenticateWithBasicAuth.php:21
+        Method      __construct @ Illuminate/Auth/Middleware/Authorize.php:25
+        Method      __construct @ Illuminate/Auth/Middleware/RequirePassword.php:39
+        Method      __construct @ Illuminate/Auth/Notifications/ResetPassword.php:36
+        Method      __construct @ Illuminate/Auth/Passwords/CacheTokenRepository.php:20
+        Method      __construct @ Illuminate/Auth/Passwords/DatabaseTokenRepository.php:18
+        Method      __construct @ Illuminate/Auth/Passwords/PasswordBroker.php:60
+        Method      __construct @ Illuminate/Auth/Passwords/PasswordBrokerManager.php:33
+        Method      __construct @ Illuminate/Auth/Recaller.php:18
+        Method      __construct @ Illuminate/Auth/RequestGuard.php:34
+        Method      __construct @ Illuminate/Auth/SessionGuard.php:145
+        Method      __construct @ Illuminate/Auth/TokenGuard.php:50
+        Method      __construct @ Illuminate/Broadcasting/AnonymousEvent.php:42
+        Method      __construct @ Illuminate/Broadcasting/BroadcastEvent.php:70
+        Method      __construct @ Illuminate/Broadcasting/BroadcastManager.php:67
+        Method      __construct @ Illuminate/Broadcasting/Broadcasters/AblyBroadcaster.php:29
+        Method      __construct @ Illuminate/Broadcasting/Broadcasters/LogBroadcaster.php:20
+        Method      __construct @ Illuminate/Broadcasting/Broadcasters/PusherBroadcaster.php:34
+        Method      __construct @ Illuminate/Broadcasting/Broadcasters/RedisBroadcaster.php:47
+        Method      __construct @ Illuminate/Broadcasting/Channel.php:21
+        Method      __construct @ Illuminate/Broadcasting/EncryptedPrivateChannel.php:11
+        Method      __construct @ Illuminate/Broadcasting/FakePendingBroadcast.php:9
+        Method      __construct @ Illuminate/Broadcasting/PendingBroadcast.php:30
+        Method      __construct @ Illuminate/Broadcasting/PresenceChannel.php:11
+        Method      __construct @ Illuminate/Broadcasting/PrivateChannel.php:13
+        Method      __construct @ Illuminate/Broadcasting/UniqueBroadcastEvent.php:29
+        Method      __construct @ Illuminate/Bus/Batch.php:108
+        Method      __construct @ Illuminate/Bus/BatchFactory.php:21
+        Method      __construct @ Illuminate/Bus/ChainedBatch.php:42
+        Method      __construct @ Illuminate/Bus/DatabaseBatchRepository.php:43
+        Method      __construct @ Illuminate/Bus/DebounceLock.php:27
+        Method      __construct @ Illuminate/Bus/Dispatcher.php:70
+        Method      __construct @ Illuminate/Bus/DynamoBatchRepository.php:64
+        Method      __construct @ Illuminate/Bus/Events/BatchCanceled.php:15
+        Method      __construct @ Illuminate/Bus/Events/BatchDispatched.php:13
+        Method      __construct @ Illuminate/Bus/Events/BatchFinished.php:13
+        Method      __construct @ Illuminate/Bus/Events/BatchStarted.php:13
+        Method      __construct @ Illuminate/Bus/PendingBatch.php:63
+        Method      __construct @ Illuminate/Bus/UniqueLock.php:24
+        Method      __construct @ Illuminate/Bus/UpdatedBatchJobCounts.php:26
+        Method      __construct @ Illuminate/Cache/ApcStore.php:28
+        Method      __construct @ Illuminate/Cache/ArrayLock.php:23
+        Method      __construct @ Illuminate/Cache/ArrayStore.php:49
+        Method      __construct @ Illuminate/Cache/CacheLock.php:21
+        Method      __construct @ Illuminate/Cache/CacheManager.php:53
+        Method      __construct @ Illuminate/Cache/Console/ClearCommand.php:49
+        Method      __construct @ Illuminate/Cache/Console/ForgetCommand.php:37
+        Method      __construct @ Illuminate/Cache/DatabaseLock.php:52
+        Method      __construct @ Illuminate/Cache/DatabaseStore.php:90
+        Method      __construct @ Illuminate/Cache/DynamoDbLock.php:21
+        Method      __construct @ Illuminate/Cache/DynamoDbStore.php:44
+        Method      __construct @ Illuminate/Cache/Events/CacheEvent.php:34
+        Method      __construct @ Illuminate/Cache/Events/CacheFailedOver.php:14
+        Method      __construct @ Illuminate/Cache/Events/CacheFlushFailed.php:26
+        Method      __construct @ Illuminate/Cache/Events/CacheFlushed.php:26
+        Method      __construct @ Illuminate/Cache/Events/CacheFlushing.php:26
+        Method      __construct @ Illuminate/Cache/Events/CacheHit.php:21
+        Method      __construct @ Illuminate/Cache/Events/CacheLocksFlushFailed.php:18
+        Method      __construct @ Illuminate/Cache/Events/CacheLocksFlushed.php:18
+        Method      __construct @ Illuminate/Cache/Events/CacheLocksFlushing.php:18
+        Method      __construct @ Illuminate/Cache/Events/KeyWriteFailed.php:29
+        Method      __construct @ Illuminate/Cache/Events/KeyWritten.php:29
+        Method      __construct @ Illuminate/Cache/Events/RetrievingManyKeys.php:20
+        Method      __construct @ Illuminate/Cache/Events/WritingKey.php:29
+        Method      __construct @ Illuminate/Cache/Events/WritingManyKeys.php:36
+        Method      __construct @ Illuminate/Cache/FailoverStore.php:25
+        Method      __construct @ Illuminate/Cache/FileStore.php:61
+        Method      __construct @ Illuminate/Cache/Limiters/ConcurrencyLimiter.php:46
+        Method      __construct @ Illuminate/Cache/Limiters/ConcurrencyLimiterBuilder.php:58
+        Method      __construct @ Illuminate/Cache/Lock.php:50
+        Method      __construct @ Illuminate/Cache/MemcachedLock.php:21
+        Method      __construct @ Illuminate/Cache/MemcachedStore.php:40
+        Method      __construct @ Illuminate/Cache/MemoizedStore.php:23
+        Method      __construct @ Illuminate/Cache/PhpRedisLock.php:16
+        Method      __construct @ Illuminate/Cache/RateLimiter.php:35
+        Method      __construct @ Illuminate/Cache/RateLimiting/GlobalLimit.php:12
+        Method      __construct @ Illuminate/Cache/RateLimiting/Limit.php:48
+        Method      __construct @ Illuminate/Cache/RateLimiting/Unlimited.php:9
+        Method      __construct @ Illuminate/Cache/RedisLock.php:21
+        Method      __construct @ Illuminate/Cache/RedisStore.php:65
+        Method      __construct @ Illuminate/Cache/Repository.php:87
+        Method      __construct @ Illuminate/Cache/SessionStore.php:32
+        Method      __construct @ Illuminate/Cache/TagSet.php:28
+        Method      __construct @ Illuminate/Cache/TaggedCache.php:29
+        Method      __construct @ Illuminate/Collections/Collection.php:41
+        Method      __construct @ Illuminate/Collections/HigherOrderCollectionProxy.php:34
+        Method      __construct @ Illuminate/Collections/LazyCollection.php:46
+        Method      __construct @ Illuminate/Collections/MultipleItemsFoundException.php:22
+        Method      __construct @ Illuminate/Concurrency/ProcessDriver.php:21
+        Method      __construct @ Illuminate/Conditionable/HigherOrderWhenProxy.php:39
+        Method      __construct @ Illuminate/Config/Repository.php:27
+        Method      __construct @ Illuminate/Console/Application.php:68
+        Method      __construct @ Illuminate/Console/Attributes/Aliases.php:14
+        Method      __construct @ Illuminate/Console/Attributes/Description.php:14
+        Method      __construct @ Illuminate/Console/Attributes/Help.php:14
+        Method      __construct @ Illuminate/Console/Attributes/Hidden.php:12
+        Method      __construct @ Illuminate/Console/Attributes/Signature.php:15
+        Method      __construct @ Illuminate/Console/Attributes/Usage.php:14
+        Method      __construct @ Illuminate/Console/CacheCommandMutex.php:33
+        Method      __construct @ Illuminate/Console/Command.php:96
+        Method      __construct @ Illuminate/Console/ContainerCommandLoader.php:31
+        Method      __construct @ Illuminate/Console/Events/ArtisanStarting.php:13
+        Method      __construct @ Illuminate/Console/Events/CommandFinished.php:17
+        Method      __construct @ Illuminate/Console/Events/CommandStarting.php:16
+        Method      __construct @ Illuminate/Console/Events/ScheduledBackgroundTaskFinished.php:13
+        Method      __construct @ Illuminate/Console/Events/ScheduledTaskFailed.php:15
+        Method      __construct @ Illuminate/Console/Events/ScheduledTaskFinished.php:14
+        Method      __construct @ Illuminate/Console/Events/ScheduledTaskSkipped.php:13
+        Method      __construct @ Illuminate/Console/Events/ScheduledTaskStarting.php:13
+        Method      __construct @ Illuminate/Console/GeneratorCommand.php:128
+        Method      __construct @ Illuminate/Console/MigrationGeneratorCommand.php:22
+        Method      __construct @ Illuminate/Console/OutputStyle.php:43
+        Method      __construct @ Illuminate/Console/Scheduling/CacheEventMutex.php:29
+        Method      __construct @ Illuminate/Console/Scheduling/CacheSchedulingMutex.php:30
+        Method      __construct @ Illuminate/Console/Scheduling/CallbackEvent.php:51
+        Method      __construct @ Illuminate/Console/Scheduling/Event.php:100
+        Method      __construct @ Illuminate/Console/Scheduling/PendingEventAttributes.php:21
+        Method      __construct @ Illuminate/Console/Scheduling/Schedule.php:110
+        Method      __construct @ Illuminate/Console/Scheduling/ScheduleInterruptCommand.php:38
+        Method      __construct @ Illuminate/Console/Scheduling/ScheduleRunCommand.php:89
+        Method      __construct @ Illuminate/Console/Signals.php:35
+        Method      __construct @ Illuminate/Console/View/Components/Component.php:33
+        Method      __construct @ Illuminate/Console/View/Components/Factory.php:36
+        Method      __construct @ Illuminate/Container/Attributes/Auth.php:14
+        Method      __construct @ Illuminate/Container/Attributes/Authenticated.php:14
+        Method      __construct @ Illuminate/Container/Attributes/Bind.php:35
+        Method      __construct @ Illuminate/Container/Attributes/Cache.php:14
+        Method      __construct @ Illuminate/Container/Attributes/Config.php:14
+        Method      __construct @ Illuminate/Container/Attributes/Context.php:15
+        Method      __construct @ Illuminate/Container/Attributes/Database.php:15
+        Method      __construct @ Illuminate/Container/Attributes/Give.php:17
+        Method      __construct @ Illuminate/Container/Attributes/Log.php:20
+        Method      __construct @ Illuminate/Container/Attributes/RouteParameter.php:14
+        Method      __construct @ Illuminate/Container/Attributes/Storage.php:15
+        Method      __construct @ Illuminate/Container/Attributes/Tag.php:13
+        Method      __construct @ Illuminate/Container/ContextualBindingBuilder.php:36
+        Method      __construct @ Illuminate/Container/RewindableGenerator.php:30
+        Method      __construct @ Illuminate/Contracts/Database/ModelIdentifier.php:58
+        Method      __construct @ Illuminate/Contracts/Queue/EntityNotFoundException.php:14
+        Method      __construct @ Illuminate/Cookie/Middleware/AddQueuedCookiesToResponse.php:21
+        Method      __construct @ Illuminate/Cookie/Middleware/EncryptCookies.php:48
+        Method      __construct @ Illuminate/Database/Capsule/Manager.php:28
+        Method      __construct @ Illuminate/Database/ClassMorphViolationException.php:20
+        Method      __construct @ Illuminate/Database/Connection.php:227
+        Method      __construct @ Illuminate/Database/ConnectionResolver.php:25
+        Method      __construct @ Illuminate/Database/Connectors/ConnectionFactory.php:29
+        Method      __construct @ Illuminate/Database/Console/Migrations/FreshCommand.php:45
+        Method      __construct @ Illuminate/Database/Console/Migrations/InstallCommand.php:38
+        Method      __construct @ Illuminate/Database/Console/Migrations/MigrateCommand.php:67
+        Method      __construct @ Illuminate/Database/Console/Migrations/MigrateMakeCommand.php:54
+        Method      __construct @ Illuminate/Database/Console/Migrations/ResetCommand.php:42
+        Method      __construct @ Illuminate/Database/Console/Migrations/RollbackCommand.php:42
+        Method      __construct @ Illuminate/Database/Console/Migrations/StatusCommand.php:39
+        Method      __construct @ Illuminate/Database/Console/MonitorCommand.php:49
+        Method      __construct @ Illuminate/Database/Console/Seeds/SeedCommand.php:44
+        Method      __construct @ Illuminate/Database/DatabaseManager.php:75
+        Method      __construct @ Illuminate/Database/DatabaseTransactionRecord.php:48
+        Method      __construct @ Illuminate/Database/DatabaseTransactionsManager.php:32
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/Appends.php:19
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/CollectedBy.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/Connection.php:15
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/DateFormat.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/Fillable.php:19
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/Guarded.php:19
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/Hidden.php:19
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/ObservedBy.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/Scope.php:12
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/ScopedBy.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/Table.php:19
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/Touches.php:19
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/UseEloquentBuilder.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/UseFactory.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/UsePolicy.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/UseResource.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/UseResourceCollection.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/Visible.php:19
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/WithoutIncrementing.php:12
+        Method      __construct @ Illuminate/Database/Eloquent/Attributes/WithoutTimestamps.php:12
+        Method      __construct @ Illuminate/Database/Eloquent/BroadcastableModelEventOccurred.php:62
+        Method      __construct @ Illuminate/Database/Eloquent/Builder.php:172
+        Method      __construct @ Illuminate/Database/Eloquent/Casts/Attribute.php:40
+        Method      __construct @ Illuminate/Database/Eloquent/Factories/Attributes/UseModel.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Factories/BelongsToManyRelationship.php:37
+        Method      __construct @ Illuminate/Database/Eloquent/Factories/BelongsToRelationship.php:36
+        Method      __construct @ Illuminate/Database/Eloquent/Factories/CrossJoinSequence.php:13
+        Method      __construct @ Illuminate/Database/Eloquent/Factories/Factory.php:175
+        Method      __construct @ Illuminate/Database/Eloquent/Factories/Relationship.php:31
+        Method      __construct @ Illuminate/Database/Eloquent/Factories/Sequence.php:34
+        Method      __construct @ Illuminate/Database/Eloquent/HigherOrderBuilderProxy.php:29
+        Method      __construct @ Illuminate/Database/Eloquent/InvalidCastException.php:36
+        Method      __construct @ Illuminate/Database/Eloquent/MissingAttributeException.php:14
+        Method      __construct @ Illuminate/Database/Eloquent/Model.php:314
+        Method      __construct @ Illuminate/Database/Eloquent/ModelInfo.php:31
+        Method      __construct @ Illuminate/Database/Eloquent/ModelInspector.php:42
+        Method      __construct @ Illuminate/Database/Eloquent/PendingHasThroughRelationship.php:37
+        Method      __construct @ Illuminate/Database/Eloquent/Relations/BelongsTo.php:62
+        Method      __construct @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:158
+        Method      __construct @ Illuminate/Database/Eloquent/Relations/HasOneOrMany.php:46
+        Method      __construct @ Illuminate/Database/Eloquent/Relations/HasOneOrManyThrough.php:80
+        Method      __construct @ Illuminate/Database/Eloquent/Relations/MorphOneOrMany.php:40
+        Method      __construct @ Illuminate/Database/Eloquent/Relations/MorphTo.php:87
+        Method      __construct @ Illuminate/Database/Eloquent/Relations/MorphToMany.php:56
+        Method      __construct @ Illuminate/Database/Eloquent/Relations/Relation.php:91
+        Method      __construct @ Illuminate/Database/Events/ConnectionEvent.php:25
+        Method      __construct @ Illuminate/Database/Events/DatabaseBusy.php:12
+        Method      __construct @ Illuminate/Database/Events/DatabaseRefreshed.php:14
+        Method      __construct @ Illuminate/Database/Events/MigrationEvent.php:29
+        Method      __construct @ Illuminate/Database/Events/MigrationSkipped.php:13
+        Method      __construct @ Illuminate/Database/Events/MigrationsEvent.php:14
+        Method      __construct @ Illuminate/Database/Events/MigrationsPruned.php:35
+        Method      __construct @ Illuminate/Database/Events/ModelPruningFinished.php:11
+        Method      __construct @ Illuminate/Database/Events/ModelPruningStarting.php:11
+        Method      __construct @ Illuminate/Database/Events/ModelsPruned.php:12
+        Method      __construct @ Illuminate/Database/Events/NoPendingMigrations.php:13
+        Method      __construct @ Illuminate/Database/Events/QueryExecuted.php:57
+        Method      __construct @ Illuminate/Database/Events/SchemaDumped.php:33
+        Method      __construct @ Illuminate/Database/Events/SchemaLoaded.php:33
+        Method      __construct @ Illuminate/Database/Events/StatementPrepared.php:12
+        Method      __construct @ Illuminate/Database/Grammar.php:25
+        Method      __construct @ Illuminate/Database/LazyLoadingViolationException.php:28
+        Method      __construct @ Illuminate/Database/Migrations/DatabaseMigrationRepository.php:35
+        Method      __construct @ Illuminate/Database/Migrations/MigrationCreator.php:38
+        Method      __construct @ Illuminate/Database/Migrations/Migrator.php:104
+        Method      __construct @ Illuminate/Database/MultipleRecordsFoundException.php:22
+        Method      __construct @ Illuminate/Database/Query/Builder.php:282
+        Method      __construct @ Illuminate/Database/Query/Expression.php:17
+        Method      __construct @ Illuminate/Database/Query/IndexHint.php:26
+        Method      __construct @ Illuminate/Database/Query/JoinClause.php:57
+        Method      __construct @ Illuminate/Database/QueryException.php:56
+        Method      __construct @ Illuminate/Database/SQLiteDatabaseDoesNotExistException.php:20
+        Method      __construct @ Illuminate/Database/Schema/Blueprint.php:101
+        Method      __construct @ Illuminate/Database/Schema/BlueprintState.php:60
+        Method      __construct @ Illuminate/Database/Schema/Builder.php:62
+        Method      __construct @ Illuminate/Database/Schema/ForeignIdColumnDefinition.php:21
+        Method      __construct @ Illuminate/Database/Schema/SchemaState.php:52
+        Method      __construct @ Illuminate/Encryption/Encrypter.php:53
+        Method      __construct @ Illuminate/Encryption/MissingAppKeyException.php:13
+        Method      __construct @ Illuminate/Events/CallQueuedListener.php:119
+        Method      __construct @ Illuminate/Events/Dispatcher.php:111
+        Method      __construct @ Illuminate/Events/NullDispatcher.php:23
+        Method      __construct @ Illuminate/Events/QueuedClosure.php:66
+        Method      __construct @ Illuminate/Filesystem/AwsS3V3Adapter.php:28
+        Method      __construct @ Illuminate/Filesystem/FilesystemAdapter.php:106
+        Method      __construct @ Illuminate/Filesystem/FilesystemManager.php:62
+        Method      __construct @ Illuminate/Filesystem/LockableFile.php:35
+        Method      __construct @ Illuminate/Filesystem/ReceiveFile.php:14
+        Method      __construct @ Illuminate/Filesystem/ServeFile.php:13
+        Method      __construct @ Illuminate/Foundation/AliasLoader.php:39
+        Method      __construct @ Illuminate/Foundation/Application.php:215
+        Method      __construct @ Illuminate/Foundation/Bus/PendingChain.php:66
+        Method      __construct @ Illuminate/Foundation/Bus/PendingDispatch.php:38
+        Method      __construct @ Illuminate/Foundation/CacheBasedMaintenanceMode.php:38
+        Method      __construct @ Illuminate/Foundation/Configuration/ApplicationBuilder.php:50
+        Method      __construct @ Illuminate/Foundation/Configuration/Exceptions.php:16
+        Method      __construct @ Illuminate/Foundation/Console/AboutCommand.php:56
+        Method      __construct @ Illuminate/Foundation/Console/CliDumper.php:51
+        Method      __construct @ Illuminate/Foundation/Console/ClosureCommand.php:40
+        Method      __construct @ Illuminate/Foundation/Console/ConfigCacheCommand.php:41
+        Method      __construct @ Illuminate/Foundation/Console/ConfigClearCommand.php:37
+        Method      __construct @ Illuminate/Foundation/Console/EnvironmentDecryptCommand.php:50
+        Method      __construct @ Illuminate/Foundation/Console/EnvironmentEncryptCommand.php:50
+        Method      __construct @ Illuminate/Foundation/Console/EventClearCommand.php:37
+        Method      __construct @ Illuminate/Foundation/Console/Kernel.php:135
+        Method      __construct @ Illuminate/Foundation/Console/QueuedCommand.php:25
+        Method      __construct @ Illuminate/Foundation/Console/RouteCacheCommand.php:39
+        Method      __construct @ Illuminate/Foundation/Console/RouteClearCommand.php:37
+        Method      __construct @ Illuminate/Foundation/Console/RouteListCommand.php:79
+        Method      __construct @ Illuminate/Foundation/Console/VendorPublishCommand.php:83
+        Method      __construct @ Illuminate/Foundation/Console/ViewClearCommand.php:38
+        Method      __construct @ Illuminate/Foundation/Events/LocaleUpdated.php:26
+        Method      __construct @ Illuminate/Foundation/Events/PublishingStubs.php:20
+        Method      __construct @ Illuminate/Foundation/Events/VendorTagPublished.php:26
+        Method      __construct @ Illuminate/Foundation/Exceptions/Handler.php:202
+        Method      __construct @ Illuminate/Foundation/Exceptions/Renderer/Exception.php:50
+        Method      __construct @ Illuminate/Foundation/Exceptions/Renderer/Frame.php:64
+        Method      __construct @ Illuminate/Foundation/Exceptions/Renderer/Mappers/BladeMapper.php:67
+        Method      __construct @ Illuminate/Foundation/Exceptions/Renderer/Renderer.php:63
+        Method      __construct @ Illuminate/Foundation/Exceptions/ReportableHandler.php:30
+        Method      __construct @ Illuminate/Foundation/Http/Attributes/ErrorBag.php:14
+        Method      __construct @ Illuminate/Foundation/Http/Attributes/FailOnUnknownFields.php:9
+        Method      __construct @ Illuminate/Foundation/Http/Attributes/RedirectTo.php:14
+        Method      __construct @ Illuminate/Foundation/Http/Attributes/RedirectToRoute.php:14
+        Method      __construct @ Illuminate/Foundation/Http/Events/RequestHandled.php:26
+        Method      __construct @ Illuminate/Foundation/Http/HtmlDumper.php:56
+        Method      __construct @ Illuminate/Foundation/Http/Kernel.php:122
+        Method      __construct @ Illuminate/Foundation/Http/Middleware/HandlePrecognitiveRequests.php:24
+        Method      __construct @ Illuminate/Foundation/Http/Middleware/PreventRequestForgery.php:78
+        Method      __construct @ Illuminate/Foundation/Http/Middleware/PreventRequestsDuringMaintenance.php:42
+        Method      __construct @ Illuminate/Foundation/PackageManifest.php:53
+        Method      __construct @ Illuminate/Foundation/ProviderRepository.php:38
+        Method      __construct @ Illuminate/Foundation/Testing/Attributes/Seed.php:12
+        Method      __construct @ Illuminate/Foundation/Testing/Attributes/Seeder.php:14
+        Method      __construct @ Illuminate/Foundation/Testing/DatabaseTransactionsManager.php:18
+        Method      __construct @ Illuminate/Foundation/Testing/Wormhole.php:20
+        Method      __construct @ Illuminate/Hashing/ArgonHasher.php:43
+        Method      __construct @ Illuminate/Hashing/BcryptHasher.php:37
+        Method      __construct @ Illuminate/Http/Client/Batch.php:127
+        Method      __construct @ Illuminate/Http/Client/BatchInProgressException.php:6
+        Method      __construct @ Illuminate/Http/Client/Events/ConnectionFailed.php:29
+        Method      __construct @ Illuminate/Http/Client/Events/RequestSending.php:20
+        Method      __construct @ Illuminate/Http/Client/Events/ResponseReceived.php:29
+        Method      __construct @ Illuminate/Http/Client/Factory.php:94
+        Method      __construct @ Illuminate/Http/Client/PendingRequest.php:257
+        Method      __construct @ Illuminate/Http/Client/Pool.php:37
+        Method      __construct @ Illuminate/Http/Client/Promises/FluentPromise.php:19
+        Method      __construct @ Illuminate/Http/Client/Promises/LazyPromise.php:29
+        Method      __construct @ Illuminate/Http/Client/Request.php:40
+        Method      __construct @ Illuminate/Http/Client/RequestException.php:42
+        Method      __construct @ Illuminate/Http/Client/Response.php:76
+        Method      __construct @ Illuminate/Http/Client/ResponseSequence.php:38
+        Method      __construct @ Illuminate/Http/Client/StrayRequestException.php:8
+        Method      __construct @ Illuminate/Http/Exceptions/HttpResponseException.php:23
+        Method      __construct @ Illuminate/Http/Exceptions/MalformedUrlException.php:11
+        Method      __construct @ Illuminate/Http/Exceptions/PostTooLargeException.php:17
+        Method      __construct @ Illuminate/Http/Exceptions/ThrottleRequestsException.php:17
+        Method      __construct @ Illuminate/Http/JsonResponse.php:26
+        Method      __construct @ Illuminate/Http/Middleware/HandleCors.php:38
+        Method      __construct @ Illuminate/Http/Middleware/TrustHosts.php:35
+        Method      __construct @ Illuminate/Http/Resources/Attributes/Collects.php:14
+        Method      __construct @ Illuminate/Http/Resources/Attributes/PreserveKeys.php:12
+        Method      __construct @ Illuminate/Http/Resources/Json/AnonymousResourceCollection.php:26
+        Method      __construct @ Illuminate/Http/Resources/Json/JsonResource.php:65
+        Method      __construct @ Illuminate/Http/Resources/Json/ResourceCollection.php:48
+        Method      __construct @ Illuminate/Http/Resources/Json/ResourceResponse.php:22
+        Method      __construct @ Illuminate/Http/Resources/JsonApi/RelationResolver.php:32
+        Method      __construct @ Illuminate/Http/Resources/MergeValue.php:21
+        Method      __construct @ Illuminate/Http/Response.php:29
+        Method      __construct @ Illuminate/Http/StreamedEvent.php:19
+        Method      __construct @ Illuminate/Http/Testing/File.php:42
+        Method      __construct @ Illuminate/JsonSchema/Types/ObjectType.php:16
+        Method      __construct @ Illuminate/Log/Context/Events/ContextDehydrating.php:18
+        Method      __construct @ Illuminate/Log/Context/Events/ContextHydrated.php:18
+        Method      __construct @ Illuminate/Log/Context/Repository.php:52
+        Method      __construct @ Illuminate/Log/Events/MessageLogged.php:13
+        Method      __construct @ Illuminate/Log/LogManager.php:77
+        Method      __construct @ Illuminate/Log/Logger.php:44
+        Method      __construct @ Illuminate/Mail/Attachment.php:42
+        Method      __construct @ Illuminate/Mail/Events/MessageSending.php:14
+        Method      __construct @ Illuminate/Mail/Events/MessageSent.php:19
+        Method      __construct @ Illuminate/Mail/MailManager.php:64
+        Method      __construct @ Illuminate/Mail/Mailables/Address.php:26
+        Method      __construct @ Illuminate/Mail/Mailables/Content.php:66
+        Method      __construct @ Illuminate/Mail/Mailables/Envelope.php:91
+        Method      __construct @ Illuminate/Mail/Mailables/Headers.php:42
+        Method      __construct @ Illuminate/Mail/Mailer.php:98
+        Method      __construct @ Illuminate/Mail/Markdown.php:57
+        Method      __construct @ Illuminate/Mail/Message.php:40
+        Method      __construct @ Illuminate/Mail/PendingMail.php:53
+        Method      __construct @ Illuminate/Mail/SendQueuedMailable.php:62
+        Method      __construct @ Illuminate/Mail/SentMessage.php:27
+        Method      __construct @ Illuminate/Mail/TextMessage.php:25
+        Method      __construct @ Illuminate/Mail/Transport/ArrayTransport.php:23
+        Method      __construct @ Illuminate/Mail/Transport/LogTransport.php:26
+        Method      __construct @ Illuminate/Mail/Transport/ResendTransport.php:43
+        Method      __construct @ Illuminate/Mail/Transport/SesTransport.php:36
+        Method      __construct @ Illuminate/Mail/Transport/SesV2Transport.php:36
+        Method      __construct @ Illuminate/Notifications/Action.php:26
+        Method      __construct @ Illuminate/Notifications/Channels/BroadcastChannel.php:24
+        Method      __construct @ Illuminate/Notifications/Channels/MailChannel.php:39
+        Method      __construct @ Illuminate/Notifications/Events/BroadcastNotificationCreated.php:23
+        Method      __construct @ Illuminate/Notifications/Events/NotificationFailed.php:19
+        Method      __construct @ Illuminate/Notifications/Events/NotificationSending.php:18
+        Method      __construct @ Illuminate/Notifications/Events/NotificationSent.php:19
+        Method      __construct @ Illuminate/Notifications/Messages/BroadcastMessage.php:22
+        Method      __construct @ Illuminate/Notifications/Messages/DatabaseMessage.php:18
+        Method      __construct @ Illuminate/Notifications/NotificationSender.php:69
+        Method      __construct @ Illuminate/Notifications/SendQueuedNotifications.php:85
+        Method      __construct @ Illuminate/Pagination/Cursor.php:31
+        Method      __construct @ Illuminate/Pagination/CursorPaginator.php:42
+        Method      __construct @ Illuminate/Pagination/LengthAwarePaginator.php:50
+        Method      __construct @ Illuminate/Pagination/Paginator.php:42
+        Method      __construct @ Illuminate/Pagination/UrlWindow.php:20
+        Method      __construct @ Illuminate/Pipeline/Hub.php:29
+        Method      __construct @ Illuminate/Pipeline/Pipeline.php:64
+        Method      __construct @ Illuminate/Process/Exceptions/ProcessFailedException.php:21
+        Method      __construct @ Illuminate/Process/Exceptions/ProcessTimedOutException.php:23
+        Method      __construct @ Illuminate/Process/FakeInvokedProcess.php:63
+        Method      __construct @ Illuminate/Process/FakeProcessResult.php:46
+        Method      __construct @ Illuminate/Process/FakeProcessSequence.php:35
+        Method      __construct @ Illuminate/Process/InvokedProcess.php:23
+        Method      __construct @ Illuminate/Process/InvokedProcessPool.php:21
+        Method      __construct @ Illuminate/Process/PendingProcess.php:101
+        Method      __construct @ Illuminate/Process/Pipe.php:40
+        Method      __construct @ Illuminate/Process/Pool.php:40
+        Method      __construct @ Illuminate/Process/ProcessPoolResults.php:21
+        Method      __construct @ Illuminate/Process/ProcessResult.php:22
+        Method      __construct @ Illuminate/Queue/Attributes/Backoff.php:21
+        Method      __construct @ Illuminate/Queue/Attributes/Connection.php:15
+        Method      __construct @ Illuminate/Queue/Attributes/DebounceFor.php:12
+        Method      __construct @ Illuminate/Queue/Attributes/Delay.php:14
+        Method      __construct @ Illuminate/Queue/Attributes/MaxExceptions.php:14
+        Method      __construct @ Illuminate/Queue/Attributes/Queue.php:15
+        Method      __construct @ Illuminate/Queue/Attributes/Timeout.php:14
+        Method      __construct @ Illuminate/Queue/Attributes/Tries.php:14
+        Method      __construct @ Illuminate/Queue/Attributes/UniqueFor.php:14
+        Method      __construct @ Illuminate/Queue/BeanstalkdQueue.php:52
+        Method      __construct @ Illuminate/Queue/CallQueuedClosure.php:50
+        Method      __construct @ Illuminate/Queue/CallQueuedHandler.php:46
+        Method      __construct @ Illuminate/Queue/Capsule/Manager.php:29
+        Method      __construct @ Illuminate/Queue/Connectors/DatabaseConnector.php:21
+        Method      __construct @ Illuminate/Queue/Connectors/FailoverConnector.php:13
+        Method      __construct @ Illuminate/Queue/Connectors/RedisConnector.php:29
+        Method      __construct @ Illuminate/Queue/Console/ListenCommand.php:50
+        Method      __construct @ Illuminate/Queue/Console/MonitorCommand.php:52
+        Method      __construct @ Illuminate/Queue/Console/RestartCommand.php:40
+        Method      __construct @ Illuminate/Queue/Console/WorkCommand.php:92
+        Method      __construct @ Illuminate/Queue/DatabaseQueue.php:63
+        Method      __construct @ Illuminate/Queue/Events/JobAttempted.php:13
+        Method      __construct @ Illuminate/Queue/Events/JobDebounced.php:13
+        Method      __construct @ Illuminate/Queue/Events/JobExceptionOccurred.php:13
+        Method      __construct @ Illuminate/Queue/Events/JobFailed.php:13
+        Method      __construct @ Illuminate/Queue/Events/JobPopped.php:12
+        Method      __construct @ Illuminate/Queue/Events/JobPopping.php:12
+        Method      __construct @ Illuminate/Queue/Events/JobProcessed.php:12
+        Method      __construct @ Illuminate/Queue/Events/JobProcessing.php:12
+        Method      __construct @ Illuminate/Queue/Events/JobQueued.php:16
+        Method      __construct @ Illuminate/Queue/Events/JobQueueing.php:15
+        Method      __construct @ Illuminate/Queue/Events/JobReleasedAfterException.php:13
+        Method      __construct @ Illuminate/Queue/Events/JobRetryRequested.php:18
+        Method      __construct @ Illuminate/Queue/Events/JobTimedOut.php:12
+        Method      __construct @ Illuminate/Queue/Events/Looping.php:12
+        Method      __construct @ Illuminate/Queue/Events/QueueBusy.php:13
+        Method      __construct @ Illuminate/Queue/Events/QueueFailedOver.php:15
+        Method      __construct @ Illuminate/Queue/Events/QueuePaused.php:13
+        Method      __construct @ Illuminate/Queue/Events/QueueResumed.php:12
+        Method      __construct @ Illuminate/Queue/Events/WorkerStarting.php:13
+        Method      __construct @ Illuminate/Queue/Events/WorkerStopping.php:13
+        Method      __construct @ Illuminate/Queue/Failed/DatabaseFailedJobProvider.php:38
+        Method      __construct @ Illuminate/Queue/Failed/DatabaseUuidFailedJobProvider.php:38
+        Method      __construct @ Illuminate/Queue/Failed/DynamoDbFailedJobProvider.php:41
+        Method      __construct @ Illuminate/Queue/Failed/FileFailedJobProvider.php:39
+        Method      __construct @ Illuminate/Queue/FailoverQueue.php:23
+        Method      __construct @ Illuminate/Queue/InvalidPayloadException.php:21
+        Method      __construct @ Illuminate/Queue/Jobs/BeanstalkdJob.php:34
+        Method      __construct @ Illuminate/Queue/Jobs/DatabaseJob.php:33
+        Method      __construct @ Illuminate/Queue/Jobs/DatabaseJobRecord.php:22
+        Method      __construct @ Illuminate/Queue/Jobs/InspectedJob.php:16
+        Method      __construct @ Illuminate/Queue/Jobs/RedisJob.php:48
+        Method      __construct @ Illuminate/Queue/Jobs/SqsJob.php:33
+        Method      __construct @ Illuminate/Queue/Jobs/SyncJob.php:31
+        Method      __construct @ Illuminate/Queue/Listener.php:52
+        Method      __construct @ Illuminate/Queue/ListenerOptions.php:26
+        Method      __construct @ Illuminate/Queue/Middleware/FailOnException.php:21
+        Method      __construct @ Illuminate/Queue/Middleware/RateLimited.php:46
+        Method      __construct @ Illuminate/Queue/Middleware/RateLimitedWithRedis.php:32
+        Method      __construct @ Illuminate/Queue/Middleware/Skip.php:11
+        Method      __construct @ Illuminate/Queue/Middleware/ThrottlesExceptions.php:93
+        Method      __construct @ Illuminate/Queue/Middleware/WithoutOverlapping.php:54
+        Method      __construct @ Illuminate/Queue/QueueManager.php:45
+        Method      __construct @ Illuminate/Queue/RedisQueue.php:88
+        Method      __construct @ Illuminate/Queue/SqsQueue.php:50
+        Method      __construct @ Illuminate/Queue/SyncQueue.php:25
+        Method      __construct @ Illuminate/Queue/Worker.php:145
+        Method      __construct @ Illuminate/Queue/WorkerOptions.php:98
+        Method      __construct @ Illuminate/Redis/Connections/PhpRedisConnection.php:38
+        Method      __construct @ Illuminate/Redis/Connections/PredisConnection.php:26
+        Method      __construct @ Illuminate/Redis/Events/CommandExecuted.php:49
+        Method      __construct @ Illuminate/Redis/Events/CommandFailed.php:51
+        Method      __construct @ Illuminate/Redis/Limiters/ConcurrencyLimiter.php:55
+        Method      __construct @ Illuminate/Redis/Limiters/ConcurrencyLimiterBuilder.php:59
+        Method      __construct @ Illuminate/Redis/Limiters/DurationLimiter.php:59
+        Method      __construct @ Illuminate/Redis/Limiters/DurationLimiterBuilder.php:59
+        Method      __construct @ Illuminate/Redis/RedisManager.php:74
+        Method      __construct @ Illuminate/Routing/Attributes/Controllers/Authorize.php:15
+        Method      __construct @ Illuminate/Routing/Attributes/Controllers/Middleware.php:14
+        Method      __construct @ Illuminate/Routing/CallableDispatcher.php:24
+        Method      __construct @ Illuminate/Routing/CompiledRouteCollection.php:64
+        Method      __construct @ Illuminate/Routing/ControllerDispatcher.php:24
+        Method      __construct @ Illuminate/Routing/ControllerMiddlewareOptions.php:18
+        Method      __construct @ Illuminate/Routing/Controllers/Middleware.php:19
+        Method      __construct @ Illuminate/Routing/Events/PreparingResponse.php:12
+        Method      __construct @ Illuminate/Routing/Events/ResponsePrepared.php:12
+        Method      __construct @ Illuminate/Routing/Events/RouteMatched.php:12
+        Method      __construct @ Illuminate/Routing/Events/Routing.php:11
+        Method      __construct @ Illuminate/Routing/Exceptions/BackedEnumCaseNotFoundException.php:14
+        Method      __construct @ Illuminate/Routing/Exceptions/InvalidSignatureException.php:11
+        Method      __construct @ Illuminate/Routing/Exceptions/StreamedResponseException.php:22
+        Method      __construct @ Illuminate/Routing/Middleware/SubstituteBindings.php:22
+        Method      __construct @ Illuminate/Routing/Middleware/ThrottleRequests.php:40
+        Method      __construct @ Illuminate/Routing/Middleware/ThrottleRequestsWithRedis.php:38
+        Method      __construct @ Illuminate/Routing/PendingResourceRegistration.php:54
+        Method      __construct @ Illuminate/Routing/PendingSingletonResourceRegistration.php:54
+        Method      __construct @ Illuminate/Routing/Redirector.php:31
+        Method      __construct @ Illuminate/Routing/ResourceRegistrar.php:65
+        Method      __construct @ Illuminate/Routing/ResponseFactory.php:44
+        Method      __construct @ Illuminate/Routing/Route.php:177
+        Method      __construct @ Illuminate/Routing/RouteFileRegistrar.php:18
+        Method      __construct @ Illuminate/Routing/RouteParameterBinder.php:20
+        Method      __construct @ Illuminate/Routing/RouteRegistrar.php:102
+        Method      __construct @ Illuminate/Routing/RouteUri.php:26
+        Method      __construct @ Illuminate/Routing/RouteUrlGenerator.php:61
+        Method      __construct @ Illuminate/Routing/Router.php:143
+        Method      __construct @ Illuminate/Routing/SortedMiddleware.php:14
+        Method      __construct @ Illuminate/Routing/UrlGenerator.php:127
+        Method      __construct @ Illuminate/Routing/ViewController.php:20
+        Method      __construct @ Illuminate/Session/ArraySessionHandler.php:30
+        Method      __construct @ Illuminate/Session/CacheBasedSessionHandler.php:29
+        Method      __construct @ Illuminate/Session/CookieSessionHandler.php:48
+        Method      __construct @ Illuminate/Session/DatabaseSessionHandler.php:60
+        Method      __construct @ Illuminate/Session/EncryptedStore.php:26
+        Method      __construct @ Illuminate/Session/FileSessionHandler.php:39
+        Method      __construct @ Illuminate/Session/Middleware/AuthenticateSession.php:32
+        Method      __construct @ Illuminate/Session/Middleware/StartSession.php:36
+        Method      __construct @ Illuminate/Session/Store.php:84
+        Method      __construct @ Illuminate/Session/SymfonySessionDecorator.php:24
+        Method      __construct @ Illuminate/Support/Composer.php:32
+        Method      __construct @ Illuminate/Support/DefaultProviders.php:18
+        Method      __construct @ Illuminate/Support/Defer/DeferredCallback.php:13
+        Method      __construct @ Illuminate/Support/EncodedHtmlString.php:30
+        Method      __construct @ Illuminate/Support/Fluent.php:40
+        Method      __construct @ Illuminate/Support/HigherOrderTapProxy.php:18
+        Method      __construct @ Illuminate/Support/HtmlString.php:21
+        Method      __construct @ Illuminate/Support/Js.php:42
+        Method      __construct @ Illuminate/Support/Lottery.php:51
+        Method      __construct @ Illuminate/Support/Manager.php:47
+        Method      __construct @ Illuminate/Support/MessageBag.php:32
+        Method      __construct @ Illuminate/Support/MultipleInstanceManager.php:53
+        Method      __construct @ Illuminate/Support/Once.php:27
+        Method      __construct @ Illuminate/Support/Onceable.php:17
+        Method      __construct @ Illuminate/Support/Optional.php:26
+        Method      __construct @ Illuminate/Support/ServiceProvider.php:86
+        Method      __construct @ Illuminate/Support/Sleep.php:83
+        Method      __construct @ Illuminate/Support/Stringable.php:30
+        Method      __construct @ Illuminate/Support/Testing/Fakes/BatchFake.php:41
+        Method      __construct @ Illuminate/Support/Testing/Fakes/BusFake.php:90
+        Method      __construct @ Illuminate/Support/Testing/Fakes/ChainedBatchTruthTest.php:20
+        Method      __construct @ Illuminate/Support/Testing/Fakes/EventFake.php:54
+        Method      __construct @ Illuminate/Support/Testing/Fakes/ExceptionHandlerFake.php:42
+        Method      __construct @ Illuminate/Support/Testing/Fakes/MailFake.php:55
+        Method      __construct @ Illuminate/Support/Testing/Fakes/PendingBatchFake.php:26
+        Method      __construct @ Illuminate/Support/Testing/Fakes/PendingChainFake.php:24
+        Method      __construct @ Illuminate/Support/Testing/Fakes/PendingMailFake.php:14
+        Method      __construct @ Illuminate/Support/Testing/Fakes/QueueFake.php:82
+        Method      __construct @ Illuminate/Support/Uri.php:36
+        Method      __construct @ Illuminate/Support/UriQueryString.php:16
+        Method      __construct @ Illuminate/Support/ValidatedInput.php:26
+        Method      __construct @ Illuminate/Testing/AssertableJsonString.php:37
+        Method      __construct @ Illuminate/Testing/Concerns/RunsInParallel.php:57
+        Method      __construct @ Illuminate/Testing/Constraints/ArraySubset.php:28
+        Method      __construct @ Illuminate/Testing/Constraints/CountInDatabase.php:37
+        Method      __construct @ Illuminate/Testing/Constraints/HasInDatabase.php:37
+        Method      __construct @ Illuminate/Testing/Constraints/NotSoftDeletedInDatabase.php:44
+        Method      __construct @ Illuminate/Testing/Constraints/SeeInHtml.php:42
+        Method      __construct @ Illuminate/Testing/Constraints/SeeInOrder.php:28
+        Method      __construct @ Illuminate/Testing/Constraints/SoftDeletedInDatabase.php:44
+        Method      __construct @ Illuminate/Testing/Fluent/AssertableJson.php:43
+        Method      __construct @ Illuminate/Testing/ParallelConsoleOutput.php:32
+        Method      __construct @ Illuminate/Testing/ParallelTesting.php:77
+        Method      __construct @ Illuminate/Testing/PendingCommand.php:88
+        Method      __construct @ Illuminate/Testing/TestComponent.php:37
+        Method      __construct @ Illuminate/Testing/TestResponse.php:76
+        Method      __construct @ Illuminate/Testing/TestResponseAssert.php:19
+        Method      __construct @ Illuminate/Testing/TestView.php:38
+        Method      __construct @ Illuminate/Translation/FileLoader.php:45
+        Method      __construct @ Illuminate/Translation/PotentiallyTranslatedString.php:35
+        Method      __construct @ Illuminate/Translation/Translator.php:89
+        Method      __construct @ Illuminate/Validation/ClosureValidationRule.php:45
+        Method      __construct @ Illuminate/Validation/Concerns/FilterEmailValidation.php:22
+        Method      __construct @ Illuminate/Validation/ConditionalRules.php:36
+        Method      __construct @ Illuminate/Validation/DatabasePresenceVerifier.php:28
+        Method      __construct @ Illuminate/Validation/Factory.php:88
+        Method      __construct @ Illuminate/Validation/InvokableValidationRule.php:56
+        Method      __construct @ Illuminate/Validation/NestedRules.php:20
+        Method      __construct @ Illuminate/Validation/NotPwnedVerifier.php:30
+        Method      __construct @ Illuminate/Validation/Rules/AnyOf.php:33
+        Method      __construct @ Illuminate/Validation/Rules/ArrayRule.php:23
+        Method      __construct @ Illuminate/Validation/Rules/Can.php:37
+        Method      __construct @ Illuminate/Validation/Rules/Contains.php:23
+        Method      __construct @ Illuminate/Validation/Rules/DatabaseRule.php:47
+        Method      __construct @ Illuminate/Validation/Rules/Dimensions.php:23
+        Method      __construct @ Illuminate/Validation/Rules/DoesntContain.php:23
+        Method      __construct @ Illuminate/Validation/Rules/Enum.php:51
+        Method      __construct @ Illuminate/Validation/Rules/ExcludeIf.php:24
+        Method      __construct @ Illuminate/Validation/Rules/ExcludeUnless.php:24
+        Method      __construct @ Illuminate/Validation/Rules/ImageFile.php:11
+        Method      __construct @ Illuminate/Validation/Rules/In.php:30
+        Method      __construct @ Illuminate/Validation/Rules/NotIn.php:30
+        Method      __construct @ Illuminate/Validation/Rules/Password.php:132
+        Method      __construct @ Illuminate/Validation/Rules/ProhibitedIf.php:24
+        Method      __construct @ Illuminate/Validation/Rules/ProhibitedUnless.php:24
+        Method      __construct @ Illuminate/Validation/Rules/RequiredIf.php:24
+        Method      __construct @ Illuminate/Validation/Rules/RequiredUnless.php:24
+        Method      __construct @ Illuminate/Validation/ValidationException.php:52
+        Method      __construct @ Illuminate/Validation/ValidationRuleParser.php:39
+        Method      __construct @ Illuminate/Validation/Validator.php:339
+        Method      __construct @ Illuminate/View/AnonymousComponent.php:26
+        Method      __construct @ Illuminate/View/AppendableAttributeValue.php:20
+        Method      __construct @ Illuminate/View/Compilers/Compiler.php:65
+        Method      __construct @ Illuminate/View/Compilers/ComponentTagCompiler.php:57
+        Method      __construct @ Illuminate/View/ComponentAttributeBag.php:36
+        Method      __construct @ Illuminate/View/ComponentSlot.php:30
+        Method      __construct @ Illuminate/View/DynamicComponent.php:40
+        Method      __construct @ Illuminate/View/Engines/CompilerEngine.php:43
+        Method      __construct @ Illuminate/View/Engines/FileEngine.php:21
+        Method      __construct @ Illuminate/View/Engines/PhpEngine.php:22
+        Method      __construct @ Illuminate/View/Factory.php:113
+        Method      __construct @ Illuminate/View/FileViewFinder.php:51
+        Method      __construct @ Illuminate/View/InvokableComponentVariable.php:26
+        Method      __construct @ Illuminate/View/Middleware/ShareErrorsFromSession.php:22
+        Method      __construct @ Illuminate/View/View.php:70
+        Method      __destruct @ Illuminate/Broadcasting/FakePendingBroadcast.php:40
+        Method      __destruct @ Illuminate/Broadcasting/PendingBroadcast.php:70
+        Method      __destruct @ Illuminate/Foundation/Bus/PendingDispatch.php:274
+        Method      __destruct @ Illuminate/Routing/PendingResourceRegistration.php:314
+        Method      __destruct @ Illuminate/Routing/PendingSingletonResourceRegistration.php:286
+        Method      __destruct @ Illuminate/Support/Sleep.php:296
+        Method      __destruct @ Illuminate/Testing/PendingCommand.php:668
+        Method      __toString @ Illuminate/Auth/Access/Response.php:210
+        Method      __toString @ Illuminate/Broadcasting/Channel.php:31
+        Method      __toString @ Illuminate/Collections/Enumerable.php:1327
+        Method      __toString @ Illuminate/Collections/Traits/EnumeratesValues.php:1035
+        Method      __toString @ Illuminate/Database/Eloquent/Model.php:2826
+        Method      __toString @ Illuminate/Http/Client/Response.php:583
+        Method      __toString @ Illuminate/JsonSchema/Types/Type.php:131
+        Method      __toString @ Illuminate/Mail/Transport/ArrayTransport.php:61
+        Method      __toString @ Illuminate/Mail/Transport/LogTransport.php:93
+        Method      __toString @ Illuminate/Mail/Transport/ResendTransport.php:142
+        Method      __toString @ Illuminate/Mail/Transport/SesTransport.php:148
+        Method      __toString @ Illuminate/Mail/Transport/SesV2Transport.php:152
+        Method      __toString @ Illuminate/Pagination/AbstractCursorPaginator.php:683
+        Method      __toString @ Illuminate/Pagination/AbstractPaginator.php:810
+        Method      __toString @ Illuminate/Support/HtmlString.php:61
+        Method      __toString @ Illuminate/Support/Js.php:160
+        Method      __toString @ Illuminate/Support/MessageBag.php:450
+        Method      __toString @ Illuminate/Support/Stringable.php:1619
+        Method      __toString @ Illuminate/Support/Uri.php:469
+        Method      __toString @ Illuminate/Support/UriQueryString.php:91
+        Method      __toString @ Illuminate/Support/ViewErrorBag.php:126
+        Method      __toString @ Illuminate/Testing/TestComponent.php:194
+        Method      __toString @ Illuminate/Testing/TestView.php:267
+        Method      __toString @ Illuminate/Translation/PotentiallyTranslatedString.php:86
+        Method      __toString @ Illuminate/Validation/Rules/ArrayRule.php:37
+        Method      __toString @ Illuminate/Validation/Rules/Contains.php:37
+        Method      __toString @ Illuminate/Validation/Rules/Date.php:169
+        Method      __toString @ Illuminate/Validation/Rules/Dimensions.php:165
+        Method      __toString @ Illuminate/Validation/Rules/DoesntContain.php:37
+        Method      __toString @ Illuminate/Validation/Rules/Enum.php:155
+        Method      __toString @ Illuminate/Validation/Rules/ExcludeIf.php:38
+        Method      __toString @ Illuminate/Validation/Rules/ExcludeUnless.php:38
+        Method      __toString @ Illuminate/Validation/Rules/Exists.php:16
+        Method      __toString @ Illuminate/Validation/Rules/In.php:46
+        Method      __toString @ Illuminate/Validation/Rules/NotIn.php:44
+        Method      __toString @ Illuminate/Validation/Rules/Numeric.php:215
+        Method      __toString @ Illuminate/Validation/Rules/ProhibitedIf.php:38
+        Method      __toString @ Illuminate/Validation/Rules/ProhibitedUnless.php:38
+        Method      __toString @ Illuminate/Validation/Rules/RequiredIf.php:42
+        Method      __toString @ Illuminate/Validation/Rules/RequiredUnless.php:42
+        Method      __toString @ Illuminate/Validation/Rules/StringRule.php:172
+        Method      __toString @ Illuminate/Validation/Rules/Unique.php:65
+        Method      __toString @ Illuminate/View/AppendableAttributeValue.php:30
+        Method      __toString @ Illuminate/View/ComponentAttributeBag.php:484
+        Method      __toString @ Illuminate/View/ComponentSlot.php:106
+        Method      __toString @ Illuminate/View/InvokableComponentVariable.php:91
+        Method      __toString @ Illuminate/View/View.php:502
+        Method      addConstraints @ Illuminate/Database/Eloquent/Relations/BelongsTo.php:91
+        Method      addConstraints @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:208
+        Method      addConstraints @ Illuminate/Database/Eloquent/Relations/HasOneOrMany.php:90
+        Method      addConstraints @ Illuminate/Database/Eloquent/Relations/HasOneOrManyThrough.php:97
+        Method      addConstraints @ Illuminate/Database/Eloquent/Relations/MorphOneOrMany.php:54
+        Method      addConstraints @ Illuminate/Database/Eloquent/Relations/Relation.php:129
+        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/BelongsTo.php:104
+        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:255
+        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/HasOneOrMany.php:102
+        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/HasOneOrManyThrough.php:164
+        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/MorphOneOrMany.php:64
+        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/MorphTo.php:95
+        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/MorphToMany.php:93
+        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/Relation.php:137
+        Method      addGroupNamespaceToStringUses @ Illuminate/Routing/Route.php:953
+        Method      addOneOfManyJoinSubQueryConstraints @ Illuminate/Database/Eloquent/Relations/Concerns/CanBeOneOfMany.php:57
+        Method      addOneOfManyJoinSubQueryConstraints @ Illuminate/Database/Eloquent/Relations/HasOne.php:88
+        Method      addOneOfManyJoinSubQueryConstraints @ Illuminate/Database/Eloquent/Relations/HasOneThrough.php:96
+        Method      addOneOfManyJoinSubQueryConstraints @ Illuminate/Database/Eloquent/Relations/MorphOne.php:88
+        Method      addOneOfManySubQueryConstraints @ Illuminate/Database/Eloquent/Relations/Concerns/CanBeOneOfMany.php:42
+        Method      addOneOfManySubQueryConstraints @ Illuminate/Database/Eloquent/Relations/HasOne.php:67
+        Method      addOneOfManySubQueryConstraints @ Illuminate/Database/Eloquent/Relations/HasOneThrough.php:79
+        Method      addOneOfManySubQueryConstraints @ Illuminate/Database/Eloquent/Relations/MorphOne.php:67
+        Method      addProviderToBootstrapFile @ Illuminate/Support/ServiceProvider.php:586
+        Method      addQueryString @ Illuminate/Routing/RouteUrlGenerator.php:378
+        Method      addResourceDestroy @ Illuminate/Routing/ResourceRegistrar.php:413
+        Method      addSingletonDestroy @ Illuminate/Routing/ResourceRegistrar.php:527
+        Method      addWhereConstraints @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:245
+        Method      addWhereConstraints @ Illuminate/Database/Eloquent/Relations/MorphToMany.php:83
+        Method      afterBootstrapping @ Illuminate/Foundation/Application.php:379
+        Method      allowStrayRequests @ Illuminate/Http/Client/Factory.php:347
+        Method      allowStrayRequests @ Illuminate/Http/Client/PendingRequest.php:1673
+        Method      allowsTrashedBindings @ Illuminate/Routing/Route.php:618
+        Method      askForPageViaCustomStrategy @ Illuminate/Foundation/Console/DocsCommand.php:213
+        Method      assertExactJsonStructure @ Illuminate/Testing/TestResponse.php:1006
+        Method      assertJsonStructure @ Illuminate/Testing/TestResponse.php:992
+        Method      assertNotStreamed @ Illuminate/Testing/TestResponse.php:662
+        Method      assertStreamed @ Illuminate/Testing/TestResponse.php:647
+        Method      assertStreamedContent @ Illuminate/Testing/TestResponse.php:678
+        Method      assertStreamedJsonContent @ Illuminate/Testing/TestResponse.php:691
+        Method      assertStructure @ Illuminate/Testing/AssertableJsonString.php:270
+        Method      attributesToString @ Illuminate/View/Compilers/ComponentTagCompiler.php:789
+        Method      beforeApplicationDestroyed @ Illuminate/Foundation/Testing/Concerns/InteractsWithTestCaseLifecycle.php:308
+        Method      beforeBootstrapping @ Illuminate/Foundation/Application.php:367
+        Method      bootstrap @ Illuminate/Console/Application.php:129
+        Method      bootstrap @ Illuminate/Contracts/Console/Kernel.php:11
+        Method      bootstrap @ Illuminate/Contracts/Http/Kernel.php:11
+        Method      bootstrap @ Illuminate/Foundation/Bootstrap/BootProviders.php:14
+        Method      bootstrap @ Illuminate/Foundation/Bootstrap/HandleExceptions.php:40
+        Method      bootstrap @ Illuminate/Foundation/Bootstrap/LoadConfiguration.php:27
+        Method      bootstrap @ Illuminate/Foundation/Bootstrap/LoadEnvironmentVariables.php:19
+        Method      bootstrap @ Illuminate/Foundation/Bootstrap/RegisterFacades.php:17
+        Method      bootstrap @ Illuminate/Foundation/Bootstrap/RegisterProviders.php:29
+        Method      bootstrap @ Illuminate/Foundation/Bootstrap/SetRequestForConsole.php:15
+        Method      bootstrap @ Illuminate/Foundation/Console/Kernel.php:490
+        Method      bootstrap @ Illuminate/Foundation/Http/Kernel.php:182
+        Method      bootstrapPath @ Illuminate/Contracts/Foundation/Application.php:29
+        Method      bootstrapPath @ Illuminate/Foundation/Application.php:480
+        Method      bootstrapWith @ Illuminate/Contracts/Foundation/Application.php:184
+        Method      bootstrapWith @ Illuminate/Foundation/Application.php:334
+        Method      bootstrapWithoutBootingProviders @ Illuminate/Foundation/Console/Kernel.php:532
+        Method      bootstrapperBootstrapped @ Illuminate/Foundation/Cloud.php:25
+        Method      bootstrapperBootstrapping @ Illuminate/Foundation/Cloud.php:17
+        Method      bootstrappers @ Illuminate/Foundation/Console/Kernel.php:627
+        Method      bootstrappers @ Illuminate/Foundation/Http/Kernel.php:548
+        Method      broadcastRestored @ Illuminate/Database/Eloquent/BroadcastsEvents.php:83
+        Method      buildClusterConnectionString @ Illuminate/Redis/Connectors/PhpRedisConnector.php:64
+        Method      buildConnectString @ Illuminate/Database/Connectors/SqlServerConnector.php:201
+        Method      buildFormRequestReplacements @ Illuminate/Routing/Console/ControllerMakeCommand.php:223
+        Method      buildHostString @ Illuminate/Database/Connectors/SqlServerConnector.php:215
+        Method      callBeforeApplicationDestroyedCallbacks @ Illuminate/Foundation/Testing/Concerns/InteractsWithTestCaseLifecycle.php:318
+        Method      castAttributeAsEncryptedString @ Illuminate/Database/Eloquent/Concerns/HasAttributes.php:1457
+        Method      castAttributeAsHashedString @ Illuminate/Database/Eloquent/Concerns/HasAttributes.php:1492
+        Method      combineConstraints @ Illuminate/Database/Eloquent/Builder.php:1871
+        Method      compileDisableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/MySqlGrammar.php:716
+        Method      compileDisableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/PostgresGrammar.php:709
+        Method      compileDisableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/SQLiteGrammar.php:681
+        Method      compileDisableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:524
+        Method      compileDropDefaultConstraint @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:393
+        Method      compileEnableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/MySqlGrammar.php:706
+        Method      compileEnableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/PostgresGrammar.php:699
+        Method      compileEnableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/SQLiteGrammar.php:671
+        Method      compileEnableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:514
+        Method      compileString @ Illuminate/View/Compilers/BladeCompiler.php:274
+        Method      componentString @ Illuminate/View/Compilers/ComponentTagCompiler.php:232
+        Method      configureForeignKeyConstraints @ Illuminate/Database/Connectors/SQLiteConnector.php:90
+        Method      connectionString @ Illuminate/Database/Schema/MySqlSchemaState.php:109
+        Method      constrain @ Illuminate/Database/Eloquent/Relations/MorphTo.php:351
+        Method      constrained @ Illuminate/Database/Schema/ForeignIdColumnDefinition.php:36
+        Method      containsStrict @ Illuminate/Collections/Collection.php:213
+        Method      containsStrict @ Illuminate/Collections/Enumerable.php:135
+        Method      containsStrict @ Illuminate/Collections/LazyCollection.php:274
+        Method      convertEmptyStringsToNull @ Illuminate/Foundation/Configuration/Middleware.php:648
+        Method      createBladeViewFromString @ Illuminate/View/Component.php:195
+        Method      createRandomStringsNormally @ Illuminate/Support/Str.php:1176
+        Method      createRandomStringsUsing @ Illuminate/Support/Str.php:1132
+        Method      createRandomStringsUsingSequence @ Illuminate/Support/Str.php:1144
+        Method      createSelectWithConstraint @ Illuminate/Database/Eloquent/Builder.php:1903
+        Method      createSesTransport @ Illuminate/Mail/MailManager.php:255
+        Method      createStringPayload @ Illuminate/Queue/Queue.php:305
+        Method      createTestRequest @ Illuminate/Foundation/Testing/Concerns/MakesHttpRequests.php:743
+        Method      createTestResponse @ Illuminate/Foundation/Testing/Concerns/MakesHttpRequests.php:755
+        Method      decryptString @ Illuminate/Contracts/Encryption/StringEncrypter.php:24
+        Method      decryptString @ Illuminate/Encryption/Encrypter.php:214
+        Method      defaultStringLength @ Illuminate/Database/Schema/Builder.php:74
+        Method      destroy @ Illuminate/Database/Eloquent/Model.php:1670
+        Method      destroy @ Illuminate/Session/ArraySessionHandler.php:97
+        Method      destroy @ Illuminate/Session/CacheBasedSessionHandler.php:80
+        Method      destroy @ Illuminate/Session/CookieSessionHandler.php:112
+        Method      destroy @ Illuminate/Session/DatabaseSessionHandler.php:265
+        Method      destroy @ Illuminate/Session/FileSessionHandler.php:98
+        Method      destroy @ Illuminate/Session/NullSessionHandler.php:53
+        Method      destroyable @ Illuminate/Routing/PendingSingletonResourceRegistration.php:105
+        Method      disableForeignKeyConstraints @ Illuminate/Database/Schema/Builder.php:621
+        Method      doesntContainStrict @ Illuminate/Collections/Collection.php:247
+        Method      doesntContainStrict @ Illuminate/Collections/LazyCollection.php:314
+        Method      dropConstrainedForeignId @ Illuminate/Database/Schema/Blueprint.php:511
+        Method      dropConstrainedForeignIdFor @ Illuminate/Database/Schema/Blueprint.php:541
+        Method      duplicatesStrict @ Illuminate/Collections/Collection.php:375
+        Method      duplicatesStrict @ Illuminate/Collections/Enumerable.php:258
+        Method      duplicatesStrict @ Illuminate/Collections/LazyCollection.php:421
+        Method      enableForeignKeyConstraints @ Illuminate/Database/Schema/Builder.php:609
+        Method      encryptString @ Illuminate/Contracts/Encryption/StringEncrypter.php:14
+        Method      encryptString @ Illuminate/Encryption/Encrypter.php:140
+        Method      ensureCastsAreStringValues @ Illuminate/Database/Eloquent/Concerns/HasAttributes.php:811
+        Method      escapeString @ Illuminate/Database/Connection.php:1180
+        Method      escapeWhenCastingToString @ Illuminate/Collections/Enumerable.php:1335
+        Method      escapeWhenCastingToString @ Illuminate/Collections/Traits/EnumeratesValues.php:1048
+        Method      escapeWhenCastingToString @ Illuminate/Contracts/Support/CanBeEscapedWhenCastToString.php:12
+        Method      escapeWhenCastingToString @ Illuminate/Database/Eloquent/Model.php:2839
+        Method      escapeWhenCastingToString @ Illuminate/Pagination/AbstractPaginator.php:823
+        Method      eventStream @ Illuminate/Contracts/Routing/ResponseFactory.php:70
+        Method      eventStream @ Illuminate/Routing/ResponseFactory.php:130
+        Method      extractBladeViewFromString @ Illuminate/View/Component.php:173
+        Method      extractConstructorParameters @ Illuminate/View/Component.php:121
+        Method      extractFromString @ Illuminate/Translation/MessageSelector.php:58
+        Method      extractQueryString @ Illuminate/Routing/UrlGenerator.php:618
+        Method      forceDestroy @ Illuminate/Database/Eloquent/Model.php:1789
+        Method      forceDestroy @ Illuminate/Database/Eloquent/SoftDeletes.php:83
+        Method      forgetBootstrappers @ Illuminate/Console/Application.php:141
+        Method      formatCommandString @ Illuminate/Console/Application.php:108
+        Method      freshTimestampString @ Illuminate/Database/Eloquent/Concerns/HasTimestamps.php:146
+        Method      fromAssertableJsonString @ Illuminate/Testing/Fluent/AssertableJson.php:163
+        Method      fromClassMethodString @ Illuminate/Routing/RouteSignatureParameters.php:41
+        Method      fromEncryptedString @ Illuminate/Database/Eloquent/Concerns/HasAttributes.php:1445
+        Method      fromJsonString @ Illuminate/Http/JsonResponse.php:38
+        Method      getAttributesFromAttributeString @ Illuminate/View/Compilers/ComponentTagCompiler.php:596
+        Method      getBootstrapProvidersPath @ Illuminate/Foundation/Application.php:490
+        Method      getLastRendered @ Illuminate/View/Engines/Engine.php:18
+        Method      getRelationWithoutConstraints @ Illuminate/Database/Eloquent/Concerns/QueriesRelationships.php:1120
+        Method      getRouteQueryString @ Illuminate/Routing/RouteUrlGenerator.php:398
+        Method      getStringParameters @ Illuminate/Routing/RouteUrlGenerator.php:431
+        Method      hasBeenBootstrapped @ Illuminate/Contracts/Foundation/Application.php:215
+        Method      hasBeenBootstrapped @ Illuminate/Foundation/Application.php:389
+        Method      htmlString @ Illuminate/Mail/Mailables/Content.php:132
+        Method      ignoreFieldsAndIncludesInQueryString @ Illuminate/Http/Resources/JsonApi/Concerns/ResolvesJsonApiElements.php:422
+        Method      initializeHasUniqueStringIds @ Illuminate/Database/Eloquent/Concerns/HasUniqueStringIds.php:28
+        Method      isEmptyString @ Illuminate/Support/Traits/InteractsWithData.php:220
+        Method      isParameterBackedEnumWithStringBackingType @ Illuminate/Reflection/Reflector.php:191
+        Method      isUniqueConstraintError @ Illuminate/Database/Connection.php:865
+        Method      isUniqueConstraintError @ Illuminate/Database/MySqlConnection.php:79
+        Method      isUniqueConstraintError @ Illuminate/Database/PostgresConnection.php:52
+        Method      isUniqueConstraintError @ Illuminate/Database/SQLiteConnection.php:59
+        Method      isUniqueConstraintError @ Illuminate/Database/SqlServerConnection.php:83
+        Method      jsonSearchStrings @ Illuminate/Testing/AssertableJsonString.php:370
+        Method      latestReadWriteTypeUsed @ Illuminate/Database/Connection.php:1709
+        Method      matchAgainstRoutes @ Illuminate/Routing/AbstractRouteCollection.php:78
+        Method      mergeConstraintsFrom @ Illuminate/Database/Eloquent/Concerns/QueriesRelationships.php:1053
+        Method      noConstraints @ Illuminate/Database/Eloquent/Relations/Relation.php:108
+        Method      openViaBuiltInStrategy @ Illuminate/Foundation/Console/DocsCommand.php:375
+        Method      openViaCustomStrategy @ Illuminate/Foundation/Console/DocsCommand.php:350
+        Method      parseNameAndAttributeSelectionConstraint @ Illuminate/Database/Eloquent/Builder.php:1888
+        Method      parsePipeString @ Illuminate/Pipeline/Pipeline.php:235
+        Method      parseStringRule @ Illuminate/Validation/ValidationRuleParser.php:273
+        Method      parseStringsToNativeTypes @ Illuminate/Support/ConfigurationUrlParser.php:150
+        Method      parseUniqueConstraintViolation @ Illuminate/Database/Connection.php:876
+        Method      parseUniqueConstraintViolation @ Illuminate/Database/MySqlConnection.php:90
+        Method      parseUniqueConstraintViolation @ Illuminate/Database/PostgresConnection.php:63
+        Method      parseUniqueConstraintViolation @ Illuminate/Database/SQLiteConnection.php:70
+        Method      parseUniqueConstraintViolation @ Illuminate/Database/SqlServerConnection.php:94
+        Method      pendingPotentiallyTranslatedString @ Illuminate/Translation/CreatesPotentiallyTranslatedStrings.php:13
+        Method      prepareStringsForCompilationUsing @ Illuminate/View/Compilers/BladeCompiler.php:1007
+        Method      preventStrayProcesses @ Illuminate/Process/Factory.php:159
+        Method      preventStrayRequests @ Illuminate/Http/Client/Factory.php:324
+        Method      preventStrayRequests @ Illuminate/Http/Client/PendingRequest.php:1660
+        Method      preventStrayRequests @ Illuminate/Support/Facades/Http.php:153
+        Method      preventingStrayProcesses @ Illuminate/Process/Factory.php:171
+        Method      preventingStrayRequests @ Illuminate/Http/Client/Factory.php:336
+        Method      prohibitDestructiveCommands @ Illuminate/Support/Facades/DB.php:131
+        Method      properString @ Illuminate/Auth/Recaller.php:68
+        Method      queryStringResolver @ Illuminate/Pagination/AbstractPaginator.php:563
+        Method      quoteString @ Illuminate/Database/Grammar.php:228
+        Method      quoteString @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:1036
+        Method      readStream @ Illuminate/Contracts/Filesystem/Filesystem.php:50
+        Method      readStream @ Illuminate/Filesystem/FilesystemAdapter.php:693
+        Method      recordRequestResponsePair @ Illuminate/Http/Client/Factory.php:379
+        Method      referencesString @ Illuminate/Mail/Mailables/Headers.php:93
+        Method      registerRequestRebindHandler @ Illuminate/Auth/AuthServiceProvider.php:84
+        Method      removeAbstractAlias @ Illuminate/Container/Container.php:626
+        Method      removeProviderFromBootstrapFile @ Illuminate/Support/ServiceProvider.php:625
+        Method      replacePlaceholderInString @ Illuminate/Validation/Validator.php:411
+        Method      requestRebinder @ Illuminate/Routing/RoutingServiceProvider.php:99
+        Method      resolveQueryString @ Illuminate/Pagination/AbstractPaginator.php:548
+        Method      respectFieldsAndIncludesInQueryString @ Illuminate/Http/Resources/JsonApi/Concerns/ResolvesJsonApiElements.php:410
+        Method      restrictOnDelete @ Illuminate/Database/Schema/ForeignKeyDefinition.php:72
+        Method      restrictOnUpdate @ Illuminate/Database/Schema/ForeignKeyDefinition.php:32
+        Method      sendRequestThroughRouter @ Illuminate/Foundation/Http/Kernel.php:163
+        Method      setGlobalToAndRemoveCcAndBcc @ Illuminate/Mail/Mailer.php:452
+        Method      setTouchedRelations @ Illuminate/Database/Eloquent/Concerns/HasRelationships.php:1214
+        Method      setTransactionManagerResolver @ Illuminate/Events/Dispatcher.php:838
+        Method      shouldBeStrict @ Illuminate/Database/Eloquent/Model.php:566
+        Method      str @ Illuminate/Support/Traits/InteractsWithData.php:234
+        Method      straightJoin @ Illuminate/Database/Query/Builder.php:842
+        Method      straightJoinSub @ Illuminate/Database/Query/Builder.php:871
+        Method      straightJoinWhere @ Illuminate/Database/Query/Builder.php:856
+        Method      stream @ Illuminate/Contracts/Routing/ResponseFactory.php:80
+        Method      stream @ Illuminate/Routing/ResponseFactory.php:197
+        Method      streamDownload @ Illuminate/Contracts/Routing/ResponseFactory.php:102
+        Method      streamDownload @ Illuminate/Routing/ResponseFactory.php:243
+        Method      streamJson @ Illuminate/Contracts/Routing/ResponseFactory.php:91
+        Method      streamJson @ Illuminate/Routing/ResponseFactory.php:227
+        Method      streamedContent @ Illuminate/Testing/TestResponse.php:1884
+        Method      strict @ Illuminate/Validation/Rules/Email.php:120
+        Method      string @ Illuminate/Cache/Repository.php:235
+        Method      string @ Illuminate/Collections/Arr.php:1168
+        Method      string @ Illuminate/Config/Repository.php:89
+        Method      string @ Illuminate/Contracts/JsonSchema/JsonSchema.php:28
+        Method      string @ Illuminate/Database/Schema/Blueprint.php:844
+        Method      string @ Illuminate/JsonSchema/JsonSchemaTypeFactory.php:34
+        Method      string @ Illuminate/Support/Traits/InteractsWithData.php:246
+        Method      string @ Illuminate/Validation/Rule.php:289
+        Method      stringable @ Illuminate/Translation/Translator.php:585
+        Method      stringable @ Illuminate/View/Compilers/Concerns/CompilesEchos.php:23
+        Method      stringifyClosure @ Illuminate/Foundation/Console/EventListCommand.php:192
+        Method      stripConditions @ Illuminate/Translation/MessageSelector.php:91
+        Method      stripParentheses @ Illuminate/View/Compilers/BladeCompiler.php:692
+        Method      stripQuotes @ Illuminate/View/Compilers/ComponentTagCompiler.php:806
+        Method      stripTableForPluck @ Illuminate/Database/Query/Builder.php:3849
+        Method      stripTags @ Illuminate/Support/Stringable.php:858
+        Method      substr @ Illuminate/Support/Str.php:1748
+        Method      substr @ Illuminate/Support/Stringable.php:1010
+        Method      substrCount @ Illuminate/Support/Str.php:1762
+        Method      substrCount @ Illuminate/Support/Stringable.php:1023
+        Method      substrReplace @ Illuminate/Support/Str.php:1780
+        Method      substrReplace @ Illuminate/Support/Stringable.php:1036
+        Method      supportsStraightJoins @ Illuminate/Database/Query/Grammars/Grammar.php:228
+        Method      supportsStraightJoins @ Illuminate/Database/Query/Grammars/MySqlGrammar.php:451
+        Method      syncMiddlewareToRouter @ Illuminate/Foundation/Http/Kernel.php:520
+        Method      throwFirstReported @ Illuminate/Support/Testing/Fakes/ExceptionHandlerFake.php:245
+        Method      toHtmlString @ Illuminate/Support/Stringable.php:1396
+        Method      toString @ Illuminate/JsonSchema/Types/Type.php:123
+        Method      toString @ Illuminate/Support/Stringable.php:1483
+        Method      toString @ Illuminate/Support/Uri.php:406
+        Method      toString @ Illuminate/Testing/Constraints/ArraySubset.php:92
+        Method      toString @ Illuminate/Testing/Constraints/CountInDatabase.php:77
+        Method      toString @ Illuminate/Testing/Constraints/HasInDatabase.php:113
+        Method      toString @ Illuminate/Testing/Constraints/NotSoftDeletedInDatabase.php:109
+        Method      toString @ Illuminate/Testing/Constraints/SeeInHtml.php:132
+        Method      toString @ Illuminate/Testing/Constraints/SeeInOrder.php:86
+        Method      toString @ Illuminate/Testing/Constraints/SoftDeletedInDatabase.php:111
+        Method      toString @ Illuminate/Translation/PotentiallyTranslatedString.php:96
+        Method      toStringOr @ Illuminate/Support/Str.php:1225
+        Method      toStringable @ Illuminate/Support/Uri.php:357
+        Method      trimStrings @ Illuminate/Foundation/Configuration/Middleware.php:661
+        Method      typeString @ Illuminate/Database/Schema/Grammars/MySqlGrammar.php:767
+        Method      typeString @ Illuminate/Database/Schema/Grammars/PostgresGrammar.php:782
+        Method      typeString @ Illuminate/Database/Schema/Grammars/SQLiteGrammar.php:718
+        Method      typeString @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:576
+        Method      uniqueStrict @ Illuminate/Collections/Enumerable.php:1221
+        Method      uniqueStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:955
+        Method      useBootstrap @ Illuminate/Pagination/AbstractPaginator.php:627
+        Method      useBootstrapFive @ Illuminate/Pagination/AbstractPaginator.php:659
+        Method      useBootstrapFour @ Illuminate/Pagination/AbstractPaginator.php:648
+        Method      useBootstrapPath @ Illuminate/Foundation/Application.php:501
+        Method      useBootstrapThree @ Illuminate/Pagination/AbstractPaginator.php:637
+        Method      usePrefetchStrategy @ Illuminate/Foundation/Vite.php:349
+        Method      validateString @ Illuminate/Validation/Concerns/ValidatesAttributes.php:2699
+        Method      whereInStrict @ Illuminate/Collections/Enumerable.php:422
+        Method      whereInStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:711
+        Method      whereNotInStrict @ Illuminate/Collections/Enumerable.php:459
+        Method      whereNotInStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:764
+        Method      whereStrict @ Illuminate/Collections/Enumerable.php:403
+        Method      whereStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:684
+        Method      withQueryString @ Illuminate/Contracts/Pagination/CursorPaginator.php:43
+        Method      withQueryString @ Illuminate/Contracts/Pagination/Paginator.php:43
+        Method      withQueryString @ Illuminate/Pagination/AbstractCursorPaginator.php:329
+        Method      withQueryString @ Illuminate/Pagination/AbstractPaginator.php:259
+        Method      withoutForeignKeyConstraints @ Illuminate/Database/Schema/Builder.php:636
+        Method      writeStream @ Illuminate/Contracts/Filesystem/Filesystem.php:91
+        Method      writeStream @ Illuminate/Filesystem/FilesystemAdapter.php:707"#]].assert_eq(&out);
 }
 
 // ── Code Actions ──────────────────────────────────────────────────────────────
@@ -764,7 +2582,7 @@ async fn laravel_signature_help_inside_call() {
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_signature_help(&resp);
-    expect![""].assert_eq(&out);
+    expect!["▶ make_guard(string $name, array $config)  @param0"].assert_eq(&out);
 }
 
 // ── Inlay Hints ───────────────────────────────────────────────────────────────
@@ -848,7 +2666,13 @@ async fn laravel_rename_class_declaration() {
         .await;
     assert!(resp["error"].is_null(), "rename returned error: {resp:#}");
     let out = canonicalize_workspace_edit(&resp["result"], &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        // Illuminate/Auth/AuthManager.php
+        17:6-17:17 → "AuthManagerV2"
+
+        // Illuminate/Auth/AuthServiceProvider.php
+        36:55-36:66 → "AuthManagerV2""#]]
+    .assert_eq(&out);
 }
 
 // ── Find Implementations ─────────────────────────────────────────────────────
@@ -879,7 +2703,7 @@ async fn laravel_find_implementations_interface_method() {
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_locations(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect!["Illuminate/Auth/AuthManager.php:69:0-69:0"].assert_eq(&out);
 }
 
 // ── Type Hierarchy ───────────────────────────────────────────────────────────
@@ -919,7 +2743,7 @@ async fn laravel_type_hierarchy_supertypes() {
         .as_array()
         .map(|a| a.iter().filter_map(|i| i["name"].as_str()).collect())
         .unwrap_or_default();
-    expect![""].assert_eq(&names.join(", "));
+    expect!["Factory"].assert_eq(&names.join(", "));
 }
 
 /// Subtypes of the `Factory` interface includes `AuthManager`.
@@ -954,7 +2778,7 @@ async fn laravel_type_hierarchy_subtypes() {
         .as_array()
         .map(|a| a.iter().filter_map(|i| i["name"].as_str()).collect())
         .unwrap_or_default();
-    expect![""].assert_eq(&names.join(", "));
+    expect!["AuthManager, BroadcastManager, CacheManager, QueueingFactory, FilesystemManager, MailManager, ChannelManager, QueueManager, RedisManager, MailFake, NotificationFake, Factory, Factory"].assert_eq(&names.join(", "));
 }
 
 /// `textDocument/implementation` on the `Factory` interface name returns
@@ -982,7 +2806,21 @@ async fn laravel_find_implementations_interface_name() {
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_locations(&resp, &s.uri(""));
-    expect![""].assert_eq(&out);
+    expect![[r#"
+        Illuminate/Auth/AuthManager.php:17:0-17:0
+        Illuminate/Broadcasting/BroadcastManager.php:37:0-37:0
+        Illuminate/Cache/CacheManager.php:23:0-23:0
+        Illuminate/Contracts/Cookie/QueueingFactory.php:4:0-4:0
+        Illuminate/Filesystem/FilesystemManager.php:32:0-32:0
+        Illuminate/Mail/MailManager.php:36:0-36:0
+        Illuminate/Notifications/ChannelManager.php:13:0-13:0
+        Illuminate/Queue/QueueManager.php:15:0-15:0
+        Illuminate/Redis/RedisManager.php:21:0-21:0
+        Illuminate/Support/Testing/Fakes/MailFake.php:18:0-18:0
+        Illuminate/Support/Testing/Fakes/NotificationFake.php:17:0-17:0
+        Illuminate/Validation/Factory.php:10:0-10:0
+        Illuminate/View/Factory.php:13:0-13:0"#]]
+    .assert_eq(&out);
 }
 
 // ── Under-load stability ──────────────────────────────────────────────────────
