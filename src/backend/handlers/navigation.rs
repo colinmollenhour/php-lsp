@@ -7,7 +7,7 @@ use crate::analysis::document_highlight::document_highlights;
 use crate::navigation::definition::{
     find_declaration_range, find_method_in_class_hierarchy, find_method_range_in_class,
 };
-use crate::navigation::references::{SymbolKind, find_references, find_references_with_target};
+use crate::navigation::references::{ReferenceQuery, SymbolKind};
 use crate::navigation::walk::collect_var_refs_in_scope;
 use crate::text::{fqn_short_name, utf16_code_units, word_at_position};
 use crate::types::type_map::{TypeMap, enclosing_class_at, enclosing_class_fqn_at};
@@ -16,7 +16,7 @@ use super::super::helpers::{
     class_name_at_construct_decl, promoted_property_at_cursor, range_within,
 };
 use super::super::panic_guard::guard_async_result;
-use super::super::{Backend, build_mir_symbol, resolve_reference_symbol};
+use super::super::{Backend, resolve_reference_symbol};
 
 impl Backend {
     pub(crate) async fn handle_goto_definition(
@@ -328,65 +328,29 @@ impl Backend {
                 None
             };
 
-            let session_method_refs = self.session_method_references(
-                &word,
-                kind,
-                target_fqn.as_deref(),
-                owner_short.as_deref(),
-            );
-
-            let mut locations = if let Some(session_locs) =
-                session_method_refs.filter(|l| !l.is_empty())
-            {
-                let mut combined = session_locs;
-                if include_declaration {
-                    let range =
-                        crate::text::word_range_at(&source, position).unwrap_or_else(|| Range {
-                            start: position,
-                            end: Position {
-                                line: position.line,
-                                character: position.character + word.encode_utf16().count() as u32,
-                            },
-                        });
-                    combined.push(Location {
-                        uri: uri.clone(),
-                        range,
+            let declaration_location = include_declaration.then(|| {
+                let range =
+                    crate::text::word_range_at(&source, position).unwrap_or_else(|| Range {
+                        start: position,
+                        end: Position {
+                            line: position.line,
+                            character: position.character + word.encode_utf16().count() as u32,
+                        },
                     });
-                    crate::references::dedup_ref_locations(&mut combined);
+                Location {
+                    uri: uri.clone(),
+                    range,
                 }
-                combined
-            } else {
-                match target_fqn.as_deref() {
-                    Some(t) => find_references_with_target(
-                        &word,
-                        &candidate_docs,
-                        include_declaration,
-                        kind,
-                        t,
-                    ),
-                    None => find_references(&word, &candidate_docs, include_declaration, kind),
-                }
-            };
+            });
 
-            if !matches!(kind, Some(SymbolKind::Method) | Some(SymbolKind::Property))
-                && let Some(sym) = build_mir_symbol(&word, kind, target_fqn.as_deref())
-            {
-                let extra = self.docs.session_references_to(&sym);
-                if !extra.is_empty() {
-                    let mut seen: std::collections::HashSet<(String, u32, u32, u32)> = locations
-                        .iter()
-                        .map(crate::references::ref_location_key)
-                        .collect();
-                    for loc in extra
-                        .into_iter()
-                        .filter_map(crate::references::session_tuple_to_location)
-                    {
-                        if seen.insert(crate::references::ref_location_key(&loc)) {
-                            locations.push(loc);
-                        }
-                    }
-                }
-            }
+            let query = ReferenceQuery {
+                word: &word,
+                kind,
+                target_fqn: target_fqn.as_deref(),
+                owner_short: owner_short.as_deref(),
+            };
+            let locations =
+                query.collect(&self.docs, &candidate_docs, include_declaration, declaration_location);
 
             Ok((!locations.is_empty()).then_some(locations))
         })

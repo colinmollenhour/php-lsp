@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use arc_swap::ArcSwap;
@@ -10,21 +10,13 @@ use tower_lsp::lsp_types::{SemanticToken, Url};
 use crate::db::analysis::AnalysisHost;
 use crate::db::input::{FileText, Workspace, find_source_file};
 use crate::document::ast::ParsedDoc;
+use crate::document::cache_registry::CacheRegistry;
 use crate::index::file_index::FileIndex;
 use crate::lang::autoload::Psr4Map;
 
-/// Upper bound on `parsed_cache` entries. Matched to the `lru = 2048` on
-/// `parsed_doc` in `src/db/parse.rs` so the secondary Arc retention can't
-/// pin more ASTs alive than salsa's memo already bounds. Exceeding this
-/// triggers probabilistic eviction (see [`DocumentStore::insert_parsed_cache`]).
-const PARSED_CACHE_CAP: usize = 2048;
-
 pub struct DocumentStore {
-    /// Cached semantic tokens per document: (result_id, tokens).
-    /// Used to compute incremental deltas for `textDocument/semanticTokens/full/delta`.
-    /// Tokens are stored in an `Arc` so the delta-path lookup can hand the
-    /// previous snapshot back without cloning the inner Vec.
-    token_cache: DashMap<Url, (String, Arc<Vec<SemanticToken>>)>,
+    /// Per-file caches with unified eviction logic. See [`CacheRegistry`].
+    caches: CacheRegistry,
 
     // ── Salsa-input storage ────────────────────────────────────────────────
     // Phase E4: `DocumentStore` is now a pure salsa-input wrapper. Open-file
@@ -47,67 +39,6 @@ pub struct DocumentStore {
     /// URIs that have been removed. Re-opening a deleted URI un-deletes it here
     /// and reuses the existing `FileText` handle.
     deleted_uris: DashSet<Url>,
-    /// G2: lock-free mirror of each `SourceFile`'s last-set text. Lets
-    /// `mirror_text` dedup repeated no-op updates (common during workspace
-    /// scan and `did_open` for already-indexed files) without taking
-    /// `host.lock()`. Updated inside the mutex whenever the salsa input is
-    /// set, so it is always consistent with the salsa revision for the
-    /// purposes of byte-equality comparison.
-    text_cache: DashMap<Url, Arc<str>>,
-    /// G3: cross-revision read-through cache for `parsed_doc`. Keyed on
-    /// `Url`, stored value is `(text_arc, Arc<ParsedDoc>)` — the text Arc
-    /// captured at parse time. On read, compare against `text_cache[uri]`
-    /// via `Arc::ptr_eq`; a match guarantees the cached ParsedDoc matches
-    /// the current salsa revision's text input, so the query can return
-    /// without snapshotting the db or invoking salsa at all. A miss
-    /// (different pointer, stale or absent entry) falls through to
-    /// `snapshot_query`. Self-evicts on text change — no writer-side
-    /// invalidation is required, which avoids the TOCTOU window where a
-    /// concurrent reader could re-insert a stale entry after a writer's
-    /// eviction.
-    ///
-    /// Size-bounded at [`PARSED_CACHE_CAP`] — see `insert_parsed_cache`.
-    /// Without this bound, every workspace file read-through would pin
-    /// its bumpalo arena alive regardless of salsa's `lru = 2048` on the
-    /// `parsed_doc` memo.
-    parsed_cache: DashMap<Url, (Arc<str>, Arc<ParsedDoc>)>,
-    /// Cross-request read-through cache for a file's mir body analysis. Keyed
-    /// on `Url`, stored value is `(source_arc, Arc<FileAnalysis>)` — the source
-    /// Arc captured at analysis time. On read, compare against the current
-    /// `doc.source_arc()` via `Arc::ptr_eq`; a match means the cached analysis
-    /// matches the live content. A miss recomputes and overwrites, so the cache
-    /// self-evicts on edit (same discipline as `parsed_cache`).
-    ///
-    /// `FileAnalysis` carries BOTH the issues consumed by diagnostics and the
-    /// per-expression `ResolvedSymbol`s consumed by position features (hover,
-    /// type-definition, completion, inlay hints). Retaining it means mir's
-    /// `FileAnalyzer::analyze` runs once per content revision instead of being
-    /// re-run (for diagnostics) and then re-derived in a weaker form (for
-    /// position queries). Bounded by the set of analyzed files (open files plus
-    /// their open dependents); explicitly evicted in [`DocumentStore::remove`].
-    /// Per-file mir analysis cache. Entry is `(source_arc, decl_ver, analysis)`.
-    /// A cache hit requires both the source pointer to match the live text AND
-    /// `decl_ver` to equal the current `decl_version` counter — the latter
-    /// ensures that a body-only edit to file A doesn't silently serve a stale
-    /// analysis for file B whose cached entry predates a declaration change in
-    /// an unrelated file C.
-    analysis_cache: DashMap<Url, (Arc<str>, u64, Arc<mir_analyzer::FileAnalysis>)>,
-    /// Monotonically increasing counter bumped whenever any file's `FileIndex`
-    /// (declaration-level info) changes. Cache entries that embed an older
-    /// version are considered stale and are recomputed on the next request.
-    decl_version: AtomicU64,
-    /// Last-seen `FileIndex` per URI. Used to decide whether a re-analysis
-    /// produced a declaration-level change (→ bump `decl_version`) or was a
-    /// body-only edit (→ leave `decl_version` unchanged so other files' cached
-    /// analyses remain valid).
-    decl_fingerprints: DashMap<Url, Arc<FileIndex>>,
-    /// Cross-request cache for the whole-doc completion [`crate::types::type_map::TypeMap`]
-    /// (`TypeMap::from_doc_with_meta`). Unlike `analysis_cache`, validity is
-    /// purely per-file (the map reads only this doc plus PHPStorm meta), so the
-    /// entry needs no cross-file invalidation: it is fresh when its captured
-    /// source `Arc` is pointer-equal to the doc's current `source_arc()` and
-    /// the meta pointer is unchanged, self-evicting on any content/meta edit.
-    type_map_cache: DashMap<Url, (Arc<str>, usize, Arc<crate::types::type_map::TypeMap>)>,
     /// Set to `true` when the set of tracked files changes (add or remove).
     /// `sync_workspace_files` skips the collect/sort/compare path when this
     /// is `false`, avoiding a mutex acquisition on every LSP request.
@@ -157,16 +88,10 @@ impl DocumentStore {
             mir_analyzer::PhpVersion::LATEST,
         );
         DocumentStore {
-            token_cache: DashMap::new(),
+            caches: CacheRegistry::new(),
             host: Mutex::new(host),
             file_texts: DashMap::new(),
             deleted_uris: DashSet::new(),
-            text_cache: DashMap::new(),
-            parsed_cache: DashMap::new(),
-            analysis_cache: DashMap::new(),
-            decl_version: AtomicU64::new(0),
-            decl_fingerprints: DashMap::new(),
-            type_map_cache: DashMap::new(),
             workspace_files_dirty: AtomicBool::new(true),
             workspace,
             psr4: Arc::new(ArcSwap::from_pointee(Psr4Map::empty())),
@@ -191,7 +116,7 @@ impl DocumentStore {
     /// running mir's FileAnalyzer.
     pub fn set_autoload_uris(&self, uris: Vec<Url>) {
         *self.autoload_uris.write().unwrap() = uris;
-        self.analysis_cache.clear();
+        self.caches.evict_analysis_all();
     }
 
     /// Get or build the `AnalysisSession` for the given PHP version. Rebuilds
@@ -246,7 +171,7 @@ impl DocumentStore {
         // mutex entirely. Common during workspace scan + `did_open` for
         // unchanged files, where most threads would otherwise serialise on
         // `host.lock()` just to confirm a no-op.
-        if let Some(cached) = self.text_cache.get(uri)
+        if let Some(cached) = self.caches.text_cache.get(uri)
             && **cached == *text
             && !self.deleted_uris.contains(uri)
             && self.file_texts.contains_key(uri)
@@ -272,7 +197,7 @@ impl DocumentStore {
             let current: Arc<str> = ft.text(host.db());
             if *current == *text_arc {
                 drop(host);
-                self.text_cache.insert(uri.clone(), current);
+                self.caches.text_cache.insert(uri.clone(), current);
                 return;
             }
             ft.set_text(host.db_mut()).to(text_arc.clone());
@@ -286,7 +211,7 @@ impl DocumentStore {
                 ft.set_cached_index(host.db_mut()).to(None);
             }
             drop(host);
-            self.text_cache.insert(uri.clone(), text_arc);
+            self.caches.text_cache.insert(uri.clone(), text_arc);
             // Evict only this file's analysis. Declaration-level changes (which
             // invalidate other files' cached analyses) are detected lazily in
             // `cached_analysis` by comparing the new `FileIndex` against the
@@ -294,7 +219,7 @@ impl DocumentStore {
             // files' cache entries (which carry the old version) become stale.
             // Body-only edits leave `decl_version` unchanged so sibling files
             // are served from cache without re-analysis.
-            self.analysis_cache.remove(uri);
+            self.caches.evict_analysis(uri);
         } else {
             let is_vendor = uri.as_str().contains("/vendor/");
             let ft = {
@@ -311,7 +236,7 @@ impl DocumentStore {
                 ft
             };
             self.file_texts.insert(uri.clone(), ft);
-            self.text_cache.insert(uri.clone(), text_arc);
+            self.caches.text_cache.insert(uri.clone(), text_arc);
             self.workspace_files_dirty.store(true, Ordering::Release);
             // A newly-ingested file may resolve previously-unresolved references
             // in other files. Cross-file invalidation happens lazily: the first
@@ -395,7 +320,7 @@ impl DocumentStore {
     /// file is closed; diff-based tokens computed against the old revision
     /// are no longer meaningful.
     pub fn evict_token_cache(&self, uri: &Url) {
-        self.token_cache.remove(uri);
+        self.caches.evict_tokens(uri);
     }
 
     /// Return the `FileIndex` for `uri` by running `file_index` on a salsa
@@ -449,7 +374,7 @@ impl DocumentStore {
     }
 
     pub fn remove(&self, uri: &Url) {
-        self.token_cache.remove(uri);
+        self.caches.evict(uri);
         // Mark the URI as deleted but keep the `source_files` entry so the
         // salsa `SourceFile` handle remains alive. Re-opening the file reuses
         // the same handle instead of calling `SourceFile::new()` again, which
@@ -459,11 +384,6 @@ impl DocumentStore {
         // Sync workspace files so the deleted file is removed from the salsa
         // `Workspace::files` list and won't appear in workspace symbols etc.
         self.sync_workspace_files();
-        self.text_cache.remove(uri);
-        self.parsed_cache.remove(uri);
-        self.analysis_cache.remove(uri);
-        self.decl_fingerprints.remove(uri);
-        self.type_map_cache.remove(uri);
         // Also evict the file from the `AnalysisSession`'s internal state so
         // workspace symbol queries don't keep returning the deleted file's
         // declarations. Cheap when the session hasn't ingested this file.
@@ -547,8 +467,8 @@ impl DocumentStore {
     /// stale cache entry. On miss, captures the text Arc and ParsedDoc
     /// together inside a single `snapshot_query`, then publishes both.
     fn get_parsed_cached(&self, uri: &Url) -> Option<Arc<ParsedDoc>> {
-        if let Some(current_text) = self.text_cache.get(uri)
-            && let Some(entry) = self.parsed_cache.get(uri)
+        if let Some(current_text) = self.caches.text_cache.get(uri)
+            && let Some(entry) = self.caches.parsed_cache.get(uri)
             && Arc::ptr_eq(&*current_text, &entry.0)
         {
             return Some(entry.1.clone());
@@ -569,35 +489,8 @@ impl DocumentStore {
             let doc = crate::db::parse::parsed_doc(db, sf).0.clone();
             Some((text, doc))
         })?;
-        self.insert_parsed_cache(uri.clone(), text, doc.clone());
+        self.caches.insert_parsed(uri.clone(), text, doc.clone());
         Some(doc)
-    }
-
-    /// Publish a fresh `ParsedDoc` into `parsed_cache`, shedding roughly
-    /// half of the cache first if it has grown past [`PARSED_CACHE_CAP`].
-    ///
-    /// Eviction is probabilistic (DashMap iteration order is arbitrary),
-    /// not LRU. That's fine — salsa's own `parsed_doc` memo uses
-    /// `lru = 2048` on hotness-aware storage, so a cache-miss here is
-    /// cheap: the next read goes through `snapshot_query` and
-    /// `parsed_doc`, which still short-circuits on the salsa memo.
-    /// What we're bounding here is the *secondary* Arc retention that
-    /// would otherwise pin every workspace file's bumpalo arena alive
-    /// regardless of salsa's eviction decisions.
-    fn insert_parsed_cache(&self, uri: Url, text: Arc<str>, doc: Arc<ParsedDoc>) {
-        if self.parsed_cache.len() >= PARSED_CACHE_CAP {
-            let drop_target = self.parsed_cache.len() / 2;
-            let mut dropped = 0usize;
-            self.parsed_cache.retain(|_, _| {
-                if dropped < drop_target {
-                    dropped += 1;
-                    false
-                } else {
-                    true
-                }
-            });
-        }
-        self.parsed_cache.insert(uri, (text, doc));
     }
 
     /// Refresh `workspace.files` to mirror the current active file set.
@@ -655,7 +548,7 @@ impl DocumentStore {
         // FileAnalysis results from the old PHP version would survive unchanged
         // files. Clear it so the next request re-runs with the new version.
         drop(host);
-        self.analysis_cache.clear();
+        self.caches.evict_analysis_all();
     }
 
     /// Session-backed workspace reference lookup. Returns `(file, line, col)`
@@ -714,7 +607,7 @@ impl DocumentStore {
     /// salsa workspace. Used by the references handler to pre-filter session
     /// results by checking whether a file mentions the owning class name.
     pub fn source_text(&self, uri: &Url) -> Option<Arc<str>> {
-        self.text_cache.get(uri).map(|e| Arc::clone(&e))
+        self.caches.text_cache.get(uri).map(|e| Arc::clone(&e))
     }
 
     /// Run Pass 1 + Pass 2 analysis on every mirrored workspace file so that
@@ -749,15 +642,12 @@ impl DocumentStore {
     /// Cache the semantic tokens computed for a delta response.
     /// `result_id` is an opaque string (a hash of the token data) returned to the client.
     pub fn store_token_cache(&self, uri: &Url, result_id: String, tokens: Arc<Vec<SemanticToken>>) {
-        self.token_cache.insert(uri.clone(), (result_id, tokens));
+        self.caches.store_token(uri, result_id, tokens);
     }
 
     /// Return the cached tokens if `result_id` matches the stored one.
     pub fn get_token_cache(&self, uri: &Url, result_id: &str) -> Option<Arc<Vec<SemanticToken>>> {
-        self.token_cache
-            .get(uri)
-            .filter(|e| e.0.as_str() == result_id)
-            .map(|e| Arc::clone(&e.1))
+        self.caches.get_token(uri, result_id)
     }
 
     /// Raw semantic issues for a file, computed via mir's session-based
@@ -811,7 +701,7 @@ impl DocumentStore {
     ) -> Arc<crate::types::type_map::TypeMap> {
         let source = doc.source_arc();
         let meta_key = meta.map_or(0usize, |m| std::ptr::from_ref(m) as usize);
-        if let Some(entry) = self.type_map_cache.get(uri)
+        if let Some(entry) = self.caches.type_map_cache.get(uri)
             && Arc::ptr_eq(&entry.0, &source)
             && entry.1 == meta_key
         {
@@ -820,7 +710,8 @@ impl DocumentStore {
         let map = Arc::new(crate::types::type_map::TypeMap::from_doc_with_meta(
             doc, meta,
         ));
-        self.type_map_cache
+        self.caches
+            .type_map_cache
             .insert(uri.clone(), (source, meta_key, Arc::clone(&map)));
         map
     }
@@ -833,8 +724,8 @@ impl DocumentStore {
     pub fn cached_analysis_if_fresh(&self, uri: &Url) -> Option<Arc<mir_analyzer::FileAnalysis>> {
         let doc = self.get_doc_salsa(uri)?;
         let source = doc.source_arc();
-        let entry = self.analysis_cache.get(uri)?;
-        let cur_ver = self.decl_version.load(Ordering::Acquire);
+        let entry = self.caches.analysis_cache.get(uri)?;
+        let cur_ver = self.caches.decl_version();
         (Arc::ptr_eq(&entry.0, &source) && entry.1 == cur_ver).then(|| Arc::clone(&entry.2))
     }
 
@@ -844,8 +735,8 @@ impl DocumentStore {
         let doc = self.get_doc_salsa(uri)?;
         let source = doc.source_arc();
 
-        let cur_ver = self.decl_version.load(Ordering::Acquire);
-        if let Some(entry) = self.analysis_cache.get(uri)
+        let cur_ver = self.caches.decl_version();
+        if let Some(entry) = self.caches.analysis_cache.get(uri)
             && Arc::ptr_eq(&entry.0, &source)
             && entry.1 == cur_ver
         {
@@ -866,7 +757,7 @@ impl DocumentStore {
         {
             let autoload_uris = self.autoload_uris.read().unwrap().clone();
             for auri in &autoload_uris {
-                if let Some(atext) = self.text_cache.get(auri).map(|t| Arc::clone(&*t)) {
+                if let Some(atext) = self.caches.text_cache.get(auri).map(|t| Arc::clone(&*t)) {
                     let afile: Arc<str> = Arc::from(auri.as_str());
                     session.ingest_file(afile, atext);
                 }
@@ -902,7 +793,11 @@ impl DocumentStore {
         // edits leave the counter unchanged, allowing sibling files to be
         // served from cache on the next request.
         let new_index = self.get_index_salsa(uri);
-        let old_fp = self.decl_fingerprints.get(uri).map(|e| Arc::clone(&*e));
+        let old_fp = self
+            .caches
+            .decl_fingerprints
+            .get(uri)
+            .map(|e| Arc::clone(&*e));
         let decl_changed = match (&old_fp, &new_index) {
             (Some(old), Some(new)) => **old != **new,
             (None, Some(_)) => true,
@@ -910,12 +805,13 @@ impl DocumentStore {
         };
         if decl_changed {
             if let Some(idx) = new_index {
-                self.decl_fingerprints.insert(uri.clone(), idx);
+                self.caches.decl_fingerprints.insert(uri.clone(), idx);
             }
-            self.decl_version.fetch_add(1, Ordering::Release);
+            self.caches.bump_decl_version();
         }
-        let ver = self.decl_version.load(Ordering::Acquire);
-        self.analysis_cache
+        let ver = self.caches.decl_version();
+        self.caches
+            .analysis_cache
             .insert(uri.clone(), (source, ver, Arc::clone(&analysis)));
         Some(analysis)
     }
@@ -1012,7 +908,8 @@ impl DocumentStore {
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
             .filter(|e| {
-                self.text_cache
+                self.caches
+                    .text_cache
                     .get(e.key())
                     .map(|src| src.contains(word))
                     .unwrap_or(true)
@@ -1034,7 +931,8 @@ impl DocumentStore {
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
             .filter(|e| {
-                self.text_cache
+                self.caches
+                    .text_cache
                     .get(e.key())
                     .map(|src| src.contains(word))
                     .unwrap_or(true)
@@ -1305,6 +1203,7 @@ mod tests {
     #[test]
     fn parsed_cache_stays_bounded_under_many_inserts() {
         let store = DocumentStore::new();
+        use crate::document::cache_registry::PARSED_CACHE_CAP;
         let overflow = PARSED_CACHE_CAP + 100;
         for i in 0..overflow {
             let u = uri(&format!("/cap/file{i}.php"));
@@ -1313,9 +1212,9 @@ mod tests {
             let _ = store.get_doc_salsa(&u);
         }
         assert!(
-            store.parsed_cache.len() <= PARSED_CACHE_CAP,
+            store.caches.parsed_cache.len() <= PARSED_CACHE_CAP,
             "parsed_cache grew to {} entries (cap {})",
-            store.parsed_cache.len(),
+            store.caches.parsed_cache.len(),
             PARSED_CACHE_CAP
         );
     }
@@ -1553,12 +1452,12 @@ mod tests {
         );
         let _ = store.cached_analysis(&ua).unwrap();
         let analysis_b_first = store.cached_analysis(&ub).unwrap();
-        let ver_after_warm = store.decl_version.load(Ordering::Acquire);
+        let ver_after_warm = store.caches.decl_version();
 
         // Body-only edit to A: same function name, different body → FileIndex unchanged.
         store.mirror_text(&ua, "<?php\nfunction a() { return 999; }");
         let _ = store.cached_analysis(&ua);
-        let ver_after_body_edit = store.decl_version.load(Ordering::Acquire);
+        let ver_after_body_edit = store.caches.decl_version();
         assert_eq!(
             ver_after_warm, ver_after_body_edit,
             "body-only edit must not bump decl_version"
@@ -1578,7 +1477,7 @@ mod tests {
         // Declaration edit to A: rename the function → FileIndex changes.
         store.mirror_text(&ua, "<?php\nfunction a_renamed() { return 999; }");
         let _ = store.cached_analysis(&ua);
-        let ver_after_decl_edit = store.decl_version.load(Ordering::Acquire);
+        let ver_after_decl_edit = store.caches.decl_version();
         assert!(
             ver_after_decl_edit > ver_after_body_edit,
             "declaration edit must bump decl_version (was {ver_after_body_edit}, now {ver_after_decl_edit})"

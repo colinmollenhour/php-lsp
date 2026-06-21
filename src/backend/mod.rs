@@ -222,55 +222,6 @@ impl Backend {
         }
     }
 
-    /// Type-aware method call sites from the mir session.
-    ///
-    /// Method refs need type-aware filtering: `$mailer->process()` and
-    /// `$queue->process()` share a name, but only the one whose receiver type
-    /// matches the cursor's owning class is a real ref. Mir's `references_to` is
-    /// type-aware; use it as the primary source for Method+`target_fqn`.
-    ///
-    /// Returns `None` when the kind isn't `Method` or no mir symbol can be built;
-    /// otherwise the (possibly empty) call-site set, filtered to files that
-    /// actually mention `owner_short` (drops untyped/Mixed receivers — any file
-    /// where a receiver is legitimately typed as the owner must reference it by
-    /// name somewhere via import, `new`, or type hint).
-    fn session_method_references(
-        &self,
-        word: &str,
-        kind: Option<crate::navigation::references::SymbolKind>,
-        target_fqn: Option<&str>,
-        owner_short: Option<&str>,
-    ) -> Option<Vec<Location>> {
-        if !matches!(
-            kind,
-            Some(crate::navigation::references::SymbolKind::Method)
-        ) {
-            return None;
-        }
-        let sym = build_mir_symbol(word, kind, target_fqn)?;
-        let locs = self
-            .docs
-            .session_references_to(&sym)
-            .into_iter()
-            .filter_map(|tuple| {
-                let loc = crate::references::session_tuple_to_location(tuple)?;
-                if let Some(short) = owner_short {
-                    let mentions = self
-                        .docs
-                        .source_text(&loc.uri)
-                        .as_ref()
-                        .map(|src| src.contains(short))
-                        .unwrap_or(true);
-                    if !mentions {
-                        return None;
-                    }
-                }
-                Some(loc)
-            })
-            .collect();
-        Some(locs)
-    }
-
     /// Resolve the PHP version to use. See `autoload::resolve_php_version_from_roots`
     /// for the full priority order.
     fn resolve_php_version(&self, explicit: Option<&str>) -> (String, &'static str) {
@@ -279,38 +230,6 @@ impl Backend {
     }
 }
 
-/// Build a `mir_analyzer::Name` from the cursor-resolved `(word, kind,
-/// target_fqn)` triple, when there's enough information to construct one.
-/// Returns `None` when:
-/// - `kind` is `None` (cursor not on a recognizable symbol),
-/// - the required FQN piece isn't available.
-fn build_mir_symbol(
-    word: &str,
-    kind: Option<crate::navigation::references::SymbolKind>,
-    target_fqn: Option<&str>,
-) -> Option<mir_analyzer::Name> {
-    use crate::navigation::references::SymbolKind;
-    use std::sync::Arc as StdArc;
-    match kind {
-        Some(SymbolKind::Function) => {
-            target_fqn.map(|fqn| mir_analyzer::Name::Function(StdArc::from(fqn)))
-        }
-        Some(SymbolKind::Class) => {
-            target_fqn.map(|fqn| mir_analyzer::Name::Class(StdArc::from(fqn)))
-        }
-        Some(SymbolKind::Method) => target_fqn.map(|owning| mir_analyzer::Name::Method {
-            class: StdArc::from(owning),
-            // PHP method dispatch is case-insensitive — Symbol::method
-            // normalizes the name. The constructor function does this for us.
-            name: StdArc::from(word.to_ascii_lowercase()),
-        }),
-        Some(SymbolKind::Property) => target_fqn.map(|owning| mir_analyzer::Name::Property {
-            class: StdArc::from(owning),
-            name: StdArc::from(word),
-        }),
-        Some(SymbolKind::Constant) | None => None,
-    }
-}
 
 /// Refine the cursor's `(word, kind)` for a references request using
 /// declaration-aware heuristics, returning the (possibly rewritten) word, its

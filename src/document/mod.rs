@@ -4,4 +4,5 @@
 pub mod ast;
 pub mod document_store;
 
+pub(crate) mod cache_registry;
 pub(crate) mod open_files;

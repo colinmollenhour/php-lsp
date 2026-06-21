@@ -15,6 +15,7 @@ use super::walk::{
     property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use,
 };
 use crate::document::ast::{ParsedDoc, str_offset_in_range};
+use crate::document::document_store::DocumentStore;
 use crate::text::{fqn_short_name, utf16_code_units};
 
 /// What kind of symbol the cursor is on.  Used to dispatch to the
@@ -748,5 +749,138 @@ fn collect_declaration_spans(
             }
             _ => {}
         }
+    }
+}
+
+/// Build a `mir_analyzer::Name` from `(word, kind, target_fqn)`.
+/// Returns `None` when kind is None or the required FQN piece is missing.
+pub fn build_mir_symbol(
+    word: &str,
+    kind: Option<SymbolKind>,
+    target_fqn: Option<&str>,
+) -> Option<mir_analyzer::Name> {
+    match kind {
+        Some(SymbolKind::Function) => {
+            target_fqn.map(|fqn| mir_analyzer::Name::Function(Arc::from(fqn)))
+        }
+        Some(SymbolKind::Class) => {
+            target_fqn.map(|fqn| mir_analyzer::Name::Class(Arc::from(fqn)))
+        }
+        Some(SymbolKind::Method) => target_fqn.map(|owning| mir_analyzer::Name::Method {
+            class: Arc::from(owning),
+            // PHP method dispatch is case-insensitive; normalize here.
+            name: Arc::from(word.to_ascii_lowercase()),
+        }),
+        Some(SymbolKind::Property) => target_fqn.map(|owning| mir_analyzer::Name::Property {
+            class: Arc::from(owning),
+            name: Arc::from(word),
+        }),
+        Some(SymbolKind::Constant) | None => None,
+    }
+}
+
+/// Unified reference collector used by `textDocument/references`.
+///
+/// Decides which path(s) to take — mir's type-aware session index (fast,
+/// exact for methods), the AST walker (comprehensive), or both — and merges
+/// the results. All call sites previously duplicated this merge logic by hand.
+pub struct ReferenceQuery<'a> {
+    pub word: &'a str,
+    pub kind: Option<SymbolKind>,
+    pub target_fqn: Option<&'a str>,
+    /// Short name of the owning class for method queries (e.g. `"Widget"` from
+    /// `"App\\Widget"`). Used to post-filter mir results to files that textually
+    /// mention the class, preventing false positives from same-name methods on
+    /// unrelated classes.
+    pub owner_short: Option<&'a str>,
+}
+
+impl<'a> ReferenceQuery<'a> {
+    /// Collect reference locations. `candidate_docs` should already be filtered
+    /// to files that mention `self.word` (from `DocumentStore::candidate_docs_for`).
+    /// For Method queries, callers must call `DocumentStore::ensure_files_ingested`
+    /// before this method to populate the mir session.
+    ///
+    /// `declaration_location` is the cursor span; it is appended to Method-path
+    /// results when `include_declaration` is `true`.
+    pub fn collect(
+        &self,
+        docs: &DocumentStore,
+        candidate_docs: &[(Url, Arc<ParsedDoc>)],
+        include_declaration: bool,
+        declaration_location: Option<Location>,
+    ) -> Vec<Location> {
+        // --- Method path: prefer mir's type-aware session index -----------
+        if matches!(self.kind, Some(SymbolKind::Method)) {
+            if let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn) {
+                let locs: Vec<Location> = docs
+                    .session_references_to(&sym)
+                    .into_iter()
+                    .filter_map(|tuple| {
+                        let loc = session_tuple_to_location(tuple)?;
+                        if let Some(short) = self.owner_short {
+                            let mentions = docs
+                                .source_text(&loc.uri)
+                                .as_ref()
+                                .map(|src| src.contains(short))
+                                .unwrap_or(true);
+                            if !mentions {
+                                return None;
+                            }
+                        }
+                        Some(loc)
+                    })
+                    .collect();
+
+                if !locs.is_empty() {
+                    let mut combined = locs;
+                    if include_declaration {
+                        if let Some(decl) = declaration_location {
+                            combined.push(decl);
+                        }
+                        dedup_ref_locations(&mut combined);
+                    }
+                    return combined;
+                }
+            }
+            // mir session had no results — fall through to AST walker.
+        }
+
+        // --- AST walker path (all non-Method kinds, or Method fallback) ---
+        let mut locations = match self.target_fqn {
+            Some(t) => find_references_with_target(
+                self.word,
+                candidate_docs,
+                include_declaration,
+                self.kind,
+                t,
+            ),
+            None => find_references(self.word, candidate_docs, include_declaration, self.kind),
+        };
+
+        // For Function and Class kinds, augment with session refs that the
+        // AST walker may miss (cross-file dynamic dispatch, generated code).
+        if !matches!(
+            self.kind,
+            Some(SymbolKind::Method) | Some(SymbolKind::Property)
+        ) {
+            if let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn) {
+                let extra = docs.session_references_to(&sym);
+                if !extra.is_empty() {
+                    let mut seen: HashSet<(String, u32, u32, u32)> =
+                        locations.iter().map(ref_location_key).collect();
+                    for loc in extra
+                        .into_iter()
+                        .filter_map(session_tuple_to_location)
+                    {
+                        if seen.insert(ref_location_key(&loc)) {
+                            locations.push(loc);
+                        }
+                    }
+                }
+            }
+        }
+
+        locations
     }
 }

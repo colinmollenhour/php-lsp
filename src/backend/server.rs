@@ -95,7 +95,7 @@ use super::helpers::{
     php_file_op, promoted_property_at_cursor, range_within, run_phpunit, symbol_kind_at,
 };
 use super::{
-    Backend, IndexReadyNotification, build_mir_symbol, compute_dependent_publishes_owned,
+    Backend, IndexReadyNotification, compute_dependent_publishes_owned,
     compute_diagnostic_result_id, publish_with_dependents, resolve_reference_symbol,
 };
 
@@ -311,6 +311,13 @@ impl LanguageServer for Backend {
                 // 100 ms debounce: if another edit arrives before we parse,
                 // the version gate below will discard this result.
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+                // Skip the expensive parse+analyze if a newer edit already
+                // superseded this one. Collapses N rapid keystrokes into 1
+                // spawn_blocking call instead of N.
+                if open_files.current_version(&uri) != Some(version) {
+                    return;
+                }
 
                 let (_doc, parse_diags) =
                     tokio::task::spawn_blocking(move || parse_document(&text))
