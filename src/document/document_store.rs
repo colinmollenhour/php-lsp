@@ -872,18 +872,18 @@ impl DocumentStore {
                 }
             }
         }
-        // Pre-load every imported class via PSR-4 so Pass-2 doesn't emit
-        // spurious `UndefinedClass` for classes that ARE on disk but haven't
-        // been ingested yet. The session's resolver was supplied at
-        // construction time.
+        // Pre-load every class-typed reference via PSR-4 before FileAnalyzer
+        // runs. Although mir 0.45.0 added priority_index_for_ast (called inside
+        // FileAnalyzer::analyze), it does not resolve bare same-namespace refs
+        // (e.g. `extends Base` inside `namespace App;` → App\Base) or
+        // use-imported names in `implements` clauses. Without this block, those
+        // cases produce spurious UndefinedClass.
+        //
+        // TODO: upstream — extend mir's collect_class_refs_from_ast to cover
+        // same-namespace bare refs and use-imported implements entries so this
+        // pre-load can be removed.
         {
             let _s = tracing::debug_span!("session.lazy_load_imports").entered();
-            // Pre-load every class-typed reference resolved via the file's
-            // namespace + `use` imports. This covers `use` imports, FQN refs
-            // (`new \App\Foo`), and bare same-namespace refs (`new Foo` from
-            // inside `namespace App;`) in a single sweep — mir won't auto-
-            // resolve via the ClassResolver, so anything not lazy-loaded here
-            // produces a spurious `UndefinedClass`.
             let fqns = crate::references::collect_referenced_class_fqns(&doc);
             for fqcn in &fqns {
                 let _ = session.load_class(fqcn);
