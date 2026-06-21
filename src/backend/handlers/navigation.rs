@@ -349,8 +349,12 @@ impl Backend {
                 target_fqn: target_fqn.as_deref(),
                 owner_short: owner_short.as_deref(),
             };
-            let locations =
-                query.collect(&self.docs, &candidate_docs, include_declaration, declaration_location);
+            let locations = query.collect(
+                &self.docs,
+                &candidate_docs,
+                include_declaration,
+                declaration_location,
+            );
 
             Ok((!locations.is_empty()).then_some(locations))
         })

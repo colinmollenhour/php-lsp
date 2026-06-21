@@ -230,7 +230,6 @@ impl Backend {
     }
 }
 
-
 /// Refine the cursor's `(word, kind)` for a references request using
 /// declaration-aware heuristics, returning the (possibly rewritten) word, its
 /// symbol kind, and — for class constants — the owning class short name.

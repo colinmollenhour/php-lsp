@@ -763,9 +763,7 @@ pub fn build_mir_symbol(
         Some(SymbolKind::Function) => {
             target_fqn.map(|fqn| mir_analyzer::Name::Function(Arc::from(fqn)))
         }
-        Some(SymbolKind::Class) => {
-            target_fqn.map(|fqn| mir_analyzer::Name::Class(Arc::from(fqn)))
-        }
+        Some(SymbolKind::Class) => target_fqn.map(|fqn| mir_analyzer::Name::Class(Arc::from(fqn))),
         Some(SymbolKind::Method) => target_fqn.map(|owning| mir_analyzer::Name::Method {
             class: Arc::from(owning),
             // PHP method dispatch is case-insensitive; normalize here.
@@ -811,40 +809,40 @@ impl<'a> ReferenceQuery<'a> {
         declaration_location: Option<Location>,
     ) -> Vec<Location> {
         // --- Method path: prefer mir's type-aware session index -----------
-        if matches!(self.kind, Some(SymbolKind::Method)) {
-            if let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn) {
-                let locs: Vec<Location> = docs
-                    .session_references_to(&sym)
-                    .into_iter()
-                    .filter_map(|tuple| {
-                        let loc = session_tuple_to_location(tuple)?;
-                        if let Some(short) = self.owner_short {
-                            let mentions = docs
-                                .source_text(&loc.uri)
-                                .as_ref()
-                                .map(|src| src.contains(short))
-                                .unwrap_or(true);
-                            if !mentions {
-                                return None;
-                            }
+        if matches!(self.kind, Some(SymbolKind::Method))
+            && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
+        {
+            let locs: Vec<Location> = docs
+                .session_references_to(&sym)
+                .into_iter()
+                .filter_map(|tuple| {
+                    let loc = session_tuple_to_location(tuple)?;
+                    if let Some(short) = self.owner_short {
+                        let mentions = docs
+                            .source_text(&loc.uri)
+                            .as_ref()
+                            .map(|src| src.contains(short))
+                            .unwrap_or(true);
+                        if !mentions {
+                            return None;
                         }
-                        Some(loc)
-                    })
-                    .collect();
-
-                if !locs.is_empty() {
-                    let mut combined = locs;
-                    if include_declaration {
-                        if let Some(decl) = declaration_location {
-                            combined.push(decl);
-                        }
-                        dedup_ref_locations(&mut combined);
                     }
-                    return combined;
+                    Some(loc)
+                })
+                .collect();
+
+            if !locs.is_empty() {
+                let mut combined = locs;
+                if include_declaration {
+                    if let Some(decl) = declaration_location {
+                        combined.push(decl);
+                    }
+                    dedup_ref_locations(&mut combined);
                 }
+                return combined;
             }
-            // mir session had no results — fall through to AST walker.
         }
+        // mir session had no results — fall through to AST walker.
 
         // --- AST walker path (all non-Method kinds, or Method fallback) ---
         let mut locations = match self.target_fqn {
@@ -863,19 +861,15 @@ impl<'a> ReferenceQuery<'a> {
         if !matches!(
             self.kind,
             Some(SymbolKind::Method) | Some(SymbolKind::Property)
-        ) {
-            if let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn) {
-                let extra = docs.session_references_to(&sym);
-                if !extra.is_empty() {
-                    let mut seen: HashSet<(String, u32, u32, u32)> =
-                        locations.iter().map(ref_location_key).collect();
-                    for loc in extra
-                        .into_iter()
-                        .filter_map(session_tuple_to_location)
-                    {
-                        if seen.insert(ref_location_key(&loc)) {
-                            locations.push(loc);
-                        }
+        ) && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
+        {
+            let extra = docs.session_references_to(&sym);
+            if !extra.is_empty() {
+                let mut seen: HashSet<(String, u32, u32, u32)> =
+                    locations.iter().map(ref_location_key).collect();
+                for loc in extra.into_iter().filter_map(session_tuple_to_location) {
+                    if seen.insert(ref_location_key(&loc)) {
+                        locations.push(loc);
                     }
                 }
             }
