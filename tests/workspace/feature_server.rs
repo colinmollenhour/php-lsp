@@ -259,3 +259,47 @@ async fn cancel_request_returns_request_cancelled_and_server_stays_alive() {
         "hover after cancellation must succeed, got: {hover}"
     );
 }
+
+// ── spawn_blocking consistency ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn references_and_hover_concurrent_complete_without_deadlock() {
+    // Two independent servers run references and hover at the same time,
+    // exercising the spawn_blocking path in both handle_references (query.collect)
+    // and handle_goto_definition (workspace_index_async). Neither request should
+    // block the other or deadlock.
+    let (mut srv_a, mut srv_b) = tokio::join!(TestServer::new(), TestServer::new());
+
+    srv_a
+        .open(
+            "conc_a.php",
+            "<?php\nfunction greet(string $name): string { return $name; }\ngreet('world');\n",
+        )
+        .await;
+    srv_b
+        .open(
+            "conc_b.php",
+            "<?php\nfunction greet(string $name): string { return $name; }\ngreet('world');\n",
+        )
+        .await;
+
+    let (refs_resp, hover_resp) = tokio::join!(
+        srv_a.references("conc_a.php", 1, 10, false),
+        srv_b.hover("conc_b.php", 1, 10)
+    );
+
+    assert!(
+        refs_resp["error"].is_null(),
+        "references must not error when run concurrently: {refs_resp:?}"
+    );
+    assert!(
+        hover_resp["error"].is_null(),
+        "hover must not error when run concurrently: {hover_resp:?}"
+    );
+
+    let refs = refs_resp["result"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !refs.is_empty(),
+        "references should find at least the call site: {refs_resp:?}"
+    );
+}

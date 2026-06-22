@@ -70,8 +70,8 @@ impl Backend {
                     }
                 });
                 if let Some((cls, class_fqn_arc)) = resolved_method_target {
-                    let all_indexes = self.docs.all_indexes();
-                    if let Some(loc) = find_method_in_class_hierarchy(&cls, &word, &all_indexes) {
+                    let wi = self.workspace_index_async().await;
+                    if let Some(loc) = find_method_in_class_hierarchy(&cls, &word, &wi.files) {
                         let refined = self
                             .docs
                             .get_doc_salsa(&loc.uri)
@@ -115,9 +115,8 @@ impl Backend {
                 };
                 if let Some(cls) = class_name {
                     let first_cls = cls.split('|').next().unwrap_or(&cls).to_owned();
-                    let all_indexes = self.docs.all_indexes();
-                    if let Some(loc) =
-                        find_method_in_class_hierarchy(&first_cls, &word, &all_indexes)
+                    let wi2 = self.workspace_index_async().await;
+                    if let Some(loc) = find_method_in_class_hierarchy(&first_cls, &word, &wi2.files)
                     {
                         let refined = self
                             .docs
@@ -135,7 +134,8 @@ impl Backend {
                     }
                     // Fallback: resolve the class FQN via the workspace index and
                     // walk the PSR-4 vendor hierarchy starting from there.
-                    let class_fqn = all_indexes
+                    let class_fqn = wi2
+                        .files
                         .iter()
                         .find_map(|(_, idx)| {
                             idx.classes
@@ -208,7 +208,6 @@ impl Backend {
         params: ReferenceParams,
     ) -> Result<Option<Vec<Location>>> {
         guard_async_result("references", async move {
-            tokio::task::yield_now().await;
             let uri = &params.text_document_position.text_document.uri;
             let position = params.text_document_position.position;
             let source = self.get_open_text(uri).unwrap_or_default();
@@ -343,18 +342,23 @@ impl Backend {
                 }
             });
 
-            let query = ReferenceQuery {
-                word: &word,
-                kind,
-                target_fqn: target_fqn.as_deref(),
-                owner_short: owner_short.as_deref(),
-            };
-            let locations = query.collect(
-                &self.docs,
-                &candidate_docs,
-                include_declaration,
-                declaration_location,
-            );
+            let docs = Arc::clone(&self.docs);
+            let locations = tokio::task::spawn_blocking(move || {
+                let query = ReferenceQuery {
+                    word: &word,
+                    kind,
+                    target_fqn: target_fqn.as_deref(),
+                    owner_short: owner_short.as_deref(),
+                };
+                query.collect(
+                    &docs,
+                    &candidate_docs,
+                    include_declaration,
+                    declaration_location,
+                )
+            })
+            .await
+            .unwrap_or_default();
 
             Ok((!locations.is_empty()).then_some(locations))
         })
