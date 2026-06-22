@@ -31,6 +31,11 @@ pub(crate) struct CacheRegistry {
     /// Cross-request cache for the whole-doc TypeMap (completion).
     pub(crate) type_map_cache:
         DashMap<Url, (Arc<str>, usize, Arc<crate::types::type_map::TypeMap>)>,
+    /// Owned-program cache: (source_arc, owned_program). Avoids repeating the
+    /// deep arena clone in `cached_analysis` when `decl_version` bumps due to
+    /// a sibling file's declaration change — the file's own source is unchanged,
+    /// so the owned AST copy can be reused.
+    pub(crate) owned_program_cache: DashMap<Url, (Arc<str>, Arc<php_ast::owned::Program>)>,
 }
 
 impl CacheRegistry {
@@ -43,6 +48,7 @@ impl CacheRegistry {
             decl_version: AtomicU64::new(0),
             decl_fingerprints: DashMap::new(),
             type_map_cache: DashMap::new(),
+            owned_program_cache: DashMap::new(),
         }
     }
 
@@ -54,6 +60,7 @@ impl CacheRegistry {
         self.analysis_cache.remove(uri);
         self.decl_fingerprints.remove(uri);
         self.type_map_cache.remove(uri);
+        self.owned_program_cache.remove(uri);
     }
 
     /// Evict only the mir analysis cache for `uri`. Used on text change so the
@@ -66,6 +73,13 @@ impl CacheRegistry {
     /// autoload.files set changes, making all cached FileAnalysis stale.
     pub(crate) fn evict_analysis_all(&self) {
         self.analysis_cache.clear();
+    }
+
+    /// Clear the entire owned-program cache. Call this when the AnalysisSession
+    /// is rebuilt (e.g. PHP version change) if callers want to drop the retained
+    /// AST copies eagerly.
+    pub(crate) fn evict_owned_program_all(&self) {
+        self.owned_program_cache.clear();
     }
 
     /// Evict only the semantic-tokens cache for `uri`. Used when a file is

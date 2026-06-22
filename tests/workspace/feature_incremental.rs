@@ -473,3 +473,54 @@ async fn rapid_concurrent_edits_and_queries_no_panic() {
         );
     }
 }
+
+// ── owned_program cache ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn declaration_change_in_one_file_does_not_break_sibling_hover() {
+    // When file A's declaration changes (bumping decl_version), file B's
+    // owned_program_cache entry should be reused since B's source is unchanged.
+    // We verify this indirectly: hover on B must return correct results both
+    // before and after the sibling declaration edit, with no panics.
+    let mut server = TestServer::new().await;
+
+    server.open("sib_a.php", "<?php\nclass Alpha {}\n").await;
+    server
+        .open(
+            "sib_b.php",
+            "<?php\nfunction computeValue(int $x): int { return $x * 2; }\n",
+        )
+        .await;
+
+    let hover_before = server.hover("sib_b.php", 1, 10).await;
+    assert!(
+        hover_before["error"].is_null(),
+        "hover on sib_b must succeed before sibling edit: {hover_before:?}"
+    );
+    assert!(
+        hover_before["result"]["contents"]["value"]
+            .as_str()
+            .unwrap_or("")
+            .contains("computeValue"),
+        "hover must show the function before sibling edit: {hover_before:?}"
+    );
+
+    // Edit sib_a.php — this is a declaration change that bumps decl_version
+    // and would previously force a fresh to_owned_program() for sib_b.
+    server
+        .change("sib_a.php", 2, "<?php\nclass AlphaRenamed {}\n")
+        .await;
+
+    let hover_after = server.hover("sib_b.php", 1, 10).await;
+    assert!(
+        hover_after["error"].is_null(),
+        "hover on sib_b must succeed after sibling declaration edit: {hover_after:?}"
+    );
+    assert!(
+        hover_after["result"]["contents"]["value"]
+            .as_str()
+            .unwrap_or("")
+            .contains("computeValue"),
+        "hover must still show the correct function after sibling edit: {hover_after:?}"
+    );
+}

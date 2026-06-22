@@ -779,7 +779,17 @@ impl DocumentStore {
             }
         }
         let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
-        let owned_program = php_ast::owned::to_owned_program(doc.program());
+        let owned_program = if let Some(cached) = self.caches.owned_program_cache.get(uri)
+            && Arc::ptr_eq(&cached.0, &source)
+        {
+            Arc::clone(&cached.1)
+        } else {
+            let prog = Arc::new(php_ast::owned::to_owned_program(doc.program()));
+            self.caches
+                .owned_program_cache
+                .insert(uri.clone(), (Arc::clone(&source), Arc::clone(&prog)));
+            prog
+        };
         let analysis = {
             let _s = tracing::debug_span!("FileAnalyzer::analyze").entered();
             let analyzer = mir_analyzer::FileAnalyzer::new(&session);
@@ -1538,5 +1548,58 @@ mod tests {
             h.join()
                 .expect("no panic in snapshot_query under concurrent writes");
         }
+    }
+
+    /// When a sibling file's declaration changes (bumping decl_version), the
+    /// owned_program_cache entry for the unchanged file B should be reused
+    /// rather than deep-cloned again. We verify this via Arc pointer equality.
+    #[test]
+    fn owned_program_cache_reused_after_sibling_declaration_change() {
+        let store = DocumentStore::new();
+        let ua = uri("/prog_a.php");
+        let ub = uri("/prog_b.php");
+
+        open(
+            &store,
+            ua.clone(),
+            "<?php\nfunction alpha(): void {}".to_string(),
+        );
+        open(
+            &store,
+            ub.clone(),
+            "<?php\nfunction beta(): void {}".to_string(),
+        );
+
+        // Warm both analysis caches and populate owned_program_cache for both files.
+        let _ = store.cached_analysis(&ua);
+        let _ = store.cached_analysis(&ub);
+
+        // Capture B's owned_program Arc before the sibling edit.
+        let prog_b_first = store
+            .caches
+            .owned_program_cache
+            .get(&ub)
+            .map(|e| Arc::clone(&e.1))
+            .expect("B's owned_program should be cached after first analysis");
+
+        // Declaration change to A: bumps decl_version, invalidating all cached_analysis entries.
+        store.mirror_text(&ua, "<?php\nfunction alpha_renamed(): void {}");
+        // Re-analyze A to trigger the decl_version bump.
+        let _ = store.cached_analysis(&ua);
+
+        // Now re-analyze B. Its source is unchanged, so owned_program_cache must hit.
+        let _ = store.cached_analysis(&ub);
+
+        let prog_b_second = store
+            .caches
+            .owned_program_cache
+            .get(&ub)
+            .map(|e| Arc::clone(&e.1))
+            .expect("B's owned_program should still be cached after sibling edit");
+
+        assert!(
+            Arc::ptr_eq(&prog_b_first, &prog_b_second),
+            "B's owned_program Arc should be identical (cache hit) after sibling declaration change"
+        );
     }
 }
