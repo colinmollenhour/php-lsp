@@ -109,14 +109,16 @@ pub(crate) fn word_range_at(source: &str, position: Position) -> Option<Range> {
 /// `Range` positions use UTF-16 code-unit offsets; this function converts them
 /// correctly before slicing the UTF-8 source string.
 pub(crate) fn selected_text_range(source: &str, range: Range) -> String {
-    let lines: Vec<&str> = source.lines().collect();
+    // split('\n') (not lines()) keeps each line's trailing '\r' so CRLF sources
+    // round-trip intact; lines() strips '\r' and the rejoin below would emit '\n'.
+    let lines: Vec<&str> = source.split('\n').collect();
     if range.start.line == range.end.line {
         let line = match lines.get(range.start.line as usize) {
             Some(l) => l,
             None => return String::new(),
         };
         let start = utf16_offset_to_byte(line, range.start.character as usize);
-        let end = utf16_offset_to_byte(line, range.end.character as usize);
+        let end = utf16_offset_to_byte(line, range.end.character as usize).max(start);
         line[start..end].to_string()
     } else {
         let mut result = String::new();
@@ -195,5 +197,41 @@ mod tests {
             Some("foo"),
             "word_at_position must handle CRLF line endings"
         );
+    }
+
+    #[test]
+    fn selected_text_range_preserves_crlf() {
+        let src = "<?php\r\n$a = 1;\r\n$b = 2;\r\n";
+        let range = Range {
+            start: Position {
+                line: 1,
+                character: 0,
+            },
+            end: Position {
+                line: 2,
+                character: 7,
+            },
+        };
+        assert_eq!(
+            selected_text_range(src, range),
+            "$a = 1;\r\n$b = 2;",
+            "multi-line extraction must preserve CRLF line endings"
+        );
+    }
+
+    #[test]
+    fn selected_text_range_reversed_does_not_panic() {
+        let src = "<?php $x = 1;";
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 10,
+            },
+            end: Position {
+                line: 0,
+                character: 3,
+            },
+        };
+        assert_eq!(selected_text_range(src, range), "");
     }
 }
