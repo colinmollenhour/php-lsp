@@ -1975,3 +1975,47 @@ class Query {
         .await;
     expect!["main.php:2:20-2:31"].assert_eq(&out);
 }
+
+/// Cursor on a method call via a typed variable resolves to the parent class
+/// that declares the method, not the child class that inherits it.
+#[tokio::test]
+async fn definition_method_inherited_from_parent_via_variable() {
+    let mut s = TestServer::new().await;
+    s.check_definition_annotated(
+        r#"<?php
+class Base {
+    public function render(): void {}
+    //              ^^^^^^ def
+}
+class Child extends Base {}
+
+$c = new Child();
+$c->ren$0der();
+"#,
+    )
+    .await;
+}
+
+/// A circular inheritance graph (A extends B extends A) must not cause
+/// `textDocument/definition` to hang. The request must complete and return
+/// no result rather than looping indefinitely.
+#[tokio::test]
+async fn definition_circular_inheritance_does_not_hang() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_definition(
+            r#"<?php
+class A extends B {
+    public function go(): void {}
+}
+class B extends A {}
+
+$a = new A();
+$a->mis$0sing();
+"#,
+        )
+        .await;
+    // Circular inheritance — no location can be returned.
+    expect!["<none>"].assert_eq(&out);
+}

@@ -75,13 +75,6 @@ impl CacheRegistry {
         self.analysis_cache.clear();
     }
 
-    /// Clear the entire owned-program cache. Call this when the AnalysisSession
-    /// is rebuilt (e.g. PHP version change) if callers want to drop the retained
-    /// AST copies eagerly.
-    pub(crate) fn evict_owned_program_all(&self) {
-        self.owned_program_cache.clear();
-    }
-
     /// Evict only the semantic-tokens cache for `uri`. Used when a file is
     /// closed; delta tokens computed against the old revision are invalid.
     pub(crate) fn evict_tokens(&self, uri: &Url) {
