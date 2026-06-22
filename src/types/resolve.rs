@@ -81,7 +81,6 @@ pub enum Declaration<'a> {
     },
     Property {
         property: &'a PropertyDecl<'a, 'a>,
-        container: Container,
         member_span: Span,
     },
     /// A constructor-promoted parameter, which acts as a property declaration.
@@ -311,7 +310,6 @@ fn resolve_member<'a>(
             ClassMemberKind::Property(p) if p.name == bare => {
                 let d = Declaration::Property {
                     property: p,
-                    container,
                     member_span: member.span,
                 };
                 if accept(&d) {

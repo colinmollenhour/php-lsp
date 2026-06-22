@@ -127,7 +127,8 @@ impl WorkspaceCache {
 
     /// Build a cache key from file content. Combines `uri` and `content`
     /// so that two files with identical content but different URIs get
-    /// different keys. Used in tests and legacy code paths.
+    /// different keys. Used by the cache-key tests.
+    #[cfg(test)]
     pub fn key_for(uri: &str, content: &str) -> CacheKey {
         let mut hasher = blake3::Hasher::new();
         hasher.update(uri.as_bytes());
@@ -232,20 +233,12 @@ fn cache_base_dir() -> Option<PathBuf> {
     None
 }
 
-/// Bump this constant (and the matching literal in [`schema_version`]) when
-/// `FileIndex` or any type it contains gains, loses, or renames a field.
-/// Rotating it causes every cached entry to be treated as a miss on the next
-/// cold start, regardless of whether the crate version changed.
-pub const FILE_INDEX_SCHEMA: &str = "fi-v4";
-
-/// Schema marker: bumping `php-lsp` crate version, `mir-codebase` version,
-/// or [`FILE_INDEX_SCHEMA`] invalidates every cached entry. The hardcoded mir
-/// version is a trade-off: keeping it in source means we don't depend on
-/// `build.rs` introspection, at the cost of needing to remember to update it
-/// alongside `Cargo.toml`.
-///
-/// **Important**: the `"fi-v1"` literal here must stay in sync with
-/// `FILE_INDEX_SCHEMA`. `concat!` requires a literal — bump both together.
+/// Schema marker: bumping `php-lsp` crate version, `mir-codebase` version, or
+/// the trailing `fi-vN` file-index marker invalidates every cached entry. The
+/// hardcoded mir version is a trade-off: keeping it in source means we don't
+/// depend on `build.rs` introspection, at the cost of needing to remember to
+/// update it alongside `Cargo.toml`. Bump `fi-vN` whenever `FileIndex` or any
+/// type it contains gains, loses, or renames a field.
 fn schema_version() -> &'static str {
     concat!(env!("CARGO_PKG_VERSION"), "-mir-0.7-fi-v4")
 }
