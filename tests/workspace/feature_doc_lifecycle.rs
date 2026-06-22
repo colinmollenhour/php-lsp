@@ -27,6 +27,39 @@ async fn did_close_clears_diagnostics() {
     expect!["<empty>"].assert_eq(&render_diagnostics_notification(&close_notif));
 }
 
+/// Regression: closing a file with unsaved edits must not leave the discarded
+/// buffer in the cross-file index. did_close used to drop the editor buffer but
+/// never re-read disk, so workspace symbols / references kept resolving against
+/// the discarded edit. The fix re-syncs from disk on close.
+#[tokio::test]
+async fn did_close_resyncs_index_from_disk() {
+    let tmp = tempfile::tempdir().unwrap();
+    let disk = "<?php\nclass DiskWidget {}\n";
+    std::fs::write(tmp.path().join("widget.php"), disk).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("widget.php", disk).await;
+
+    // Edit the buffer without saving: rename the class. While open, the buffer
+    // is authoritative, so the index reflects the edited name.
+    s.change("widget.php", 2, "<?php\nclass BufferWidget {}\n")
+        .await;
+    expect!["Class       BufferWidget @ widget.php:1"]
+        .assert_eq(&s.snapshot_workspace_symbols("BufferWidget").await);
+
+    // Close without saving — the edit is discarded. Cross-file lookups must now
+    // resolve against disk (DiskWidget), not the discarded buffer (BufferWidget).
+    let uri = s.uri("widget.php");
+    s.close("widget.php").await;
+    // did_close re-reads disk then publishes empty diagnostics last; waiting for
+    // that publish guarantees the disk re-sync has landed before we query.
+    s.client().wait_for_diagnostics(&uri).await;
+    expect!["<no symbols>"].assert_eq(&s.snapshot_workspace_symbols("BufferWidget").await);
+    expect!["Class       DiskWidget @ widget.php:1"]
+        .assert_eq(&s.snapshot_workspace_symbols("DiskWidget").await);
+}
+
 #[tokio::test]
 async fn did_close_unopened_does_not_crash() {
     let mut server = TestServer::new().await;
