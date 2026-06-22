@@ -7,8 +7,7 @@ use dashmap::{DashMap, DashSet};
 use salsa::Setter;
 use tower_lsp::lsp_types::{SemanticToken, Url};
 
-use crate::db::analysis::AnalysisHost;
-use crate::db::input::{FileText, Workspace, find_source_file};
+use crate::db::mir_queries::{LspWorkspace, LspWsFile};
 use crate::document::ast::ParsedDoc;
 use crate::document::cache_registry::CacheRegistry;
 use crate::index::file_index::FileIndex;
@@ -23,30 +22,25 @@ pub struct DocumentStore {
     // state (live text, version token, parse-diagnostics cache) lives on
     // `Backend` in its `open_files` map; the set of files tracked by salsa
     // is exactly `source_files.keys()`.
-    /// Mutex — held briefly to clone the database for reads and to mutate
-    /// it for writes. Per-thread salsa state (`zalsa_local`) is `!Sync`,
-    /// which rules out `RwLock<AnalysisHost>`. Readers instead snapshot the
-    /// db (cheap — storage is `Arc<Zalsa>`) and run queries on the clone
-    /// with the lock released, giving real read/read parallelism. Writers
-    /// during an in-flight read bump the shared revision; the reader raises
-    /// `salsa::Cancelled` on its next query call and `snapshot_query` below
-    /// retries with a fresh snapshot.
-    host: Mutex<AnalysisHost>,
-    /// `Url -> FileText` lookup. One immortal `FileText` salsa input per unique
-    /// URI ever seen. Text edits mutate the existing handle; delete/reopen cycles
-    /// reuse it rather than allocating a new input each time.
-    file_texts: DashMap<Url, FileText>,
+    /// `Url -> LspWsFile` lookup on the shared mir db. Each `LspWsFile` pairs
+    /// mir's `SourceFile` (the shared text input) with the optional warm-start
+    /// `cached_index`. Created/updated through the `AnalysisSession`'s
+    /// `with_db_mut` under the db write lock; reads run on cheap snapshot clones.
+    lsp_ws_files: DashMap<Url, LspWsFile>,
     /// URIs that have been removed. Re-opening a deleted URI un-deletes it here
-    /// and reuses the existing `FileText` handle.
+    /// and reuses the existing `LspWsFile` handle.
     deleted_uris: DashSet<Url>,
     /// Set to `true` when the set of tracked files changes (add or remove).
     /// `sync_workspace_files` skips the collect/sort/compare path when this
-    /// is `false`, avoiding a mutex acquisition on every LSP request.
+    /// is `false`, avoiding a lock acquisition on every LSP request.
     workspace_files_dirty: AtomicBool,
-    /// Workspace salsa input. Tracks the full set of `SourceFile`s that
-    /// participate in whole-program queries (`codebase`, `file_refs`).
-    /// Re-synced from `source_files` on demand by `sync_workspace_files`.
-    workspace: Workspace,
+    /// `LspWorkspace` salsa input on the shared mir db: the project-file scoping
+    /// set aggregated by `workspace_index`. Created lazily on first sync (the db
+    /// is owned by the lazily-built `AnalysisSession`).
+    lsp_workspace: Mutex<Option<LspWorkspace>>,
+    /// Target PHP version (selects the `AnalysisSession`). Stored here since the
+    /// converged db has no php-lsp `Workspace` input to carry it.
+    php_version: Mutex<mir_analyzer::PhpVersion>,
     /// Shared PSR-4 namespace-to-path map. Shared with `Backend` via `Arc`
     /// so updates from `initialized` (when composer.json is loaded) are
     /// visible here without any additional wiring. `ArcSwap` makes reads
@@ -81,19 +75,13 @@ impl Default for DocumentStore {
 
 impl DocumentStore {
     pub fn new() -> Self {
-        let host = AnalysisHost::new();
-        let workspace = Workspace::new(
-            host.db(),
-            Arc::<[(Arc<str>, FileText)]>::from(Vec::new()),
-            mir_analyzer::PhpVersion::LATEST,
-        );
         DocumentStore {
             caches: CacheRegistry::new(),
-            host: Mutex::new(host),
-            file_texts: DashMap::new(),
+            lsp_ws_files: DashMap::new(),
             deleted_uris: DashSet::new(),
             workspace_files_dirty: AtomicBool::new(true),
-            workspace,
+            lsp_workspace: Mutex::new(None),
+            php_version: Mutex::new(mir_analyzer::PhpVersion::LATEST),
             psr4: Arc::new(ArcSwap::from_pointee(Psr4Map::empty())),
             analysis_session: Mutex::new(None),
             session_cache_dir: OnceLock::new(),
@@ -119,11 +107,12 @@ impl DocumentStore {
         self.caches.evict_analysis_all();
     }
 
-    /// Get or build the `AnalysisSession` for the given PHP version. Rebuilds
-    /// when the version changes (e.g. user flipped config). The session owns
-    /// its own salsa db and AnalysisCache; lazy-loads vendor files via the
-    /// shared PSR-4 map.
-    pub fn analysis_session(
+    /// Get or build the `AnalysisSession` for the given PHP version, **without**
+    /// loading PHP stubs. Stub loading is heavy (parses every built-in stub
+    /// file) and is only needed for semantic analysis, not for parse / index /
+    /// symbol-map queries. The parse path uses this; semantic callers use
+    /// [`Self::analysis_session`], which loads stubs idempotently on top.
+    fn get_or_build_session(
         &self,
         php_version: mir_analyzer::PhpVersion,
     ) -> Arc<mir_analyzer::AnalysisSession> {
@@ -143,14 +132,27 @@ impl DocumentStore {
             builder = builder.with_cache_dir(dir);
         }
         let session = Arc::new(builder);
-        session.ensure_all_stubs();
         *guard = Some((php_version, Arc::clone(&session)));
+        session
+    }
+
+    /// The `AnalysisSession` for the given PHP version with PHP stubs loaded.
+    /// Rebuilds when the version changes (e.g. user flipped config). The
+    /// session owns the shared salsa db and AnalysisCache; lazy-loads vendor
+    /// files via the shared PSR-4 map. `ensure_all_stubs` is idempotent — cheap
+    /// after the first call on a given session.
+    pub fn analysis_session(
+        &self,
+        php_version: mir_analyzer::PhpVersion,
+    ) -> Arc<mir_analyzer::AnalysisSession> {
+        let session = self.get_or_build_session(php_version);
+        session.ensure_all_stubs();
         session
     }
 
     /// Current PHP version tracked by the workspace input.
     pub fn workspace_php_version(&self) -> mir_analyzer::PhpVersion {
-        self.with_host(|h| self.workspace.php_version(h.db()))
+        *self.php_version.lock().unwrap()
     }
 
     /// Return the `Arc<ArcSwap<Psr4Map>>` so callers can share it.
@@ -159,6 +161,43 @@ impl DocumentStore {
     /// to PSR-4 resolution during analysis without extra plumbing.
     pub fn psr4_arc(&self) -> Arc<ArcSwap<Psr4Map>> {
         Arc::clone(&self.psr4)
+    }
+
+    /// Durability for a file's salsa input: vendor files never change within a
+    /// session, so salsa can skip re-validating their queries on user edits.
+    fn input_durability(uri: &Url) -> salsa::Durability {
+        if uri.as_str().contains("/vendor/") {
+            salsa::Durability::HIGH
+        } else {
+            salsa::Durability::LOW
+        }
+    }
+
+    /// The `LspWsFile` handle for `uri`, if it is mirrored and not deleted.
+    fn lsp_ws_file(&self, uri: &Url) -> Option<LspWsFile> {
+        if self.deleted_uris.contains(uri) {
+            return None;
+        }
+        self.lsp_ws_files.get(uri).map(|e| *e)
+    }
+
+    /// Take a cheap snapshot of the shared mir db and run `f` on it, retrying
+    /// once on `salsa::Cancelled` (raised when a concurrent writer bumps the
+    /// revision). Mirrors [`Self::snapshot_query`] for the converged db.
+    fn snapshot_mir_query<R>(&self, f: impl Fn(&mir_analyzer::db::MirDbStorage) -> R) -> R {
+        use std::panic::AssertUnwindSafe;
+        let session = self.get_or_build_session(self.workspace_php_version());
+        // Each iteration's snapshot clone MUST drop before the next snapshot:
+        // a concurrent writer's salsa `set` holds the mir write lock and waits
+        // for outstanding db handles to drop, while the next `snapshot_db` needs
+        // the read lock — keeping the clone alive across the retry deadlocks.
+        loop {
+            let db = session.snapshot_db();
+            match salsa::Cancelled::catch(AssertUnwindSafe(|| f(&db))) {
+                Ok(r) => return r,
+                Err(_) => drop(db),
+            }
+        }
     }
 
     /// Mirror a file's current text into the salsa layer. Creates the
@@ -174,7 +213,7 @@ impl DocumentStore {
         if let Some(cached) = self.caches.text_cache.get(uri)
             && **cached == *text
             && !self.deleted_uris.contains(uri)
-            && self.file_texts.contains_key(uri)
+            && self.lsp_ws_files.contains_key(uri)
         {
             return;
         }
@@ -188,73 +227,49 @@ impl DocumentStore {
     /// ensure `text_cache` and `parsed_cache` hold the same Arc pointer —
     /// enabling `Arc::ptr_eq` validation in `get_parsed_cached`.
     pub fn mirror_text_arc(&self, uri: &Url, text_arc: Arc<str>) {
-        if let Some(ft) = self.file_texts.get(uri).map(|e| *e) {
+        let dur = Self::input_durability(uri);
+        let path: Arc<str> = Arc::from(uri.as_str());
+        let session = self.get_or_build_session(self.workspace_php_version());
+        if let Some(wf) = self.lsp_ws_files.get(uri).map(|e| *e) {
             self.deleted_uris.remove(uri);
-            // Slow path: re-check inside the mutex. Salsa's `set_text`
-            // unconditionally bumps the revision, so every spurious setter
-            // invalidates every downstream query.
-            let mut host = self.host.lock().unwrap();
-            let current: Arc<str> = ft.text(host.db());
-            if *current == *text_arc {
-                drop(host);
-                self.caches.text_cache.insert(uri.clone(), current);
+            // Fast path: byte-identical text already mirrored — skip the write
+            // lock and the revision bump entirely.
+            if let Some(cached) = self.caches.text_cache.get(uri)
+                && **cached == *text_arc
+            {
                 return;
             }
-            ft.set_text(host.db_mut()).to(text_arc.clone());
-            // Phase K2: any text change invalidates a previously-seeded
-            // cached index. Only bump the revision when a cached index is
-            // actually present — an unconditional set would cause two
-            // revision bumps per edit (one for text, one for cached_index),
-            // which needlessly cancels in-flight `file_index` queries on
-            // every keystroke.
-            if ft.cached_index(host.db()).is_some() {
-                ft.set_cached_index(host.db_mut()).to(None);
-            }
-            drop(host);
+            session.with_db_mut(|db| {
+                let sf = wf.source(db);
+                sf.set_text(db).with_durability(dur).to(text_arc.clone());
+                // Any text change invalidates a previously-seeded cached index.
+                // Only set when present to avoid a spurious second revision bump.
+                if wf.cached_index(db).is_some() {
+                    wf.set_cached_index(db).to(None);
+                }
+            });
             self.caches.text_cache.insert(uri.clone(), text_arc);
-            // Evict only this file's analysis. Declaration-level changes (which
-            // invalidate other files' cached analyses) are detected lazily in
-            // `cached_analysis` by comparing the new `FileIndex` against the
-            // stored fingerprint; if changed, `decl_version` is bumped and other
-            // files' cache entries (which carry the old version) become stale.
-            // Body-only edits leave `decl_version` unchanged so sibling files
-            // are served from cache without re-analysis.
+            // Evict only this file's analysis; cross-file invalidation is handled
+            // lazily in `cached_analysis` via the declaration fingerprint.
             self.caches.evict_analysis(uri);
         } else {
-            let is_vendor = uri.as_str().contains("/vendor/");
-            let ft = {
-                let mut host = self.host.lock().unwrap();
-                let ft = FileText::new(host.db(), text_arc.clone(), None);
-                if is_vendor {
-                    // Vendor files never change in a session — mark their text
-                    // as HIGH durability so salsa skips re-validating
-                    // parsed_doc/file_index for them on every user edit.
-                    ft.set_text(host.db_mut())
-                        .with_durability(salsa::Durability::HIGH)
-                        .to(Arc::clone(&text_arc));
-                }
-                ft
-            };
-            self.file_texts.insert(uri.clone(), ft);
+            let wf = session.with_db_mut(|db| {
+                let sf = db.upsert_source_file_with_durability(path, text_arc.clone(), dur);
+                LspWsFile::new(db, sf, None)
+            });
+            self.lsp_ws_files.insert(uri.clone(), wf);
             self.caches.text_cache.insert(uri.clone(), text_arc);
             self.workspace_files_dirty.store(true, Ordering::Release);
-            // A newly-ingested file may resolve previously-unresolved references
-            // in other files. Cross-file invalidation happens lazily: the first
-            // `cached_analysis` call for this file sees no fingerprint (old_fp =
-            // None), treats it as a declaration change, and bumps `decl_version`,
-            // making every other file's cache entry stale at that point.
-            // No eager clear needed — other files' entries are still valid until
-            // this file's declarations are first observed.
         }
     }
 
-    /// Return the `FileText` handle for a URL, if active (not deleted).
+    /// Return the `LspWsFile` handle for a URL, if active (not deleted).
     #[cfg(test)]
-    pub fn source_file(&self, uri: &Url) -> Option<FileText> {
+    pub fn source_file(&self, uri: &Url) -> Option<LspWsFile> {
         if self.deleted_uris.contains(uri) {
             return None;
         }
-        self.file_texts.get(uri).map(|e| *e)
+        self.lsp_ws_files.get(uri).map(|e| *e)
     }
 
     /// Phase K2: pre-seed a `FileIndex` loaded from the on-disk cache onto
@@ -270,48 +285,12 @@ impl DocumentStore {
     /// Returns `false` when `uri` was not mirrored (caller should mirror
     /// first); returns `true` on success.
     pub fn seed_cached_index(&self, uri: &Url, index: Arc<FileIndex>) -> bool {
-        let Some(ft) = self.file_texts.get(uri).map(|e| *e) else {
+        let Some(wf) = self.lsp_ws_file(uri) else {
             return false;
         };
-        let mut host = self.host.lock().unwrap();
-        ft.set_cached_index(host.db_mut()).to(Some(index));
+        let session = self.get_or_build_session(self.workspace_php_version());
+        session.with_db_mut(|db| wf.set_cached_index(db).to(Some(index)));
         true
-    }
-
-    /// Run `f` with a borrow of the `AnalysisHost`. Used by tests and by the
-    /// upcoming `*_salsa` accessors to query the salsa layer.
-    pub fn with_host<R>(&self, f: impl FnOnce(&AnalysisHost) -> R) -> R {
-        let host = self.host.lock().unwrap();
-        f(&host)
-    }
-
-    /// Phase E1: take a brief lock, clone the salsa database, release the
-    /// lock. Queries then run on the cloned `RootDatabase` without blocking
-    /// writers or other readers. Salsa's `Storage<Self>` is reference-counted
-    /// (`Arc<Zalsa>`), so the clone is cheap — it shares memoized data and
-    /// the cancellation flag with the host's db.
-    fn snapshot_db(&self) -> crate::db::analysis::RootDatabase {
-        let host = self.host.lock().unwrap();
-        host.db().clone()
-    }
-
-    /// Run a query on a fresh snapshot, catching `salsa::Cancelled` (raised
-    /// when a concurrent writer advances the revision). A single snapshot
-    /// attempt covers the common case; on cancellation we take the host mutex
-    /// so no further write can race us, then run against the fresh database
-    /// state. Writers hold the lock only long enough to bump input values, so
-    /// the lock-held path is brief in practice.
-    fn snapshot_query<R>(&self, f: impl Fn(&crate::db::analysis::RootDatabase) -> R + Clone) -> R {
-        use std::panic::AssertUnwindSafe;
-        let db = self.snapshot_db();
-        let f_clone = f.clone();
-        if let Ok(r) = salsa::Cancelled::catch(AssertUnwindSafe(move || f_clone(&db))) {
-            return r;
-        }
-        // Snapshot was cancelled by a concurrent write. Take the host mutex so
-        // no further writes can race us, then run against the fresh database.
-        let host = self.host.lock().unwrap();
-        f(host.db())
     }
 
     /// Evict the semantic-tokens cache for `uri`. Called by Backend when a
@@ -328,7 +307,7 @@ impl DocumentStore {
     /// `snapshot_query`.
     #[cfg(test)]
     pub fn source_files_len(&self) -> usize {
-        self.file_texts.len()
+        self.lsp_ws_files.len()
     }
 
     #[cfg(test)]
@@ -336,19 +315,12 @@ impl DocumentStore {
         &self,
         uri: &Url,
     ) -> Option<crate::index::file_index::FileIndex> {
-        if self.deleted_uris.contains(uri) {
-            return None;
-        }
-        if !self.file_texts.contains_key(uri) {
-            return None;
-        }
-        self.sync_workspace_files();
-        let uri_str: Arc<str> = Arc::from(uri.as_str());
-        let ws = self.workspace;
-        self.snapshot_query(move |db| {
-            let sf = find_source_file(db, ws, &uri_str)?;
-            Some(crate::db::index::file_index(db, sf).get().clone())
-        })
+        let wf = self.lsp_ws_file(uri)?;
+        Some(
+            self.snapshot_mir_query(move |db| {
+                (*crate::db::mir_queries::file_index(db, wf).0).clone()
+            }),
+        )
     }
 
     /// Register a file in the salsa layer without marking it open.
@@ -409,19 +381,10 @@ impl DocumentStore {
 
     /// Salsa-backed compact symbol index.
     pub fn get_index_salsa(&self, uri: &Url) -> Option<Arc<FileIndex>> {
-        if self.deleted_uris.contains(uri) {
-            return None;
-        }
-        if !self.file_texts.contains_key(uri) {
-            return None;
-        }
-        self.sync_workspace_files();
-        let uri_str: Arc<str> = Arc::from(uri.as_str());
-        let ws = self.workspace;
-        self.snapshot_query(move |db| {
-            let sf = find_source_file(db, ws, &uri_str)?;
-            Some(crate::db::index::file_index(db, sf).0.clone())
-        })
+        let wf = self.lsp_ws_file(uri)?;
+        Some(
+            self.snapshot_mir_query(move |db| crate::db::mir_queries::file_index(db, wf).0.clone()),
+        )
     }
 
     /// Salsa-backed pre-computed symbol map (name → Vec<SymbolEntry>).
@@ -430,19 +393,12 @@ impl DocumentStore {
         &self,
         uri: &Url,
     ) -> Option<Arc<crate::types::symbol_map::SymbolMap>> {
-        if self.deleted_uris.contains(uri) {
-            return None;
-        }
-        if !self.file_texts.contains_key(uri) {
-            return None;
-        }
-        self.sync_workspace_files();
-        let uri_str: Arc<str> = Arc::from(uri.as_str());
-        let ws = self.workspace;
-        self.snapshot_query(move |db| {
-            let sf = find_source_file(db, ws, &uri_str)?;
-            Some(crate::db::symbol_map::symbol_map(db, sf).0.clone())
-        })
+        // Symbol map runs on the shared mir db, sharing its memoized `parsed_doc`.
+        let wf = self.lsp_ws_file(uri)?;
+        Some(self.snapshot_mir_query(move |db| {
+            let sf = wf.source(db);
+            crate::db::mir_queries::symbol_map(db, sf).0.clone()
+        }))
     }
 
     /// Pre-computed symbol maps for every entry in `open_urls` except `uri`.
@@ -472,21 +428,14 @@ impl DocumentStore {
             return Some(entry.1.clone());
         }
 
-        if self.deleted_uris.contains(uri) {
-            return None;
-        }
-        if !self.file_texts.contains_key(uri) {
-            return None;
-        }
-        self.sync_workspace_files();
-        let uri_str: Arc<str> = Arc::from(uri.as_str());
-        let ws = self.workspace;
-        let (text, doc) = self.snapshot_query(move |db| {
-            let sf = find_source_file(db, ws, &uri_str)?;
-            let text = sf.text_input(db).text(db);
-            let doc = crate::db::parse::parsed_doc(db, sf).0.clone();
-            Some((text, doc))
-        })?;
+        // Parse runs on the shared mir db.
+        let wf = self.lsp_ws_file(uri)?;
+        let (text, doc) = self.snapshot_mir_query(move |db| {
+            let sf = wf.source(db);
+            let text = sf.text(db);
+            let doc = crate::db::mir_queries::parsed_doc(db, sf).0.clone();
+            (text, doc)
+        });
         self.caches.insert_parsed(uri.clone(), text, doc.clone());
         Some(doc)
     }
@@ -502,27 +451,24 @@ impl DocumentStore {
             return;
         }
 
-        // Collect active (non-deleted) files without holding the host lock.
-        let mut files: Vec<(Arc<str>, FileText)> = self
-            .file_texts
+        // Collect active (non-deleted) files, sorted by URI for stable ordering.
+        let mut entries: Vec<(Arc<str>, LspWsFile)> = self
+            .lsp_ws_files
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
             .map(|e| (Arc::<str>::from(e.key().as_str()), *e.value()))
             .collect();
-        // Sort by URI string for stable ordering.
-        files.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        entries.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        let files: Arc<[LspWsFile]> = entries.iter().map(|(_, wf)| *wf).collect();
 
-        let mut host = self.host.lock().unwrap();
-        let current = self.workspace.files(host.db());
-        if current.len() == files.len()
-            && current
-                .iter()
-                .zip(files.iter())
-                .all(|(a, b)| a.0 == b.0 && a.1 == b.1)
-        {
-            return;
-        }
-        self.workspace.set_files(host.db_mut()).to(Arc::from(files));
+        let session = self.get_or_build_session(self.workspace_php_version());
+        let mut guard = self.lsp_workspace.lock().unwrap();
+        session.with_db_mut(|db| match *guard {
+            Some(ws) => {
+                ws.set_files(db).to(files);
+            }
+            None => *guard = Some(LspWorkspace::new(db, files)),
+        });
     }
 
     /// Mark the workspace file set as dirty so the next `sync_workspace_files`
@@ -537,15 +483,21 @@ impl DocumentStore {
     /// Skips the setter when the version hasn't changed to avoid spurious
     /// query invalidation.
     pub fn set_php_version(&self, version: mir_analyzer::PhpVersion) {
-        let mut host = self.host.lock().unwrap();
-        if self.workspace.php_version(host.db()) == version {
-            return;
+        {
+            let mut guard = self.php_version.lock().unwrap();
+            if *guard == version {
+                return;
+            }
+            *guard = version;
         }
-        self.workspace.set_php_version(host.db_mut()).to(version);
-        // The analysis_cache validates against source content only, so stale
-        // FileAnalysis results from the old PHP version would survive unchanged
-        // files. Clear it so the next request re-runs with the new version.
-        drop(host);
+        // Changing the version selects a different `AnalysisSession` (and thus a
+        // different db). Drop the inputs created on the old session's db; the
+        // workspace scan re-mirrors files onto the new session. In practice the
+        // version is set once at init, before any file is mirrored.
+        self.lsp_ws_files.clear();
+        *self.lsp_workspace.lock().unwrap() = None;
+        self.workspace_files_dirty.store(true, Ordering::Release);
+        // Stale FileAnalysis from the old version would survive unchanged files.
         self.caches.evict_analysis_all();
     }
 
@@ -588,12 +540,16 @@ impl DocumentStore {
     /// changes.
     pub fn get_workspace_index_salsa(&self) -> Arc<crate::db::workspace_index::WorkspaceIndexData> {
         self.sync_workspace_files();
-        let ws = self.workspace;
-        self.snapshot_query(move |db| {
-            crate::db::workspace_index::workspace_index(db, ws)
-                .0
-                .clone()
-        })
+        let ws = *self.lsp_workspace.lock().unwrap();
+        let Some(ws) = ws else {
+            return Arc::new(crate::db::workspace_index::WorkspaceIndexData {
+                files: Vec::new(),
+                classes_by_name: std::collections::HashMap::new(),
+                subtypes_of: std::collections::HashMap::new(),
+                decls_by_name: std::collections::HashMap::new(),
+            });
+        };
+        self.snapshot_mir_query(move |db| crate::db::mir_queries::workspace_index(db, ws).0.clone())
     }
 
     /// No-op after mir 0.22 migration. The session manages its own warm-up
@@ -619,7 +575,7 @@ impl DocumentStore {
         let php_version = self.workspace_php_version();
         let session = self.analysis_session(php_version);
         let urls: Vec<Url> = self
-            .file_texts
+            .lsp_ws_files
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
             .map(|e| e.key().clone())
@@ -741,7 +697,7 @@ impl DocumentStore {
             return Some(Arc::clone(&entry.2));
         }
 
-        let php_version = self.with_host(|h| self.workspace.php_version(h.db()));
+        let php_version = self.workspace_php_version();
         let session = self.analysis_session(php_version);
         let file: Arc<str> = Arc::from(uri.as_str());
         {
@@ -889,7 +845,7 @@ impl DocumentStore {
     /// call_hierarchy, code_lens.
     pub fn all_docs_for_scan(&self) -> Vec<(Url, Arc<ParsedDoc>)> {
         let urls: Vec<Url> = self
-            .file_texts
+            .lsp_ws_files
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
             .map(|e| e.key().clone())
@@ -912,7 +868,7 @@ impl DocumentStore {
     /// (safe superset — never produces false negatives).
     pub fn candidate_docs_for(&self, word: &str) -> Vec<(Url, Arc<ParsedDoc>)> {
         let candidate_urls: Vec<Url> = self
-            .file_texts
+            .lsp_ws_files
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
             .filter(|e| {
@@ -935,7 +891,7 @@ impl DocumentStore {
     /// Used to scope [`ensure_files_ingested`] for method references: only
     /// files that mention the method name by text need mir Pass 2 analysis.
     pub fn candidate_urls_mentioning(&self, word: &str) -> Vec<Url> {
-        self.file_texts
+        self.lsp_ws_files
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
             .filter(|e| {

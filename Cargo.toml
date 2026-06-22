@@ -40,10 +40,10 @@ dhat = { version = "0.3", optional = true }
 mimalloc = { version = "0.1", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-mir-analyzer = { version = "0.46.0", git = "https://github.com/jorgsowa/mir" }
-mir-issues = { version = "0.46.0", git = "https://github.com/jorgsowa/mir" }
-mir-codebase = { version = "0.46.0", git = "https://github.com/jorgsowa/mir" }
-mir-types = { version = "0.46.0", git = "https://github.com/jorgsowa/mir" }
+mir-analyzer = { version = "0.47.0", git = "https://github.com/jorgsowa/mir" }
+mir-issues = { version = "0.47.0", git = "https://github.com/jorgsowa/mir" }
+mir-codebase = { version = "0.47.0", git = "https://github.com/jorgsowa/mir" }
+mir-types = { version = "0.47.0", git = "https://github.com/jorgsowa/mir" }
 php-rs-parser = "0.18"
 php-ast = "0.18"
 bumpalo = { version = "3", features = ["collections"] }
@@ -77,6 +77,12 @@ harness = false
 [[bench]]
 name = "edit_latency"
 harness = false
+
+# Faster local iteration: line-tables-only debuginfo keeps backtraces (file +
+# line) while cutting the debuginfo codegen + link time that dominates the
+# php-lsp test build.
+[profile.dev]
+debug = "line-tables-only"
 
 # Optimize CPU-heavy dependencies in debug/test builds so the test suite
 # stays fast without requiring a full release build.  These crates do the

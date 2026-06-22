@@ -29,11 +29,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use salsa::Database;
 use tower_lsp::lsp_types::Url;
 
-use crate::db::index::file_index;
-use crate::db::input::Workspace;
 use crate::index::file_index::FileIndex;
 
 /// Back-pointer into `WorkspaceIndexData.files`: `(file_idx, class_idx)` where
@@ -86,13 +83,13 @@ pub struct WorkspaceIndexData {
     pub decls_by_name: HashMap<String, Vec<DeclRef>>,
 }
 
-type BuildMapsResult = (
+pub(crate) type BuildMapsResult = (
     HashMap<String, Vec<ClassRef>>,
     HashMap<Arc<str>, Vec<ClassRef>>,
     HashMap<String, Vec<DeclRef>>,
 );
 
-fn build_maps(files: &[(Url, Arc<FileIndex>)]) -> BuildMapsResult {
+pub(crate) fn build_maps(files: &[(Url, Arc<FileIndex>)]) -> BuildMapsResult {
     let mut classes_by_name: HashMap<String, Vec<ClassRef>> = HashMap::new();
     let mut subtypes_of: HashMap<Arc<str>, Vec<ClassRef>> = HashMap::new();
     let mut decls_by_name: HashMap<String, Vec<DeclRef>> = HashMap::new();
@@ -270,132 +267,3 @@ impl WorkspaceIndexArc {
 // SAFETY: same contract as other `*Arc` newtypes — ptr_eq is sufficient because
 // every rebuild allocates a fresh `Arc`.
 crate::impl_arc_update!(WorkspaceIndexArc);
-
-/// Build the aggregate workspace index.
-///
-/// Depends on `Workspace::files` and every per-file `file_index` query;
-/// editing any file invalidates this via normal salsa dependency tracking.
-/// The `Arc<FileIndex>` values are the same ones served by `file_index` —
-/// callers that already held one are guaranteed pointer-equality here.
-#[salsa::tracked(no_eq)]
-pub fn workspace_index(db: &dyn Database, ws: Workspace) -> WorkspaceIndexArc {
-    let files_input = crate::db::input::workspace_files(db, ws);
-
-    let mut files: Vec<(Url, Arc<FileIndex>)> = Vec::with_capacity(files_input.len());
-    for sf in files_input.iter() {
-        let uri_arc = sf.uri(db);
-        // Fall back to inserting any well-formed entry — salsa inputs carry
-        // whatever string the caller mirrored; if parsing ever fails (test
-        // harness with a non-URL string) we simply skip that file for
-        // cross-workspace queries rather than panic.
-        let Ok(url) = Url::parse(&uri_arc) else {
-            continue;
-        };
-        let idx = file_index(db, *sf).0.clone();
-        files.push((url, idx));
-    }
-
-    let (classes_by_name, subtypes_of, decls_by_name) = build_maps(&files);
-
-    WorkspaceIndexArc(Arc::new(WorkspaceIndexData {
-        files,
-        classes_by_name,
-        subtypes_of,
-        decls_by_name,
-    }))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::*;
-    use crate::db::analysis::AnalysisHost;
-    use crate::db::input::FileText;
-    use salsa::Setter;
-
-    fn new_file(host: &AnalysisHost, uri: &str, src: &str) -> (Arc<str>, FileText) {
-        let ft = FileText::new(host.db(), Arc::<str>::from(src), None);
-        (Arc::<str>::from(uri), ft)
-    }
-
-    #[test]
-    fn workspace_index_builds_name_and_subtype_maps() {
-        let host = AnalysisHost::new();
-        let f1 = new_file(&host, "file:///a.php", "<?php\nclass Animal {}");
-        let f2 = new_file(
-            &host,
-            "file:///b.php",
-            "<?php\nclass Dog extends Animal {}\nclass Cat extends Animal {}",
-        );
-        let ws = Workspace::new(
-            host.db(),
-            Arc::from([f1, f2]),
-            mir_analyzer::PhpVersion::LATEST,
-        );
-
-        let wi = workspace_index(host.db(), ws);
-        let data = wi.get();
-
-        assert!(data.classes_by_name.contains_key("Animal"));
-        assert!(data.classes_by_name.contains_key("Dog"));
-
-        let subs = data
-            .subtypes_of
-            .get("Animal")
-            .expect("Animal must have subtype entries");
-        assert_eq!(subs.len(), 2, "Dog + Cat extend Animal");
-
-        let names: Vec<_> = subs
-            .iter()
-            .filter_map(|r| data.at(*r).map(|(_, c)| c.name.clone()))
-            .collect();
-        assert!(names.iter().any(|n| n.as_ref() == "Dog"));
-        assert!(names.iter().any(|n| n.as_ref() == "Cat"));
-    }
-
-    #[test]
-    fn workspace_index_memoizes_and_invalidates() {
-        let mut host = AnalysisHost::new();
-        let (uri_arc, ft1) = new_file(&host, "file:///a.php", "<?php\nclass A {}");
-        let ws = Workspace::new(
-            host.db(),
-            Arc::from([(uri_arc, ft1)]),
-            mir_analyzer::PhpVersion::LATEST,
-        );
-
-        let a = workspace_index(host.db(), ws);
-        let b = workspace_index(host.db(), ws);
-        assert!(
-            Arc::ptr_eq(&a.0, &b.0),
-            "unchanged inputs must return the memoized Arc"
-        );
-
-        ft1.set_text(host.db_mut())
-            .to(Arc::<str>::from("<?php\nclass B {}"));
-        let c = workspace_index(host.db(), ws);
-        assert!(!Arc::ptr_eq(&a.0, &c.0), "an edit must produce a fresh Arc");
-        assert!(c.get().classes_by_name.contains_key("B"));
-        assert!(!c.get().classes_by_name.contains_key("A"));
-    }
-
-    #[test]
-    fn workspace_index_collects_interface_and_trait_subtypes() {
-        let host = AnalysisHost::new();
-        let src = concat!(
-            "<?php\n",
-            "interface Greeter {}\n",
-            "trait Shouting {}\n",
-            "class Hi implements Greeter { use Shouting; }\n",
-        );
-        let f = new_file(&host, "file:///m.php", src);
-        let ws = Workspace::new(host.db(), Arc::from([f]), mir_analyzer::PhpVersion::LATEST);
-        let wi = workspace_index(host.db(), ws);
-        let data = wi.get();
-
-        let greeter_subs = data.subtypes_of.get("Greeter").expect("Greeter subs");
-        assert_eq!(greeter_subs.len(), 1);
-        let shouting_subs = data.subtypes_of.get("Shouting").expect("Shouting subs");
-        assert_eq!(shouting_subs.len(), 1);
-    }
-}
