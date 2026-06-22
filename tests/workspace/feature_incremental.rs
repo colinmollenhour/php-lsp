@@ -440,3 +440,36 @@ async fn cross_file_republish_preserves_dependent_parse_errors() {
         2:7-2:8 [1] ParseError: Parse error: expected expression"#]]
     .assert_eq(&render_diagnostics_notification(&notif));
 }
+
+// ── snapshot_query retry reduction ───────────────────────────────────────────
+
+#[tokio::test]
+async fn rapid_concurrent_edits_and_queries_no_panic() {
+    // Interleave rapid didChange updates with hover and references requests.
+    // This exercises the snapshot_query single-retry-then-lock path — if it
+    // deadlocks or panics, the test will hang or fail.
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "rapid.php",
+            "<?php\nfunction target(): int { return 0; }\ntarget();\n",
+        )
+        .await;
+
+    for v in 2..=12 {
+        let src = format!("<?php\nfunction target(): int {{ return {v}; }}\ntarget();\n");
+        server.change("rapid.php", v, &src).await;
+
+        let hover = server.hover("rapid.php", 1, 10).await;
+        assert!(
+            hover["error"].is_null(),
+            "hover must not error during rapid edits (iteration {v}): {hover:?}"
+        );
+
+        let refs = server.references("rapid.php", 1, 10, false).await;
+        assert!(
+            refs["error"].is_null(),
+            "references must not error during rapid edits (iteration {v}): {refs:?}"
+        );
+    }
+}

@@ -296,22 +296,20 @@ impl DocumentStore {
     }
 
     /// Run a query on a fresh snapshot, catching `salsa::Cancelled` (raised
-    /// when a concurrent writer advances the revision) and retrying with a
-    /// new snapshot. Writers hold the mutex only long enough to bump input
-    /// values, so a handful of retries is more than enough in practice; we
-    /// cap at 8 to avoid pathological livelock under sustained write pressure.
+    /// when a concurrent writer advances the revision). A single snapshot
+    /// attempt covers the common case; on cancellation we take the host mutex
+    /// so no further write can race us, then run against the fresh database
+    /// state. Writers hold the lock only long enough to bump input values, so
+    /// the lock-held path is brief in practice.
     fn snapshot_query<R>(&self, f: impl Fn(&crate::db::analysis::RootDatabase) -> R + Clone) -> R {
         use std::panic::AssertUnwindSafe;
-        for _ in 0..8 {
-            let db = self.snapshot_db();
-            let f = f.clone();
-            match salsa::Cancelled::catch(AssertUnwindSafe(move || f(&db))) {
-                Ok(r) => return r,
-                Err(_) => continue,
-            }
+        let db = self.snapshot_db();
+        let f_clone = f.clone();
+        if let Ok(r) = salsa::Cancelled::catch(AssertUnwindSafe(move || f_clone(&db))) {
+            return r;
         }
-        // Last-resort attempt: take the mutex for the whole query so no
-        // writer can race us. Much slower, but guaranteed to make progress.
+        // Snapshot was cancelled by a concurrent write. Take the host mutex so
+        // no further writes can race us, then run against the fresh database.
         let host = self.host.lock().unwrap();
         f(host.db())
     }
@@ -1489,5 +1487,56 @@ mod tests {
             analysis_b_stale.is_none(),
             "B's analysis should be stale after A's declaration changed"
         );
+    }
+
+    /// snapshot_query must complete without panic when a concurrent writer
+    /// races the snapshot. The single-retry-then-lock logic should handle this
+    /// correctly: the lock-held fallback guarantees progress.
+    #[test]
+    fn snapshot_query_survives_concurrent_writes() {
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let store = Arc::new(DocumentStore::new());
+        let u = uri("/sq_test.php");
+        open(
+            &store,
+            u.clone(),
+            "<?php\nfunction f(): int { return 1; }".to_string(),
+        );
+
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let mut handles = Vec::new();
+
+        // Writer: keep bumping the file text to trigger salsa::Cancelled.
+        {
+            let store = Arc::clone(&store);
+            let u = u.clone();
+            handles.push(thread::spawn(move || {
+                let mut rev = 0u32;
+                while Instant::now() < deadline {
+                    store.mirror_text(&u, &format!("<?php\nfunction f(): int {{ return {rev}; }}"));
+                    rev += 1;
+                }
+            }));
+        }
+
+        // Reader: hammer snapshot_query via get_doc_salsa.
+        for _ in 0..4 {
+            let store = Arc::clone(&store);
+            let u = u.clone();
+            handles.push(thread::spawn(move || {
+                while Instant::now() < deadline {
+                    let _ = store.get_doc_salsa(&u);
+                    let _ = store.get_index_salsa(&u);
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join()
+                .expect("no panic in snapshot_query under concurrent writes");
+        }
     }
 }
