@@ -670,8 +670,15 @@ impl DocumentStore {
         // per-file body analysis.
         let class_issues = {
             let _s = tracing::debug_span!("session.class_issues_for").entered();
-            self.analysis_session(self.workspace_php_version())
-                .class_issues(std::slice::from_ref(&file))
+            // Retry: concurrent db writes cancel snapshot queries via resume_unwind.
+            loop {
+                let session = self.analysis_session(self.workspace_php_version());
+                if let Ok(issues) = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                    session.class_issues(std::slice::from_ref(&file))
+                })) {
+                    break issues;
+                }
+            }
         };
         let combined: Vec<mir_issues::Issue> = analysis
             .issues
@@ -798,8 +805,15 @@ impl DocumentStore {
         };
         let analysis = {
             let _s = tracing::debug_span!("FileAnalyzer::analyze").entered();
-            let analyzer = mir_analyzer::FileAnalyzer::new(&session);
-            Arc::new(analyzer.analyze(file.clone(), doc.source(), &owned_program, &source_map))
+            // Retry: concurrent db writes cancel snapshot queries via resume_unwind.
+            loop {
+                let analyzer = mir_analyzer::FileAnalyzer::new(&session);
+                if let Ok(a) = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                    analyzer.analyze(file.clone(), doc.source(), &owned_program, &source_map)
+                })) {
+                    break Arc::new(a);
+                }
+            }
         };
         // Compare the new FileIndex against the stored fingerprint. If
         // declarations changed (or this is the first analysis), bump
