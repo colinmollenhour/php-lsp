@@ -309,16 +309,21 @@ impl Backend {
                 constant_owner,
             );
 
-            let candidate_docs = self.docs.candidate_docs_for(&word);
+            let mut candidate_docs = self.docs.candidate_docs_for(&word);
 
-            if matches!(kind, Some(SymbolKind::Method)) {
-                let candidate_urls = self.docs.candidate_urls_mentioning(&word);
-                let docs = Arc::clone(&self.docs);
-                let _ = tokio::task::spawn_blocking(move || {
-                    docs.ensure_files_ingested(&candidate_urls)
-                })
-                .await;
+            // Visibility scoping: a private/protected method can only be
+            // referenced from its declaring class file (+ subtype files for
+            // protected), so drop every other candidate before analysis. Public
+            // methods and unresolved owners keep the full workspace scope.
+            if matches!(kind, Some(SymbolKind::Method))
+                && let Some(scope) = target_fqn
+                    .as_deref()
+                    .and_then(|fqn| self.docs.method_reference_scope(fqn, &word))
+            {
+                let scope: std::collections::HashSet<Url> = scope.into_iter().collect();
+                candidate_docs.retain(|(u, _)| scope.contains(u));
             }
+
             let owner_short: Option<String> = if matches!(kind, Some(SymbolKind::Method)) {
                 target_fqn
                     .as_deref()

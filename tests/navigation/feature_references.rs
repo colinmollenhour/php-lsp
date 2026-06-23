@@ -16,6 +16,9 @@ mod cross_file;
 #[path = "references/oop.rs"]
 mod oop;
 
+#[path = "references/visibility.rs"]
+mod visibility;
+
 #[path = "references/constructors.rs"]
 mod constructors;
 

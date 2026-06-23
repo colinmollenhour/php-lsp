@@ -795,9 +795,9 @@ pub struct ReferenceQuery<'a> {
 
 impl<'a> ReferenceQuery<'a> {
     /// Collect reference locations. `candidate_docs` should already be filtered
-    /// to files that mention `self.word` (from `DocumentStore::candidate_docs_for`).
-    /// For Method queries, callers must call `DocumentStore::ensure_files_ingested`
-    /// before this method to populate the mir session.
+    /// to files that mention `self.word` (from `DocumentStore::candidate_docs_for`);
+    /// mir reference lookups are scoped to and analyzed from that same set via
+    /// the memoized `analyze_file` query — no pre-ingest required.
     ///
     /// `declaration_location` is the cursor span; it is appended to Method-path
     /// results when `include_declaration` is `true`.
@@ -808,12 +808,20 @@ impl<'a> ReferenceQuery<'a> {
         include_declaration: bool,
         declaration_location: Option<Location>,
     ) -> Vec<Location> {
+        // Scope mir reference lookups to the text-pre-filtered candidate files
+        // (same set the AST walker uses). analyze_file runs only on these,
+        // memoized — no workspace-wide ingest on the read path.
+        let candidate_files: Vec<Arc<str>> = candidate_docs
+            .iter()
+            .map(|(u, _)| Arc::from(u.as_str()))
+            .collect();
+
         // --- Method path: prefer mir's type-aware session index -----------
         if matches!(self.kind, Some(SymbolKind::Method))
             && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
         {
             let locs: Vec<Location> = docs
-                .session_references_to(&sym)
+                .session_references_to(&sym, &candidate_files)
                 .into_iter()
                 .filter_map(|tuple| {
                     let loc = session_tuple_to_location(tuple)?;
@@ -863,7 +871,7 @@ impl<'a> ReferenceQuery<'a> {
             Some(SymbolKind::Method) | Some(SymbolKind::Property)
         ) && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
         {
-            let extra = docs.session_references_to(&sym);
+            let extra = docs.session_references_to(&sym, &candidate_files);
             if !extra.is_empty() {
                 let mut seen: HashSet<(String, u32, u32, u32)> =
                     locations.iter().map(ref_location_key).collect();

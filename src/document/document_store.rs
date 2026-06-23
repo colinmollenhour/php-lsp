@@ -501,23 +501,22 @@ impl DocumentStore {
         self.caches.evict_analysis_all();
     }
 
-    /// Session-backed workspace reference lookup. Returns `(file, line, col)`
-    /// locations for every occurrence of `symbol` in the files that the
-    /// `AnalysisSession` has ingested so far. The session's reference index
-    /// is built incrementally during `ingest_file`, so refs for files the
-    /// session hasn't seen yet (background-indexed but never opened) won't
-    /// appear here — those are covered by the AST-walker fallback in the
-    /// references handler.
+    /// Session-backed reference lookup scoped to `files`. Returns `(file, line,
+    /// col)` locations for every occurrence of `symbol` originating in those
+    /// files, computed from the memoized `analyze_file` query — no ingest, no
+    /// shared-index mutation, so repeated lookups don't degrade across a
+    /// session. `files` should be the text-pre-filtered candidate set.
     ///
     /// Returns LSP-style 0-based line/column.
     pub fn session_references_to(
         &self,
         symbol: &mir_analyzer::Name,
+        files: &[Arc<str>],
     ) -> Vec<(Arc<str>, u32, u32, u32)> {
         let php_version = self.workspace_php_version();
         let session = self.analysis_session(php_version);
         session
-            .references_to(symbol)
+            .references_to_in_files(symbol, files)
             .into_iter()
             .map(|(file, range)| {
                 // mir uses 1-based lines; 0-based columns (since mir 0.42.0).
@@ -527,6 +526,57 @@ impl DocumentStore {
                 (file, line, col_start, col_end)
             })
             .collect()
+    }
+
+    /// The complete set of files a `private` method's references can occur in,
+    /// or `None` when the search must stay workspace-wide.
+    ///
+    /// `owner_fqn` is the enclosing class at the cursor; narrowing applies only
+    /// when that class *directly declares* `method` (so its `MethodDef`
+    /// visibility is authoritative — inherited/call-site lookups fall through to
+    /// `None`). A reference to `Class::method` is recorded only where
+    /// `analyze_file` resolves an expression to that key, and `analyze_file` is
+    /// per-source-file, so a `private` member — resolvable only inside the
+    /// declaring class body, which lives in one file — is fully scoped to the
+    /// declaring file. This holds at any indexing stage, unlike `protected`
+    /// (whose complete scope needs the transitive subtype set, known only once
+    /// indexing finishes) which keeps the full, already-flat scope.
+    ///
+    /// Classes that compose traits or mixins are excluded — those inline
+    /// external resolution context, so a reference could surface in another file.
+    pub fn method_reference_scope(&self, owner_fqn: &str, method: &str) -> Option<Vec<Url>> {
+        use crate::index::file_index::{ClassKind, Visibility};
+
+        let ws = self.get_workspace_index_salsa();
+        let owner_fqn = owner_fqn.trim_start_matches('\\');
+        let owner_short = crate::text::fqn_short_name(owner_fqn);
+
+        let (decl_uri, decl_class) = ws
+            .classes_by_name
+            .get(owner_short)?
+            .iter()
+            .filter_map(|&r| ws.at(r))
+            .find(|(_, cls)| cls.fqn.trim_start_matches('\\') == owner_fqn)?;
+
+        // Trait/interface methods, and methods on classes that compose traits or
+        // mixins, can be referenced from other files — keep the full scope.
+        if !matches!(decl_class.kind, ClassKind::Class | ClassKind::Enum)
+            || !decl_class.traits.is_empty()
+            || !decl_class.mixins.is_empty()
+        {
+            return None;
+        }
+
+        let vis = decl_class
+            .methods
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case(method))?
+            .visibility;
+
+        match vis {
+            Visibility::Private => Some(vec![decl_uri.clone()]),
+            Visibility::Protected | Visibility::Public => None,
+        }
     }
 
     /// Phase J: salsa-memoized aggregate workspace index.
@@ -884,61 +934,6 @@ impl DocumentStore {
             .into_iter()
             .filter_map(|u| self.get_doc_salsa(&u).map(|d| (u, d)))
             .collect()
-    }
-
-    /// URLs of files whose raw source text contains `word`. No parsing.
-    ///
-    /// Used to scope [`ensure_files_ingested`] for method references: only
-    /// files that mention the method name by text need mir Pass 2 analysis.
-    pub fn candidate_urls_mentioning(&self, word: &str) -> Vec<Url> {
-        self.lsp_ws_files
-            .iter()
-            .filter(|e| !self.deleted_uris.contains(e.key()))
-            .filter(|e| {
-                self.caches
-                    .text_cache
-                    .get(e.key())
-                    .map(|src| src.contains(word))
-                    .unwrap_or(true)
-            })
-            .map(|e| e.key().clone())
-            .collect()
-    }
-
-    /// Run Pass 1 + Pass 2 analysis on the given files only.
-    ///
-    /// Scoped alternative to [`ensure_all_files_ingested`] used by
-    /// `textDocument/references` for method symbols: only files that textually
-    /// mention the method name need to be analyzed, cutting the Pass-2 cost
-    /// from O(workspace) to O(candidates).
-    ///
-    /// Uses `BatchFileAnalyzer` so Pass 2 runs in parallel across rayon threads,
-    /// cutting wall time from O(N × per-file) to O(N/cores × per-file).
-    pub fn ensure_files_ingested(&self, urls: &[Url]) {
-        let php_version = self.workspace_php_version();
-        let session = self.analysis_session(php_version);
-
-        // Pass 1: ingest all files (sequential — session serialises writes internally).
-        let parsed_files: Vec<mir_analyzer::ParsedFile> = urls
-            .iter()
-            .filter_map(|uri| {
-                let doc = self.get_doc_salsa(uri)?;
-                let file: Arc<str> = Arc::from(uri.as_str());
-                session.ingest_file(file.clone(), doc.source_arc());
-                let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
-                let owned_program = php_ast::owned::to_owned_program(doc.program());
-                Some(mir_analyzer::ParsedFile::new(
-                    file,
-                    doc.source_arc(),
-                    owned_program,
-                    source_map,
-                ))
-            })
-            .collect();
-
-        // Pass 2: analyze in parallel via rayon — each worker gets its own db clone.
-        let batch = mir_analyzer::BatchFileAnalyzer::new(&session);
-        batch.analyze_batch(parsed_files);
     }
 }
 
