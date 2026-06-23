@@ -1,28 +1,21 @@
-//! Find-references session-age degradation: old vs new read path.
+//! Find-references read-path performance guard.
 //!
-//! The OLD `textDocument/references` read path ran `ensure_files_ingested` on
-//! every request — for each candidate file: `AnalysisSession::ingest_file`
-//! (definition churn + `update_reverse_deps_for` + `evict_with_dependents` over
-//! the dependency graph) + a `to_owned_program` clone + a parallel
-//! `analyze_batch`. The graph those mutations walk grows as the workspace warms,
-//! so the *same* request slows down the longer a session runs.
+//! The references read path is a memoized `analyze_file` query over the
+//! candidate set — no ingest, no shared-index mutation. This bench pins two
+//! properties on the Laravel fixture:
 //!
-//! The NEW path (`AnalysisSession::references_to_in_files`) reads the memoized
-//! `analyze_file` query over the same candidate set — no ingest, no reverse-dep
-//! churn, no index mutation. Warm files are memo hits; an edit re-analyzes only
-//! the touched file.
+//! - per-request time stays FLAT as the background-warmed file count grows
+//!   (re-introducing per-request mutation would make it climb again); and
+//! - visibility scoping (a private method's references live only in its
+//!   declaring file) collapses the candidate set from every text-match to one
+//!   file.
 //!
-//! This bench holds the candidate set FIXED and varies the background-warmed
-//! file count, measuring both paths per level. OLD should climb with warm size;
-//! NEW should stay flat. Auto-skips when the Laravel fixture is absent.
+//! Auto-skips when the Laravel fixture is absent.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mir_analyzer::{AnalysisSession, BatchFileAnalyzer, Name, ParsedFile, PhpVersion};
-use php_ast::owned::to_owned_program;
-use php_lsp::ast::ParsedDoc;
-use php_rs_parser::source_map::SourceMap;
+use mir_analyzer::{AnalysisSession, Name, PhpVersion};
 use tower_lsp::lsp_types::Url;
 
 const METHOD: &str = "save";
@@ -57,37 +50,10 @@ fn laravel_sources() -> Option<Vec<SourceFile>> {
     Some(files)
 }
 
-fn edited(text: &str, tag: usize) -> Arc<str> {
-    Arc::from(format!("{text}\n// bench-edit-{tag}\n").as_str())
-}
-
-/// OLD path: one `ensure_files_ingested`-equivalent pass over the candidates,
-/// with `candidates[0]` re-parsed from edited source so the re-ingest does real
-/// work (mirrors a keystroke landing on an open file).
-fn old_path(session: &AnalysisSession, candidates: &[SourceFile], tag: usize) {
-    let mut parsed_files: Vec<ParsedFile> = Vec::with_capacity(candidates.len());
-    for (i, cand) in candidates.iter().enumerate() {
-        let src = if i == 0 {
-            edited(&cand.text, tag)
-        } else {
-            cand.text.clone()
-        };
-        let doc = ParsedDoc::parse(src.clone());
-        session.ingest_file(cand.file.clone(), src.clone());
-        let source_map = SourceMap::new(doc.source());
-        let owned = to_owned_program(doc.program());
-        parsed_files.push(ParsedFile::new(cand.file.clone(), src, owned, source_map));
-    }
-    let batch = BatchFileAnalyzer::new(session);
-    std::hint::black_box(batch.analyze_batch(parsed_files));
-}
-
-/// NEW path: the production references read — a pure `references_to_in_files`
-/// over the candidate set. No mutation; warm files are `analyze_file` memo hits.
-/// This is what repeats per request, so flatness here is the whole point.
-fn new_path(session: &AnalysisSession, sym: &Name, candidates: &[SourceFile]) {
-    let files: Vec<Arc<str>> = candidates.iter().map(|c| c.file.clone()).collect();
-    std::hint::black_box(session.references_to_in_files(sym, &files));
+/// The production references read: a pure `references_to_in_files` over the
+/// candidate set. No mutation; warm files are `analyze_file` memo hits.
+fn references(session: &AnalysisSession, sym: &Name, files: &[Arc<str>]) {
+    std::hint::black_box(session.references_to_in_files(sym, files));
 }
 
 fn mean_ms(samples: &[Duration]) -> f64 {
@@ -95,66 +61,17 @@ fn mean_ms(samples: &[Duration]) -> f64 {
     total.as_secs_f64() * 1000.0 / samples.len() as f64
 }
 
-fn measure(mut op: impl FnMut(usize)) -> f64 {
+fn measure(mut op: impl FnMut()) -> f64 {
     let mut samples: Vec<Duration> = Vec::with_capacity(ITERS_PER_LEVEL);
     for iter in 0..ITERS_PER_LEVEL {
         let t0 = Instant::now();
-        op(iter);
+        op();
         let dt = t0.elapsed();
         if iter >= WARMUP_ITERS {
             samples.push(dt);
         }
     }
     mean_ms(&samples)
-}
-
-fn run_path(
-    label: &str,
-    background: &[&SourceFile],
-    candidates: &[SourceFile],
-    sym: &Name,
-    new: bool,
-) {
-    let warm_levels: Vec<usize> = [0usize, 200, 500, 1000, background.len()]
-        .into_iter()
-        .filter(|&n| n <= background.len())
-        .collect();
-
-    println!("\n[{label}]  warm_files   mean_ms");
-    let mut first = f64::NAN;
-    let mut last = f64::NAN;
-    for &warm in &warm_levels {
-        let session = AnalysisSession::new(PhpVersion::LATEST);
-        if new {
-            for sf in background.iter().take(warm) {
-                session.set_file_text(sf.file.clone(), sf.text.clone());
-            }
-            for cand in candidates {
-                session.set_file_text(cand.file.clone(), cand.text.clone());
-            }
-        } else {
-            for sf in background.iter().take(warm) {
-                session.ingest_file(sf.file.clone(), sf.text.clone());
-            }
-            for cand in candidates {
-                session.ingest_file(cand.file.clone(), cand.text.clone());
-            }
-        }
-
-        let m = if new {
-            measure(|_| new_path(&session, sym, candidates))
-        } else {
-            measure(|tag| old_path(&session, candidates, tag))
-        };
-        if first.is_nan() {
-            first = m;
-        }
-        last = m;
-        println!("           {warm:>10}   {m:>7.2}");
-    }
-    let ratio = last / first;
-    let verdict = if ratio >= 1.30 { "DEGRADES" } else { "FLAT" };
-    println!("           last/first = {ratio:.2}x  → {verdict}");
 }
 
 fn main() {
@@ -175,9 +92,10 @@ fn main() {
         })
         .collect();
     if candidates.is_empty() {
-        eprintln!("no candidate files mention `{METHOD}` — cannot run degradation bench");
+        eprintln!("no candidate files mention `{METHOD}` — cannot run the bench");
         return;
     }
+    let candidate_files: Vec<Arc<str>> = candidates.iter().map(|c| c.file.clone()).collect();
 
     let candidate_keys: std::collections::HashSet<&str> =
         candidates.iter().map(|c| c.file.as_ref()).collect();
@@ -192,29 +110,57 @@ fn main() {
         candidates.len()
     );
 
-    // The codebase key only filters results; the measured cost is analyze_file /
-    // ingest over the candidate set, so any method symbol exercises the path.
+    // The codebase key only filters results; the measured cost is `analyze_file`
+    // over the candidate set, so any method symbol exercises the path.
     let sym = Name::method("App\\Models\\Model", METHOD);
 
-    // Process warm-up: a throwaway run so the first measured level isn't paying
-    // first-touch CPU/allocator costs that would inflate the cold ratio.
+    // Throwaway run so the first measured level isn't paying first-touch
+    // CPU/allocator costs that would skew the cold sample.
     {
         let session = AnalysisSession::new(PhpVersion::LATEST);
         for cand in &candidates {
             session.set_file_text(cand.file.clone(), cand.text.clone());
         }
         for _ in 0..WARMUP_ITERS {
-            new_path(&session, &sym, &candidates);
+            references(&session, &sym, &candidate_files);
         }
     }
 
-    run_path("NEW analyze_file", &background, &candidates, &sym, true);
-    run_path("OLD ensure_ingested", &background, &candidates, &sym, false);
+    // Flatness: hold the candidate set fixed, grow the background-warmed file
+    // count. Per-request time must not climb with warmed-set size.
+    let warm_levels: Vec<usize> = [0usize, 200, 500, 1000, background.len()]
+        .into_iter()
+        .filter(|&n| n <= background.len())
+        .collect();
+    println!(
+        "\nwarm_files   mean_ms (fixed {}-file references op)",
+        candidates.len()
+    );
+    let mut first = f64::NAN;
+    let mut last = f64::NAN;
+    for &warm in &warm_levels {
+        let session = AnalysisSession::new(PhpVersion::LATEST);
+        for sf in background.iter().take(warm) {
+            session.set_file_text(sf.file.clone(), sf.text.clone());
+        }
+        for cand in &candidates {
+            session.set_file_text(cand.file.clone(), cand.text.clone());
+        }
+        let m = measure(|| references(&session, &sym, &candidate_files));
+        if first.is_nan() {
+            first = m;
+        }
+        last = m;
+        println!("{warm:>10}   {m:>7.3}");
+    }
+    let ratio = last / first;
+    println!(
+        "last/first = {ratio:.2}x  → {}",
+        if ratio >= 1.30 { "DEGRADES" } else { "FLAT" }
+    );
 
-    // Stage 4 visibility scoping: a private method's references can only live in
-    // its declaring file, so the handler narrows the candidate set from every
-    // text-match to that one file. Contrast the full candidate query with the
-    // single-file query both at full warm.
+    // Visibility scoping: a private method's references can only live in its
+    // declaring file, so the handler narrows the candidate set to that one file.
     {
         let session = AnalysisSession::new(PhpVersion::LATEST);
         for sf in &background {
@@ -224,13 +170,13 @@ fn main() {
             session.set_file_text(cand.file.clone(), cand.text.clone());
         }
         for _ in 0..WARMUP_ITERS {
-            new_path(&session, &sym, &candidates);
-            new_path(&session, &sym, &candidates[..1]);
+            references(&session, &sym, &candidate_files);
+            references(&session, &sym, &candidate_files[..1]);
         }
-        let full = measure(|_| new_path(&session, &sym, &candidates));
-        let scoped = measure(|_| new_path(&session, &sym, &candidates[..1]));
+        let full = measure(|| references(&session, &sym, &candidate_files));
+        let scoped = measure(|| references(&session, &sym, &candidate_files[..1]));
         println!(
-            "\n[Stage 4: private scoping @ full warm]  {}-file full: {full:.3} ms   1-file scoped: {scoped:.3} ms   {:.1}x faster",
+            "\nprivate scoping @ full warm: {}-file {full:.3} ms → 1-file {scoped:.3} ms  ({:.0}x)",
             candidates.len(),
             full / scoped,
         );
