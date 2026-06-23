@@ -602,45 +602,11 @@ impl DocumentStore {
         self.snapshot_mir_query(move |db| crate::db::mir_queries::workspace_index(db, ws).0.clone())
     }
 
-    /// No-op after mir 0.22 migration. The session manages its own warm-up
-    /// via `ingest_file` / `analyze_dependents_of`; there's nothing for us
-    /// to pre-warm here.
-    pub fn warm_reference_index(&self) {}
-
     /// Return the raw source text for `uri` if it has been mirrored into the
     /// salsa workspace. Used by the references handler to pre-filter session
     /// results by checking whether a file mentions the owning class name.
     pub fn source_text(&self, uri: &Url) -> Option<Arc<str>> {
         self.caches.text_cache.get(uri).map(|e| Arc::clone(&e))
-    }
-
-    /// Run Pass 1 + Pass 2 analysis on every mirrored workspace file so that
-    /// type-aware queries (e.g. `session.references_to`) see the full workspace.
-    ///
-    /// Reference locations are only recorded during Pass 2 (`FileAnalyzer::analyze`).
-    /// `ingest_file` alone (Pass 1) is not sufficient. Only needed for cross-file
-    /// queries like `textDocument/references` that rely on the reference index.
-    /// The session's internal cache makes re-analysis of unchanged files cheap.
-    pub fn ensure_all_files_ingested(&self) {
-        let php_version = self.workspace_php_version();
-        let session = self.analysis_session(php_version);
-        let urls: Vec<Url> = self
-            .lsp_ws_files
-            .iter()
-            .filter(|e| !self.deleted_uris.contains(e.key()))
-            .map(|e| e.key().clone())
-            .collect();
-        for uri in &urls {
-            let Some(doc) = self.get_doc_salsa(uri) else {
-                continue;
-            };
-            let file: Arc<str> = Arc::from(uri.as_str());
-            session.ingest_file(file.clone(), doc.source_arc());
-            let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
-            let owned_program = php_ast::owned::to_owned_program(doc.program());
-            let analyzer = mir_analyzer::FileAnalyzer::new(&session);
-            analyzer.analyze(file, doc.source(), &owned_program, &source_map);
-        }
     }
 
     /// Cache the semantic tokens computed for a delta response.
@@ -757,40 +723,7 @@ impl DocumentStore {
         let php_version = self.workspace_php_version();
         let session = self.analysis_session(php_version);
         let file: Arc<str> = Arc::from(uri.as_str());
-        {
-            let _s = tracing::debug_span!("session.ingest_file").entered();
-            session.ingest_file(file.clone(), source.clone());
-        }
-        // Pre-ingest autoload.files helpers (e.g. tap(), class_uses_recursive()
-        // in Laravel) so mir sees their function definitions before analyzing
-        // the current file. ingest_file is idempotent — already-ingested files
-        // are skipped cheaply by the session's internal content cache.
-        {
-            let autoload_uris = self.autoload_uris.read().unwrap().clone();
-            for auri in &autoload_uris {
-                if let Some(atext) = self.caches.text_cache.get(auri).map(|t| Arc::clone(&*t)) {
-                    let afile: Arc<str> = Arc::from(auri.as_str());
-                    session.ingest_file(afile, atext);
-                }
-            }
-        }
-        // Pre-load every class-typed reference via PSR-4 before FileAnalyzer
-        // runs. Although mir 0.45.0 added priority_index_for_ast (called inside
-        // FileAnalyzer::analyze), it does not resolve bare same-namespace refs
-        // (e.g. `extends Base` inside `namespace App;` → App\Base) or
-        // use-imported names in `implements` clauses. Without this block, those
-        // cases produce spurious UndefinedClass.
-        //
-        // TODO: upstream — extend mir's collect_class_refs_from_ast to cover
-        // same-namespace bare refs and use-imported implements entries so this
-        // pre-load can be removed.
-        {
-            let _s = tracing::debug_span!("session.lazy_load_imports").entered();
-            let fqns = crate::references::collect_referenced_class_fqns(&doc);
-            for fqcn in &fqns {
-                let _ = session.load_class(fqcn);
-            }
-        }
+
         let source_map = php_rs_parser::source_map::SourceMap::new(doc.source());
         let owned_program = if let Some(cached) = self.caches.owned_program_cache.get(uri)
             && Arc::ptr_eq(&cached.0, &source)
@@ -803,16 +736,38 @@ impl DocumentStore {
                 .insert(uri.clone(), (Arc::clone(&source), Arc::clone(&prog)));
             prog
         };
-        let analysis = {
-            let _s = tracing::debug_span!("FileAnalyzer::analyze").entered();
-            // Retry: concurrent db writes cancel snapshot queries via resume_unwind.
-            loop {
-                let analyzer = mir_analyzer::FileAnalyzer::new(&session);
-                if let Ok(a) = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
-                    analyzer.analyze(file.clone(), doc.source(), &owned_program, &source_map)
-                })) {
-                    break Arc::new(a);
+
+        // autoload.files helpers (e.g. Laravel's tap()) must be ingested so mir sees their functions.
+        let autoload_texts: Vec<(Arc<str>, Arc<str>)> = {
+            let autoload_uris = self.autoload_uris.read().unwrap().clone();
+            autoload_uris
+                .iter()
+                .filter_map(|auri| {
+                    self.caches
+                        .text_cache
+                        .get(auri)
+                        .map(|t| (Arc::from(auri.as_str()), Arc::clone(&*t)))
+                })
+                .collect()
+        };
+        // Bare same-namespace / use-imported class refs aren't resolved by mir's priority_index_for_ast; preload them.
+        let class_fqns = crate::references::collect_referenced_class_fqns(&doc);
+
+        // ingest_file/load_class/analyze take internal salsa snapshots; a concurrent db write cancels them via resume_unwind. Retry the idempotent sequence.
+        let analysis = loop {
+            let attempt = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                session.ingest_file(file.clone(), source.clone());
+                for (afile, atext) in &autoload_texts {
+                    session.ingest_file(afile.clone(), atext.clone());
                 }
+                for fqcn in &class_fqns {
+                    let _ = session.load_class(fqcn);
+                }
+                let analyzer = mir_analyzer::FileAnalyzer::new(&session);
+                analyzer.analyze(file.clone(), doc.source(), &owned_program, &source_map)
+            }));
+            if let Ok(a) = attempt {
+                break Arc::new(a);
             }
         };
         // Compare the new FileIndex against the stored fingerprint. If
@@ -950,10 +905,6 @@ impl DocumentStore {
             .collect()
     }
 }
-
-// `warm_file_refs_parallel` removed: the analyzer-side reference index is
-// now owned by `AnalysisSession` and warmed by `ingest_file`. This salsa-side
-// helper has no counterpart in the new architecture.
 
 #[cfg(test)]
 mod tests {
