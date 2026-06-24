@@ -514,10 +514,18 @@ impl DocumentStore {
         files: &[Arc<str>],
     ) -> Vec<(Arc<str>, u32, u32, u32)> {
         let php_version = self.workspace_php_version();
-        let session = self.analysis_session(php_version);
-        session
-            .references_to_in_files(symbol, files)
-            .into_iter()
+        // Retry: concurrent db writes (background indexing) cancel snapshot
+        // queries via resume_unwind; without the loop the panic propagates out
+        // of the caller's spawn_blocking and the request silently returns empty.
+        let raw = loop {
+            let session = self.analysis_session(php_version);
+            if let Ok(refs) = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                session.references_to_in_files(symbol, files)
+            })) {
+                break refs;
+            }
+        };
+        raw.into_iter()
             .map(|(file, range)| {
                 // mir uses 1-based lines; 0-based columns (since mir 0.42.0).
                 let line = range.start.line.saturating_sub(1);

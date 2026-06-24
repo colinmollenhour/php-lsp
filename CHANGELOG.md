@@ -7,6 +7,7 @@ All notable changes to php-lsp are documented here.
 ### Fixed
 
 - **Intermittent `workspace/diagnostic` failure while indexing**: a concurrent write from the background workspace scan could cancel an in-flight salsa snapshot query during diagnostics, surfacing as a `task N panicked` error. Analysis now retries on cancellation instead of failing the request.
+- **Find-references intermittently returning no results while indexing**: a concurrent scan write could cancel the session reference lookup's salsa snapshot, and the resulting panic was swallowed into an empty response. The lookup now retries on cancellation like the other snapshot queries.
 - **Handler panics no longer abort the session**: a panic in one request handler is isolated, and the workspace index re-syncs on `didClose`.
 - **CRLF and reversed selection ranges**: text-range handling now copes with CRLF line endings and ranges whose start is after their end.
 
