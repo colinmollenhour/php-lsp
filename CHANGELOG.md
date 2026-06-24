@@ -2,6 +2,28 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.13.1] — 2026-06-24
+
+### Fixed
+
+- **Intermittent `workspace/diagnostic` failure while indexing**: a concurrent write from the background workspace scan could cancel an in-flight salsa snapshot query during diagnostics, surfacing as a `task N panicked` error. Analysis now retries on cancellation instead of failing the request.
+- **Handler panics no longer abort the session**: a panic in one request handler is isolated, and the workspace index re-syncs on `didClose`.
+- **CRLF and reversed selection ranges**: text-range handling now copes with CRLF line endings and ranges whose start is after their end.
+
+### Performance
+
+- **Find-references no longer degrades over a long session**: the references read path runs as a memoized, scoped query over a salsa snapshot instead of mutating shared state on every request.
+- Reference collection and go-to-definition index lookups moved off the async executor, keeping the request loop responsive.
+- Whole-document analysis reuses a cached owned AST per file revision, avoiding repeated deep clones.
+
+### Changed
+
+- **Single analysis database**: php-lsp and the mir analyzer now share one salsa database, removing the dual-database bridge and its duplicate invalidation.
+
+### Dependencies
+
+- **mir updated to 0.48.0.**
+
 ## [0.13.0] — 2026-06-21
 
 ### Features
