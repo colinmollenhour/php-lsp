@@ -1,0 +1,8 @@
+{
+    "name": "php-lsp/references-stress",
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    }
+}

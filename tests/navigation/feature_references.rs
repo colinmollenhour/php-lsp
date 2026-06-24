@@ -19,6 +19,9 @@ mod oop;
 #[path = "references/visibility.rs"]
 mod visibility;
 
+#[path = "references/stress.rs"]
+mod stress;
+
 #[path = "references/constructors.rs"]
 mod constructors;
 

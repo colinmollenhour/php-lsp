@@ -16,6 +16,13 @@ impl tower_lsp::lsp_types::notification::Notification for IndexReadyNotification
 use tower_lsp::Client;
 use tower_lsp::lsp_types::*;
 
+/// Response for the `$/php-lsp/debugStats` custom request.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct DebugStats {
+    /// Cumulative count of real `ParsedDoc` parses (cache misses).
+    pub parses: u64,
+}
+
 use crate::document::ast::ParsedDoc;
 use crate::document::document_store::DocumentStore;
 use crate::document::open_files::OpenFiles;
@@ -59,6 +66,15 @@ impl Backend {
             meta: Arc::new(ArcSwap::from_pointee(PhpStormMeta::default())),
             config: Arc::new(ArcSwap::from_pointee(LspConfig::default())),
         }
+    }
+
+    /// `$/php-lsp/debugStats` — internal observability counters. Currently just
+    /// the cumulative real-parse count, used by the references stress tests to
+    /// assert the read path doesn't parse the whole workspace.
+    pub async fn debug_stats(&self) -> tower_lsp::jsonrpc::Result<DebugStats> {
+        Ok(DebugStats {
+            parses: self.docs.parse_count(),
+        })
     }
 
     fn set_open_text(&self, uri: Url, text: String) -> u64 {

@@ -65,6 +65,12 @@ pub struct DocumentStore {
     /// this map fills that gap for hierarchy traversal. Populated by
     /// `cache_vendor_index`; reads via `get_vendor_index`.
     vendor_index_cache: DashMap<Url, Arc<FileIndex>>,
+    /// Set once the workspace scan's reference-index phase finishes, i.e. the
+    /// `subtypes_of` map in `workspace_index` is complete. Visibility-derived
+    /// scope narrowing that relies on the full subtype set (protected methods)
+    /// only applies once this is `true`; before then it falls back to the full
+    /// workspace scope so references are never under-reported.
+    index_ready: AtomicBool,
 }
 
 impl Default for DocumentStore {
@@ -87,7 +93,19 @@ impl DocumentStore {
             session_cache_dir: OnceLock::new(),
             autoload_uris: std::sync::RwLock::new(Vec::new()),
             vendor_index_cache: DashMap::new(),
+            index_ready: AtomicBool::new(false),
         }
+    }
+
+    /// Mark the workspace reference index as fully built. Called by the scan
+    /// when its final phase completes (alongside `$/php-lsp/indexReady`).
+    pub fn mark_index_ready(&self) {
+        self.index_ready.store(true, Ordering::Release);
+    }
+
+    /// Whether the workspace reference index has finished building.
+    pub fn is_index_ready(&self) -> bool {
+        self.index_ready.load(Ordering::Acquire)
     }
 
     /// Set the directory used to persist stub-parse and analysis results across
@@ -430,6 +448,7 @@ impl DocumentStore {
 
         // Parse runs on the shared mir db.
         let wf = self.lsp_ws_file(uri)?;
+        self.caches.bump_parse_count();
         let (text, doc) = self.snapshot_mir_query(move |db| {
             let sf = wf.source(db);
             let text = sf.text(db);
@@ -546,9 +565,16 @@ impl DocumentStore {
     /// `analyze_file` resolves an expression to that key, and `analyze_file` is
     /// per-source-file, so a `private` member — resolvable only inside the
     /// declaring class body, which lives in one file — is fully scoped to the
-    /// declaring file. This holds at any indexing stage, unlike `protected`
-    /// (whose complete scope needs the transitive subtype set, known only once
-    /// indexing finishes) which keeps the full, already-flat scope.
+    /// declaring file at any indexing stage.
+    ///
+    /// A `protected` member is reachable from the declaring class and its
+    /// transitive subclasses (`$this->m()`, `parent::m()`, `self::`/`static::`),
+    /// all of which live in the declaring file or a subtype file — never outside
+    /// the hierarchy in valid PHP. Its scope is therefore the declaring file plus
+    /// the transitive subtype files. The complete subtype set is only known once
+    /// the workspace reference index finishes, so this narrowing applies only
+    /// when [`Self::is_index_ready`]; before then it falls back to `None` (full
+    /// workspace scope) so references are never under-reported.
     ///
     /// Classes that compose traits or mixins are excluded — those inline
     /// external resolution context, so a reference could surface in another file.
@@ -583,7 +609,24 @@ impl DocumentStore {
 
         match vis {
             Visibility::Private => Some(vec![decl_uri.clone()]),
-            Visibility::Protected | Visibility::Public => None,
+            Visibility::Protected => {
+                if !self.is_index_ready() {
+                    return None;
+                }
+                // Subtype set comes from mir's resolved inheritance graph — it
+                // matches subclasses by FQCN, so `extends \Ns\Base` and aliased
+                // `use ... as` forms are all found. Falls back to full scope if
+                // mir can't resolve the owner.
+                let session = self.analysis_session(self.workspace_php_version());
+                let mut files: std::collections::HashSet<Url> = session
+                    .subtype_files(owner_fqn)
+                    .into_iter()
+                    .filter_map(|p| Url::parse(&p).ok())
+                    .collect();
+                files.insert(decl_uri.clone());
+                Some(files.into_iter().collect())
+            }
+            Visibility::Public => None,
         }
     }
 
@@ -608,6 +651,13 @@ impl DocumentStore {
             });
         };
         self.snapshot_mir_query(move |db| crate::db::mir_queries::workspace_index(db, ws).0.clone())
+    }
+
+    /// Total number of real `ParsedDoc` parses served so far (cache misses).
+    /// Surfaced via `$/php-lsp/debugStats` so tests can assert the references
+    /// read path doesn't parse the whole workspace.
+    pub fn parse_count(&self) -> u64 {
+        self.caches.parse_count()
     }
 
     /// Return the raw source text for `uri` if it has been mirrored into the
@@ -882,20 +932,16 @@ impl DocumentStore {
             .collect()
     }
 
-    /// Parsed documents limited to files whose raw source text contains `word`.
-    ///
-    /// Prefilters via [`Self::text_cache`] (a cheap substring scan on the raw
-    /// `Arc<str>` already in memory) before calling [`Self::get_doc_salsa`],
-    /// which triggers a salsa parse for files not yet in the AST cache.  This
-    /// means only candidate files are ever parsed — the key win over
-    /// [`all_docs_for_scan`] for find-references, which otherwise parses the
-    /// entire workspace before the memchr gate in `find_references_inner` fires.
+    /// URLs of workspace files whose raw source text contains `word`, via a
+    /// cheap [`Self::text_cache`] substring scan — **no parsing**. The
+    /// references read path narrows this list by symbol visibility and hands it
+    /// straight to mir's per-file `analyze_file` query, so a method lookup never
+    /// materializes a `ParsedDoc` for the whole text-matching workspace.
     ///
     /// Files whose text is not yet in `text_cache` are included conservatively
     /// (safe superset — never produces false negatives).
-    pub fn candidate_docs_for(&self, word: &str) -> Vec<(Url, Arc<ParsedDoc>)> {
-        let candidate_urls: Vec<Url> = self
-            .lsp_ws_files
+    pub fn candidate_urls_for(&self, word: &str) -> Vec<Url> {
+        self.lsp_ws_files
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
             .filter(|e| {
@@ -906,8 +952,20 @@ impl DocumentStore {
                     .unwrap_or(true)
             })
             .map(|e| e.key().clone())
-            .collect();
-        candidate_urls
+            .collect()
+    }
+
+    /// Parsed documents limited to files whose raw source text contains `word`.
+    ///
+    /// [`Self::candidate_urls_for`] + a salsa parse per survivor. Used by the
+    /// AST-walker reference paths (constructor refs, non-method kinds) that
+    /// genuinely need the parsed AST. The method reference path uses
+    /// `candidate_urls_for` directly and avoids these parses entirely.
+    ///
+    /// Files whose text is not yet in `text_cache` are included conservatively
+    /// (safe superset — never produces false negatives).
+    pub fn candidate_docs_for(&self, word: &str) -> Vec<(Url, Arc<ParsedDoc>)> {
+        self.candidate_urls_for(word)
             .into_iter()
             .filter_map(|u| self.get_doc_salsa(&u).map(|d| (u, d)))
             .collect()

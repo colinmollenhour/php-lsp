@@ -309,20 +309,22 @@ impl Backend {
                 constant_owner,
             );
 
-            let mut candidate_docs = self.docs.candidate_docs_for(&word);
-
             // Visibility scoping: a private/protected method can only be
             // referenced from its declaring class file (+ subtype files for
-            // protected), so drop every other candidate before analysis. Public
-            // methods and unresolved owners keep the full workspace scope.
-            if matches!(kind, Some(SymbolKind::Method))
-                && let Some(scope) = target_fqn
+            // protected). When that scope is known, use it directly as the
+            // candidate set — skipping the whole-workspace text sweep in
+            // `candidate_urls_for`, which otherwise scans every file's source
+            // only to discard all but the scope. Public methods and unresolved
+            // owners fall back to the text-filtered workspace scope.
+            let method_scope = if matches!(kind, Some(SymbolKind::Method)) {
+                target_fqn
                     .as_deref()
                     .and_then(|fqn| self.docs.method_reference_scope(fqn, &word))
-            {
-                let scope: std::collections::HashSet<Url> = scope.into_iter().collect();
-                candidate_docs.retain(|(u, _)| scope.contains(u));
-            }
+            } else {
+                None
+            };
+            let candidate_urls =
+                method_scope.unwrap_or_else(|| self.docs.candidate_urls_for(&word));
 
             let owner_short: Option<String> = if matches!(kind, Some(SymbolKind::Method)) {
                 target_fqn
@@ -357,7 +359,7 @@ impl Backend {
                 };
                 query.collect(
                     &docs,
-                    &candidate_docs,
+                    &candidate_urls,
                     include_declaration,
                     declaration_location,
                 )

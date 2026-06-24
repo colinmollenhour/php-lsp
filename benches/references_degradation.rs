@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mir_analyzer::{AnalysisSession, Name, PhpVersion};
+use php_lsp::document_store::DocumentStore;
 use tower_lsp::lsp_types::Url;
 
 const METHOD: &str = "save";
@@ -180,5 +181,140 @@ fn main() {
             candidates.len(),
             full / scoped,
         );
+    }
+
+    candidate_path_comparison(&all);
+}
+
+/// The php-lsp candidate-selection step, old vs new. `candidate_docs_for`
+/// (the pre-fix read path) parses every text-matching file into a `ParsedDoc`;
+/// `candidate_urls_for` (the method read path) only filters URLs. This pins the
+/// win the `references_to_in_files`-only measurement above can't see, because it
+/// runs *before* the handler reaches mir.
+fn candidate_path_comparison(all: &[SourceFile]) {
+    let store = DocumentStore::new();
+    for f in all {
+        if let Ok(url) = Url::parse(&f.file) {
+            store.ingest(url, &f.text);
+        }
+    }
+
+    let before_urls = store.parse_count();
+    let t0 = Instant::now();
+    let urls = store.candidate_urls_for(METHOD);
+    let urls_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let urls_parses = store.parse_count() - before_urls;
+
+    let before_docs = store.parse_count();
+    let t1 = Instant::now();
+    let docs = store.candidate_docs_for(METHOD);
+    let docs_ms = t1.elapsed().as_secs_f64() * 1000.0;
+    let docs_parses = store.parse_count() - before_docs;
+
+    println!(
+        "\ncandidate selection for `{METHOD}` over {} files:\n  \
+         candidate_urls_for (method path): {} urls, {urls_parses} parses, {urls_ms:.3} ms\n  \
+         candidate_docs_for (pre-fix path): {} docs, {docs_parses} parses, {docs_ms:.3} ms",
+        all.len(),
+        urls.len(),
+        docs.len(),
+    );
+
+    scope_narrowing_comparison(&store, all.len());
+}
+
+/// Visibility-derived narrowing (improvement #1) vs the full-workspace text
+/// sweep, and the memoized subtype graph (#3). For a `private`/`protected`
+/// method the handler uses `method_reference_scope` as the candidate set
+/// directly, so it never runs `candidate_urls_for`'s O(workspace) sweep. The
+/// scoped lookup is measured across many iterations to confirm it stays cheap
+/// and flat — the subtype map is built once inside the memoized
+/// `workspace_index`, not rebuilt per request.
+fn scope_narrowing_comparison(store: &DocumentStore, total_files: usize) {
+    use php_lsp::file_index::{ClassKind, Visibility};
+
+    store.mark_index_ready();
+    let ws = store.get_workspace_index_salsa();
+
+    let narrowable = |cls: &php_lsp::file_index::ClassDef| {
+        matches!(cls.kind, ClassKind::Class | ClassKind::Enum)
+            && cls.traits.is_empty()
+            && cls.mixins.is_empty()
+    };
+
+    let mut private_target: Option<(String, String)> = None;
+    let mut protected_target: Option<(String, String, usize)> = None;
+    for (_, idx) in &ws.files {
+        for cls in &idx.classes {
+            if !narrowable(cls) {
+                continue;
+            }
+            let fqn = cls.fqn.trim_start_matches('\\').to_string();
+            if private_target.is_none()
+                && let Some(m) = cls
+                    .methods
+                    .iter()
+                    .find(|m| matches!(m.visibility, Visibility::Private))
+            {
+                private_target = Some((fqn.clone(), m.name.to_string()));
+            }
+            // Cheap heuristic to pick a demo target that has at least one
+            // (plain `extends`) subclass; the scope itself is measured below via
+            // method_reference_scope, which goes through mir's resolved graph.
+            let sub_count = ws.subtypes_of.get(cls.name.as_ref()).map_or(0, |v| v.len());
+            if protected_target.is_none()
+                && sub_count > 0
+                && let Some(m) = cls
+                    .methods
+                    .iter()
+                    .find(|m| matches!(m.visibility, Visibility::Protected))
+            {
+                protected_target = Some((fqn, m.name.to_string(), sub_count));
+            }
+        }
+    }
+
+    if let Some((fqn, method)) = private_target {
+        let t0 = Instant::now();
+        let full = store.candidate_urls_for(&method);
+        let full_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let _ = store.method_reference_scope(&fqn, &method);
+        let iters = 200;
+        let t1 = Instant::now();
+        let mut scope_len = 0;
+        for _ in 0..iters {
+            scope_len = store
+                .method_reference_scope(&fqn, &method)
+                .map_or(0, |s| s.len());
+        }
+        let scope_ms = t1.elapsed().as_secs_f64() * 1000.0 / iters as f64;
+        println!(
+            "\nprivate `{fqn}::{method}` narrowing over {total_files} files:\n  \
+             full text sweep (candidate_urls_for `{method}`): {} files, {full_ms:.3} ms\n  \
+             scoped (method_reference_scope, {iters}x mean):   {scope_len} file(s), {scope_ms:.5} ms",
+            full.len(),
+        );
+    } else {
+        eprintln!("no narrowable private method found in fixture");
+    }
+
+    if let Some((fqn, method, subs)) = protected_target {
+        let _ = store.method_reference_scope(&fqn, &method);
+        let iters = 200;
+        let t = Instant::now();
+        let mut scope_len = 0;
+        for _ in 0..iters {
+            scope_len = store
+                .method_reference_scope(&fqn, &method)
+                .map_or(0, |s| s.len());
+        }
+        let ms = t.elapsed().as_secs_f64() * 1000.0 / iters as f64;
+        println!(
+            "protected `{fqn}::{method}` ({subs} direct subclasses) scoped lookup, \
+             {iters}x mean: {scope_len} file(s), {ms:.5} ms (subtype graph memoized in workspace_index)",
+        );
+    } else {
+        eprintln!("no narrowable protected method with subclasses found in fixture");
     }
 }

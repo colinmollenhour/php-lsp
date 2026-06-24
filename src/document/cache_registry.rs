@@ -26,6 +26,10 @@ pub(crate) struct CacheRegistry {
     pub(crate) analysis_cache: DashMap<Url, (Arc<str>, u64, Arc<mir_analyzer::FileAnalysis>)>,
     /// Monotonically increasing counter bumped on any declaration-level change.
     pub(crate) decl_version: AtomicU64,
+    /// Count of real `ParsedDoc` parses served by `get_parsed_cached` (cache
+    /// misses only). Read via `$/php-lsp/debugStats` to guard the references
+    /// read path against re-introducing whole-workspace parsing.
+    pub(crate) parse_count: AtomicU64,
     /// Last-seen FileIndex per URI, used to detect declaration changes.
     pub(crate) decl_fingerprints: DashMap<Url, Arc<FileIndex>>,
     /// Cross-request cache for the whole-doc TypeMap (completion).
@@ -46,6 +50,7 @@ impl CacheRegistry {
             parsed_cache: DashMap::new(),
             analysis_cache: DashMap::new(),
             decl_version: AtomicU64::new(0),
+            parse_count: AtomicU64::new(0),
             decl_fingerprints: DashMap::new(),
             type_map_cache: DashMap::new(),
             owned_program_cache: DashMap::new(),
@@ -123,5 +128,13 @@ impl CacheRegistry {
 
     pub(crate) fn bump_decl_version(&self) {
         self.decl_version.fetch_add(1, Ordering::Release);
+    }
+
+    pub(crate) fn bump_parse_count(&self) {
+        self.parse_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn parse_count(&self) -> u64 {
+        self.parse_count.load(Ordering::Relaxed)
     }
 }

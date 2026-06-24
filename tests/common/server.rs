@@ -576,6 +576,14 @@ impl TestServer {
             .await
     }
 
+    /// Cumulative real-parse count from the `$/php-lsp/debugStats` request.
+    pub async fn debug_stats_parses(&mut self) -> u64 {
+        let resp = self.client.request_no_params("$/php-lsp/debugStats").await;
+        resp["result"]["parses"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("debugStats lacked numeric `parses`: {resp}"))
+    }
+
     pub async fn references(
         &mut self,
         path: &str,

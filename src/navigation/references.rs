@@ -794,34 +794,39 @@ pub struct ReferenceQuery<'a> {
 }
 
 impl<'a> ReferenceQuery<'a> {
-    /// Collect reference locations. `candidate_docs` should already be filtered
-    /// to files that mention `self.word` (from `DocumentStore::candidate_docs_for`);
-    /// mir reference lookups are scoped to and analyzed from that same set via
-    /// the memoized `analyze_file` query — no pre-ingest required.
+    /// Collect reference locations. `candidate_urls` should already be filtered
+    /// to files that mention `self.word` and narrowed by visibility (from
+    /// `DocumentStore::candidate_urls_for` + scope narrowing in the handler).
+    ///
+    /// The method path hands the URLs straight to mir's memoized `analyze_file`
+    /// query and never parses a `ParsedDoc`. The AST-walker path (non-method
+    /// kinds, or a method that mir couldn't resolve) parses the candidates
+    /// lazily — only the files that actually reach the walker pay the parse.
     ///
     /// `declaration_location` is the cursor span; it is appended to Method-path
     /// results when `include_declaration` is `true`.
     pub fn collect(
         &self,
         docs: &DocumentStore,
-        candidate_docs: &[(Url, Arc<ParsedDoc>)],
+        candidate_urls: &[Url],
         include_declaration: bool,
         declaration_location: Option<Location>,
     ) -> Vec<Location> {
-        // Scope mir reference lookups to the text-pre-filtered candidate files
-        // (same set the AST walker uses). analyze_file runs only on these,
-        // memoized — no workspace-wide ingest on the read path.
-        let candidate_files: Vec<Arc<str>> = candidate_docs
-            .iter()
-            .map(|(u, _)| Arc::from(u.as_str()))
-            .collect();
+        let candidate_files = || -> Vec<Arc<str>> {
+            candidate_urls
+                .iter()
+                .map(|u| Arc::from(u.as_str()))
+                .collect()
+        };
 
         // --- Method path: prefer mir's type-aware session index -----------
+        // Needs only the URL list; building `ParsedDoc`s here would parse the
+        // entire text-matching workspace just to discard it.
         if matches!(self.kind, Some(SymbolKind::Method))
             && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
         {
             let locs: Vec<Location> = docs
-                .session_references_to(&sym, &candidate_files)
+                .session_references_to(&sym, &candidate_files())
                 .into_iter()
                 .filter_map(|tuple| {
                     let loc = session_tuple_to_location(tuple)?;
@@ -853,15 +858,21 @@ impl<'a> ReferenceQuery<'a> {
         // mir session had no results — fall through to AST walker.
 
         // --- AST walker path (all non-Method kinds, or Method fallback) ---
+        // Parse the candidates lazily: only the kinds that reach the walker pay.
+        let candidate_docs: Vec<(Url, Arc<ParsedDoc>)> = candidate_urls
+            .iter()
+            .filter_map(|u| docs.get_doc_salsa(u).map(|d| (u.clone(), d)))
+            .collect();
+
         let mut locations = match self.target_fqn {
             Some(t) => find_references_with_target(
                 self.word,
-                candidate_docs,
+                &candidate_docs,
                 include_declaration,
                 self.kind,
                 t,
             ),
-            None => find_references(self.word, candidate_docs, include_declaration, self.kind),
+            None => find_references(self.word, &candidate_docs, include_declaration, self.kind),
         };
 
         // For Function and Class kinds, augment with session refs that the
@@ -871,7 +882,7 @@ impl<'a> ReferenceQuery<'a> {
             Some(SymbolKind::Method) | Some(SymbolKind::Property)
         ) && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
         {
-            let extra = docs.session_references_to(&sym, &candidate_files);
+            let extra = docs.session_references_to(&sym, &candidate_files());
             if !extra.is_empty() {
                 let mut seen: HashSet<(String, u32, u32, u32)> =
                     locations.iter().map(ref_location_key).collect();

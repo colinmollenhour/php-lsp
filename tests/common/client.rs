@@ -375,7 +375,9 @@ pub(crate) fn spawn_server() -> TestClient {
     let (client_stream, server_stream) = tokio::io::duplex(1 << 20);
     let (server_read, server_write) = tokio::io::split(server_stream);
     let (client_read, client_write) = tokio::io::split(client_stream);
-    let (service, socket) = LspService::new(Backend::new);
+    let (service, socket) = LspService::build(Backend::new)
+        .custom_method("$/php-lsp/debugStats", Backend::debug_stats)
+        .finish();
     tokio::spawn(Server::new(server_read, server_write, socket).serve(service));
     TestClient {
         write: client_write,

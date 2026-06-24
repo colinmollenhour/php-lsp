@@ -428,6 +428,7 @@ impl Backend {
                 send_refresh_requests(&client).await;
 
                 let salsa_docs = Arc::clone(&docs);
+                docs.mark_index_ready();
                 drop(docs);
                 client.send_notification::<IndexReadyNotification>(()).await;
                 drop(tokio::task::spawn_blocking(move || {
