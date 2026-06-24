@@ -818,10 +818,6 @@ pub fn filtered_completions_at(
 mod tests {
     use super::*;
 
-    fn doc(source: &str) -> ParsedDoc {
-        ParsedDoc::parse(source.to_string())
-    }
-
     fn labels(items: &[CompletionItem]) -> Vec<&str> {
         items.iter().map(|i| i.label.as_str()).collect()
     }

@@ -1,6 +1,4 @@
-use tower_lsp::lsp_types::{Position, Url};
-
-use crate::document::ast::ParsedDoc;
+use tower_lsp::lsp_types::Position;
 
 /// Strip the `$0` cursor marker from a PHP source string and return
 /// the cleaned source together with the `Position` of that marker.
@@ -24,19 +22,4 @@ pub fn cursor(src: &str) -> (String, Position) {
     let character = before[last_nl_end..].encode_utf16().count() as u32;
     let cleaned = format!("{}{}", before, &src[marker_byte + MARKER.len()..]);
     (cleaned, Position { line, character })
-}
-
-/// Create a `file://` URL from a path.
-pub fn file_url(path: &str) -> Url {
-    Url::parse(&format!("file://{path}")).unwrap()
-}
-
-/// Parse PHP source into a `ParsedDoc`.
-pub fn parse_doc(src: &str) -> ParsedDoc {
-    ParsedDoc::parse(src.to_string())
-}
-
-/// Create an LSP `Position` from line and character offsets.
-pub fn position(line: u32, character: u32) -> Position {
-    Position { line, character }
 }
