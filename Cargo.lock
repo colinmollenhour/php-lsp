@@ -1219,6 +1219,7 @@ dependencies = [
  "futures",
  "iai-callgrind",
  "indexmap",
+ "memchr",
  "mimalloc",
  "mir-analyzer",
  "mir-codebase",

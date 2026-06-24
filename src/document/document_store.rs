@@ -932,26 +932,31 @@ impl DocumentStore {
             .collect()
     }
 
-    /// URLs of workspace files whose raw source text contains `word`, via a
-    /// cheap [`Self::text_cache`] substring scan — **no parsing**. The
-    /// references read path narrows this list by symbol visibility and hands it
-    /// straight to mir's per-file `analyze_file` query, so a method lookup never
-    /// materializes a `ParsedDoc` for the whole text-matching workspace.
+    /// URLs of workspace files whose raw source text mentions `word` as a whole
+    /// identifier — **no parsing**. Uses a precompiled `memmem` finder (the same
+    /// needle is scanned across the whole workspace) plus a word-boundary check,
+    /// so `save` does not match inside `saveAll`/`unsaved`; the scan runs in
+    /// parallel over the file set. The references read path narrows this list by
+    /// symbol visibility and hands it to mir's per-file `analyze_file`, so a
+    /// method lookup never materializes a `ParsedDoc` for the workspace.
     ///
     /// Files whose text is not yet in `text_cache` are included conservatively
     /// (safe superset — never produces false negatives).
     pub fn candidate_urls_for(&self, word: &str) -> Vec<Url> {
-        self.lsp_ws_files
+        use rayon::prelude::*;
+        let urls: Vec<Url> = self
+            .lsp_ws_files
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
-            .filter(|e| {
-                self.caches
-                    .text_cache
-                    .get(e.key())
-                    .map(|src| src.contains(word))
-                    .unwrap_or(true)
-            })
             .map(|e| e.key().clone())
+            .collect();
+        let finder = memchr::memmem::Finder::new(word.as_bytes());
+        let wlen = word.len();
+        urls.into_par_iter()
+            .filter(|u| match self.caches.text_cache.get(u) {
+                Some(src) => mentions_identifier(src.as_bytes(), &finder, wlen),
+                None => true,
+            })
             .collect()
     }
 
@@ -972,12 +977,49 @@ impl DocumentStore {
     }
 }
 
+/// Whether `hay` contains `finder`'s needle (length `wlen`) as a whole
+/// identifier — i.e. not immediately preceded or followed by an ASCII
+/// identifier byte (`[A-Za-z0-9_]`). Only ASCII bytes count as identifier
+/// boundaries, so the check can over-accept near multibyte text but never
+/// rejects a real whole-word match.
+fn mentions_identifier(hay: &[u8], finder: &memchr::memmem::Finder, wlen: usize) -> bool {
+    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut from = 0;
+    while let Some(rel) = finder.find(&hay[from..]) {
+        let idx = from + rel;
+        let before_ok = idx == 0 || !is_ident(hay[idx - 1]);
+        let end = idx + wlen;
+        let after_ok = end >= hay.len() || !is_ident(hay[end]);
+        if before_ok && after_ok {
+            return true;
+        }
+        from = idx + 1;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn uri(path: &str) -> Url {
         Url::parse(&format!("file://{path}")).unwrap()
+    }
+
+    #[test]
+    fn mentions_identifier_respects_word_boundaries() {
+        let m = |hay: &str, word: &str| {
+            let f = memchr::memmem::Finder::new(word.as_bytes());
+            mentions_identifier(hay.as_bytes(), &f, word.len())
+        };
+        assert!(m("$this->save();", "save"));
+        assert!(m("function save() {}", "save"));
+        assert!(m("save", "save"));
+        // substrings inside a larger identifier must not match
+        assert!(!m("$this->saveAll();", "save"));
+        assert!(!m("return $unsaved;", "save"));
+        assert!(!m("class Saver {}", "save"));
+        assert!(!m("no occurrence here", "save"));
     }
 
     /// Phase E4: open-file state lives on `Backend`, not `DocumentStore`.
