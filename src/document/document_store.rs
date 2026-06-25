@@ -59,12 +59,6 @@ pub struct DocumentStore {
     /// not discoverable by namespace walk. Pre-ingested into the AnalysisSession
     /// before each file analysis so mir doesn't emit false UndefinedFunction.
     autoload_uris: std::sync::RwLock<Vec<Url>>,
-    /// On-demand `FileIndex` store for vendor files loaded lazily via PSR-4
-    /// navigation. Vendor is excluded from the eager workspace scan, so files
-    /// ingested by `psr4_method_goto` are not in the salsa workspace_index;
-    /// this map fills that gap for hierarchy traversal. Populated by
-    /// `cache_vendor_index`; reads via `get_vendor_index`.
-    vendor_index_cache: DashMap<Url, Arc<FileIndex>>,
     /// Set once the workspace scan's reference-index phase finishes, i.e. the
     /// `subtypes_of` map in `workspace_index` is complete. Visibility-derived
     /// scope narrowing that relies on the full subtype set (protected methods)
@@ -98,7 +92,6 @@ impl DocumentStore {
             analysis_session: Mutex::new(None),
             session_cache_dir: OnceLock::new(),
             autoload_uris: std::sync::RwLock::new(Vec::new()),
-            vendor_index_cache: DashMap::new(),
             index_ready: AtomicBool::new(false),
             write_revision: AtomicU64::new(0),
         }
@@ -231,8 +224,13 @@ impl DocumentStore {
     }
 
     /// Take a cheap snapshot of the shared mir db and run `f` on it, retrying
-    /// once on `salsa::Cancelled` (raised when a concurrent writer bumps the
+    /// on `salsa::Cancelled` (raised when a concurrent writer bumps the
     /// revision). Mirrors [`Self::snapshot_query`] for the converged db.
+    ///
+    /// The loop terminates as soon as the writer pauses long enough for one
+    /// query to complete. Handlers that want an early exit under sustained
+    /// write pressure should pass a write-rev closure (see `code_lenses`) and
+    /// check it at coarser granularity rather than here.
     fn snapshot_mir_query<R>(&self, f: impl Fn(&mir_analyzer::db::MirDbStorage) -> R) -> R {
         use std::panic::AssertUnwindSafe;
         let session = self.get_or_build_session(self.workspace_php_version());
@@ -950,12 +948,15 @@ impl DocumentStore {
     /// Only call this for files that are not part of the normal workspace scan
     /// (i.e. vendor files loaded on-demand by PSR-4 navigation).
     pub fn cache_vendor_index(&self, uri: Url, index: Arc<FileIndex>) {
-        self.vendor_index_cache.insert(uri, index);
+        self.caches.vendor_index_cache.insert(uri, index);
     }
 
     /// Retrieve a previously cached vendor `FileIndex`.
     pub fn get_vendor_index(&self, uri: &Url) -> Option<Arc<FileIndex>> {
-        self.vendor_index_cache.get(uri).map(|e| Arc::clone(&*e))
+        self.caches
+            .vendor_index_cache
+            .get(uri)
+            .map(|e| Arc::clone(&*e))
     }
 
     /// Same as `all_indexes` but excludes `uri`.
@@ -1181,6 +1182,18 @@ mod tests {
         assert!(store.get_token_cache(&u, "id1").is_some());
         store.evict_token_cache(&u);
         assert!(store.get_token_cache(&u, "id1").is_none());
+    }
+
+    #[test]
+    fn vendor_index_cache_evicted_on_remove() {
+        let store = DocumentStore::new();
+        let u = uri("/vendor/acme/lib.php");
+        store.ingest(u.clone(), "<?php\nclass Lib {}");
+        let idx = store.get_index_salsa(&u).unwrap();
+        store.cache_vendor_index(u.clone(), idx.clone());
+        assert!(store.get_vendor_index(&u).is_some());
+        store.remove(&u);
+        assert!(store.get_vendor_index(&u).is_none());
     }
 
     #[test]

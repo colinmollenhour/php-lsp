@@ -40,6 +40,11 @@ pub(crate) struct CacheRegistry {
     /// a sibling file's declaration change — the file's own source is unchanged,
     /// so the owned AST copy can be reused.
     pub(crate) owned_program_cache: DashMap<Url, (Arc<str>, Arc<php_ast::owned::Program>)>,
+    /// On-demand `FileIndex` store for vendor files loaded lazily via PSR-4
+    /// navigation. Vendor is excluded from the eager workspace scan; files
+    /// ingested by `psr4_method_goto` are not in the salsa workspace_index.
+    /// Evicted alongside all other per-file caches via `evict()`.
+    pub(crate) vendor_index_cache: DashMap<Url, Arc<FileIndex>>,
 }
 
 impl CacheRegistry {
@@ -54,6 +59,7 @@ impl CacheRegistry {
             decl_fingerprints: DashMap::new(),
             type_map_cache: DashMap::new(),
             owned_program_cache: DashMap::new(),
+            vendor_index_cache: DashMap::new(),
         }
     }
 
@@ -66,6 +72,7 @@ impl CacheRegistry {
         self.decl_fingerprints.remove(uri);
         self.type_map_cache.remove(uri);
         self.owned_program_cache.remove(uri);
+        self.vendor_index_cache.remove(uri);
     }
 
     /// Evict only the mir analysis cache for `uri`. Used on text change so the
