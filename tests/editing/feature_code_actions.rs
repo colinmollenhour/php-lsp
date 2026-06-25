@@ -578,6 +578,8 @@ class Config {
         .await;
     expect![[r#"
         refactor         Generate getter/setter
+        refactor         Make private [edit]
+        refactor         Make protected [edit]
         refactor         Promote constructor parameter"#]]
     .assert_eq(&out);
 }
@@ -622,6 +624,8 @@ class Config {
         .await;
     expect![[r#"
         refactor         Generate getter/setter
+        refactor         Make private [edit]
+        refactor         Make protected [edit]
         refactor         Promote constructor parameter"#]]
     .assert_eq(&out);
 }

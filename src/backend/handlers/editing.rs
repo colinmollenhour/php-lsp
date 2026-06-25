@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
+use crate::actions::arrow_function_action::closure_to_arrow_function_actions;
 use crate::actions::extract_action::extract_variable_actions;
 use crate::actions::extract_constant_action::extract_constant_actions;
 use crate::actions::extract_method_action::extract_method_actions;
@@ -131,6 +132,12 @@ impl Backend {
         actions.extend(extract_constant_actions(&source, params.range, uri));
         actions.extend(inline_variable_actions(&source, params.range, uri));
         actions.extend(change_visibility_actions(&source, &doc, params.range, uri));
+        actions.extend(closure_to_arrow_function_actions(
+            &source,
+            &doc,
+            params.range,
+            uri,
+        ));
         if let Some(action) = organize_imports_action(&source, uri) {
             actions.push(action);
         }

@@ -135,6 +135,8 @@ class Foo {
         .await;
     expect![[r#"
         refactor         Generate PHPDoc
+        refactor         Make private [edit]
+        refactor         Make protected [edit]
         refactor.extract Extract variable [edit]"#]]
     .assert_eq(&out);
 }

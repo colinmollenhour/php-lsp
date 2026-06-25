@@ -15,6 +15,8 @@ pub use common::{
     render_resolved_workspace_symbol, render_semantic_tokens, render_workspace_symbols,
 };
 
+#[path = "editing/feature_code_action_arrow_function.rs"]
+mod feature_code_action_arrow_function;
 #[path = "editing/feature_code_action_extract_constant.rs"]
 mod feature_code_action_extract_constant;
 #[path = "editing/feature_code_action_extract_method.rs"]
