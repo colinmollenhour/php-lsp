@@ -2,6 +2,25 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.14.0] — 2026-06-25
+
+### Features
+
+- **find-implementations and type-hierarchy use mir's resolved subtype graph**: `textDocument/implementation`, `typeHierarchy/subtypes`, and `typeHierarchy/supertypes` now resolve subtypes through mir's name-resolution graph instead of the raw-name workspace index. This fixes under-reporting for classes that extend a parent via an aliased import (`use App\Base as X; class C extends X {}`) or a fully-qualified name (`class C extends \App\Base {}`).
+
+### Performance
+
+- **Word-boundary candidate pre-filter, scanned in parallel**: find-references applies a memmem word-boundary gate over the candidate file set in parallel threads before any semantic analysis, cutting per-request cost for common method names.
+- **Parse-free method reference path with visibility-derived scope**: the method-reference path reads lightweight `FileIndex` entries (~2 KB/file) instead of full parsed documents, and the candidate set is scope-narrowed from visibility before text scanning. Protected methods limit the search to the declaring file plus its resolved subtype hierarchy.
+
+### Fixed
+
+- **Find-references session lookup retries on salsa cancellation**: a salsa cancellation during the session reference lookup no longer surfaces as an empty result; the lookup now retries like the other snapshot queries.
+
+### Dependencies
+
+- **mir updated to 0.49.0.**
+
 ## [0.13.1] — 2026-06-24
 
 ### Fixed
