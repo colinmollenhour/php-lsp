@@ -577,3 +577,29 @@ function topLevel(): void {}
         "fixture must produce at least one showReferences lens"
     );
 }
+
+/// Verify code_lens returns correct lenses even when the document was edited
+/// before the request. The write bumps `write_rev`; the handler captures the
+/// new rev at request-start, so the sweep completes normally (no spurious
+/// cancellation — the revision is stable for the entire spawn_blocking call).
+#[tokio::test]
+async fn code_lens_correct_after_preceding_write() {
+    let mut s = TestServer::new().await;
+
+    // Open, then change — write_rev is bumped by the change.
+    s.open("main.php", "<?php\nclass Alpha {}\n").await;
+    s.change(
+        "main.php",
+        2,
+        "<?php\nclass Alpha {}\nfunction helperFn(): void {}\n",
+    )
+    .await;
+
+    // code_lens after the write: revision is stable during spawn_blocking,
+    // so lenses must be produced (not suppressed by stale-cancel logic).
+    let resp = s.code_lens("main.php").await;
+    assert!(
+        resp["result"].as_array().is_some_and(|l| !l.is_empty()),
+        "code_lens must produce lenses after a preceding write; got: {resp}"
+    );
+}

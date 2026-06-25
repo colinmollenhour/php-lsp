@@ -20,14 +20,26 @@ use crate::navigation::references::{SymbolKind, find_references};
 use crate::types::type_map::parent_class_name;
 
 /// Build all code lenses for `uri`/`doc`, using `all_docs` for reference counts.
+///
+/// `should_cancel` is polled between top-level declarations; when it returns
+/// `true` the function returns an empty `Vec` immediately. Pass `|| false` for
+/// requests that do not need cooperative cancellation.
 pub fn code_lenses(
     uri: &Url,
     doc: &ParsedDoc,
     all_docs: &[(Url, Arc<ParsedDoc>)],
+    should_cancel: impl Fn() -> bool,
 ) -> Vec<CodeLens> {
     let sv = doc.view();
     let mut lenses = Vec::new();
-    collect_lenses(&doc.program().stmts, sv, uri, all_docs, &mut lenses);
+    collect_lenses(
+        &doc.program().stmts,
+        sv,
+        uri,
+        all_docs,
+        &mut lenses,
+        &should_cancel,
+    );
     lenses
 }
 
@@ -37,8 +49,13 @@ fn collect_lenses(
     uri: &Url,
     all_docs: &[(Url, Arc<ParsedDoc>)],
     out: &mut Vec<CodeLens>,
+    should_cancel: &impl Fn() -> bool,
 ) {
     for stmt in stmts {
+        if should_cancel() {
+            out.clear();
+            return;
+        }
         match &stmt.kind {
             StmtKind::Function(f) => {
                 let name = f.name.as_str().unwrap_or_default();
@@ -209,7 +226,7 @@ fn collect_lenses(
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_lenses(&inner.stmts, sv, uri, all_docs, out);
+                    collect_lenses(&inner.stmts, sv, uri, all_docs, out, should_cancel);
                 }
             }
             _ => {}
@@ -443,6 +460,26 @@ fn find_method_name_range(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `should_cancel = || true` must return an empty Vec immediately without
+    /// panicking, regardless of the document contents.
+    #[test]
+    fn code_lenses_cancelled_returns_empty() {
+        use crate::document::ast::ParsedDoc;
+
+        let source = "<?php\nclass Foo { public function bar(): void {} }\n";
+        let doc = std::sync::Arc::new(ParsedDoc::parse(source));
+        let uri = tower_lsp::lsp_types::Url::parse("file:///test.php").unwrap();
+        let all_docs: Vec<(tower_lsp::lsp_types::Url, std::sync::Arc<ParsedDoc>)> = vec![];
+
+        let lenses = code_lenses(&uri, &doc, &all_docs, || true);
+        assert!(lenses.is_empty(), "cancelled sweep must return empty");
+    }
 }
 
 /// A method is a test if its name starts with `test` (PHPUnit convention),

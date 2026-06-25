@@ -107,46 +107,49 @@ impl Backend {
             .collect();
 
         let docs = Arc::clone(&self.docs);
+        let cancel_rev = self.docs.write_rev();
         let diag_cfg_sweep = diag_cfg.clone();
         let items = tokio::task::spawn_blocking(move || {
-            all_parse_diags
-                .into_iter()
-                .map(|(uri, parse_diags, version)| {
-                    let sem_diags = docs
-                        .get_semantic_issues_salsa(&uri)
-                        .map(|issues| {
-                            crate::semantic_diagnostics::issues_to_diagnostics(
-                                &issues,
-                                &uri,
-                                &diag_cfg_sweep,
-                            )
-                        })
-                        .unwrap_or_default();
-                    let all_diags = merge_file_diagnostics(parse_diags, sem_diags);
-                    let result_id = compute_diagnostic_result_id(&all_diags, uri.as_str());
-                    if previous_map.get(&uri) == Some(&result_id) {
-                        WorkspaceDocumentDiagnosticReport::Unchanged(
-                            WorkspaceUnchangedDocumentDiagnosticReport {
-                                uri,
-                                version,
-                                unchanged_document_diagnostic_report:
-                                    UnchangedDocumentDiagnosticReport { result_id },
-                            },
+            let mut results = Vec::new();
+            for (uri, parse_diags, version) in all_parse_diags {
+                // A write during the sweep means the results are immediately
+                // stale. Return empty so the editor re-requests after the edit.
+                if docs.write_rev() != cancel_rev {
+                    return vec![];
+                }
+                let sem_diags = docs
+                    .get_semantic_issues_salsa(&uri)
+                    .map(|issues| {
+                        crate::semantic_diagnostics::issues_to_diagnostics(
+                            &issues,
+                            &uri,
+                            &diag_cfg_sweep,
                         )
-                    } else {
-                        WorkspaceDocumentDiagnosticReport::Full(
-                            WorkspaceFullDocumentDiagnosticReport {
-                                uri,
-                                version,
-                                full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                                    result_id: Some(result_id),
-                                    items: all_diags,
-                                },
-                            },
-                        )
-                    }
-                })
-                .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let all_diags = merge_file_diagnostics(parse_diags, sem_diags);
+                let result_id = compute_diagnostic_result_id(&all_diags, uri.as_str());
+                results.push(if previous_map.get(&uri) == Some(&result_id) {
+                    WorkspaceDocumentDiagnosticReport::Unchanged(
+                        WorkspaceUnchangedDocumentDiagnosticReport {
+                            uri,
+                            version,
+                            unchanged_document_diagnostic_report:
+                                UnchangedDocumentDiagnosticReport { result_id },
+                        },
+                    )
+                } else {
+                    WorkspaceDocumentDiagnosticReport::Full(WorkspaceFullDocumentDiagnosticReport {
+                        uri,
+                        version,
+                        full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                            result_id: Some(result_id),
+                            items: all_diags,
+                        },
+                    })
+                });
+            }
+            results
         })
         .await
         .map_err(|e| {
