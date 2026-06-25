@@ -24,13 +24,12 @@ use crate::navigation::call_hierarchy::{
 };
 use crate::navigation::declaration::{goto_declaration, goto_declaration_from_index};
 use crate::navigation::implementation::{
-    find_implementations, find_implementations_from_workspace,
-    find_method_implementations_from_workspace,
+    find_implementations, find_implementations_mir_backed, find_method_implementations_mir_backed,
 };
 use crate::navigation::moniker::moniker_at;
 use crate::navigation::type_definition::{goto_type_definition, goto_type_definition_from_index};
 use crate::navigation::type_hierarchy::{
-    prepare_type_hierarchy_from_workspace, subtypes_of_from_workspace, supertypes_of_from_workspace,
+    prepare_type_hierarchy_from_workspace, subtypes_of_mir_backed, supertypes_of_from_workspace,
 };
 
 use crate::analysis::code_lens::code_lenses;
@@ -1034,10 +1033,13 @@ impl LanguageServer for Backend {
             // First pass: open-file ParsedDocs give accurate character positions.
             let open_docs = self.docs.docs_for(&self.open_urls());
             let mut locs = find_implementations(&word, fqn, &open_docs);
-            // Second pass: workspace aggregate's `subtypes_of` reverse map.
+            // Second pass: mir-backed subtype graph (fixes aliased/FQN extends),
+            // falling back to the raw-name subtypes_of map when mir is cold.
             let wi = self.workspace_index_async().await;
             if locs.is_empty() {
-                locs = find_implementations_from_workspace(&word, fqn, &wi);
+                let fqn_for_mir = fqn.unwrap_or(&word).to_string();
+                let subtype_urls = self.docs.class_subtype_urls(&fqn_for_mir);
+                locs = find_implementations_mir_backed(&word, fqn, &wi, &subtype_urls);
             }
             // Third pass: treat word as a method name inside its declaring
             // class/interface — returns concrete overrides in every subtype.
@@ -1047,7 +1049,23 @@ impl LanguageServer for Backend {
                 && let Some(enclosing) =
                     crate::types::type_map::enclosing_class_at(&source, &doc, position)
             {
-                locs = find_method_implementations_from_workspace(&word, &enclosing, &wi);
+                // Resolve the enclosing class's FQN for mir's subtype graph.
+                let enclosing_fqn = wi
+                    .classes_by_name
+                    .get(&enclosing)
+                    .and_then(|refs| refs.first())
+                    .and_then(|r| wi.at(*r))
+                    .map(|(_, cls)| cls.fqn.as_ref().to_string());
+                let method_subtype_urls = enclosing_fqn
+                    .as_deref()
+                    .map(|f| self.docs.class_subtype_urls(f))
+                    .unwrap_or_default();
+                locs = find_method_implementations_mir_backed(
+                    &word,
+                    &enclosing,
+                    &wi,
+                    &method_subtype_urls,
+                );
             }
             if locs.is_empty() {
                 Ok(None)
@@ -1172,9 +1190,20 @@ impl LanguageServer for Backend {
         params: TypeHierarchySubtypesParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
         guard_async_result("subtypes", async move {
-            // Phase J: O(matches) lookup via the aggregate's `subtypes_of` map.
             let wi = self.workspace_index_async().await;
-            let result = subtypes_of_from_workspace(&params.item, &wi);
+            // Resolve the item's FQCN for mir's subtype graph.
+            let item_fqn = wi
+                .classes_by_name
+                .get(&params.item.name)
+                .and_then(|refs| refs.first())
+                .and_then(|r| wi.at(*r))
+                .map(|(_, cls)| cls.fqn.as_ref().to_string());
+            let subtype_urls = item_fqn
+                .as_deref()
+                .map(|f| self.docs.class_subtype_urls(f))
+                .unwrap_or_default();
+            let result =
+                subtypes_of_mir_backed(&params.item, item_fqn.as_deref(), &wi, &subtype_urls);
             Ok(if result.is_empty() {
                 None
             } else {

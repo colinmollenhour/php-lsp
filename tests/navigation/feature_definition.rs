@@ -2019,3 +2019,63 @@ $a->mis$0sing();
     // Circular inheritance — no location can be returned.
     expect!["<none>"].assert_eq(&out);
 }
+
+// ── mir-backed implementation: aliased extends / FQN-qualified extends ───────
+
+/// `class Child extends BaseAlias {}` where `use App\Base as BaseAlias;` must be
+/// found when the cursor sits on `Base` with `use App\Base;` in scope.
+/// The raw-name `subtypes_of` map stores "BaseAlias" but we search for "Base"/
+/// "App\Base" — mir's resolved graph bridges the alias.
+#[tokio::test]
+async fn implementation_aliased_extends_cross_file() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"//- /App/Base.php
+<?php
+namespace App;
+interface Base {}
+
+//- /Other/Child.php
+<?php
+namespace Other;
+use App\Base as BaseAlias;
+class Child extends BaseAlias {}
+
+//- /caller.php
+<?php
+use App\Base;
+function test(Base$0 $x): void {}
+"#,
+        )
+        .await;
+    expect!["Other/Child.php:3:0-3:0"].assert_eq(&out);
+}
+
+/// `class Child extends \App\Base {}` (FQN-qualified with leading backslash) is found
+/// when the cursor sits on `Base` with `use App\Base;` in scope. The AST-based
+/// open-docs pass handles this via `name_matches`; the workspace-index fallback would
+/// miss it because `subtypes_of` stores `"\App\Base"` but searches `"App\Base"`.
+#[tokio::test]
+async fn implementation_fqn_qualified_extends_cross_file() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_implementation(
+            r#"//- /App/Base.php
+<?php
+namespace App;
+interface Base {}
+
+//- /Child.php
+<?php
+class Child extends \App\Base {}
+
+//- /caller.php
+<?php
+use App\Base;
+function test(Base$0 $x): void {}
+"#,
+        )
+        .await;
+    expect!["Child.php:1:6-1:11"].assert_eq(&out);
+}

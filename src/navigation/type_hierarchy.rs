@@ -1,4 +1,5 @@
 /// `textDocument/prepareTypeHierarchy`, `typeHierarchy/supertypes`, `typeHierarchy/subtypes`.
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Position, SymbolKind, TypeHierarchyItem, Url};
@@ -94,6 +95,61 @@ pub fn supertypes_of_from_workspace(
                 ClassKind::Enum => SymbolKind::ENUM,
             };
             result.push(make_item_from_index(&cls.name, kind, uri, cls.start_line));
+        }
+    }
+    result
+}
+
+/// Mir-backed variant of [`subtypes_of_from_workspace`].
+///
+/// `item_fqn` is the FQCN of the hierarchy item (e.g. `"App\\Animal"`),
+/// resolved in the handler from the workspace index. `subtype_urls` is the
+/// file set from `DocumentStore::class_subtype_urls`. When non-empty this
+/// fixes aliased `extends` and FQN-qualified forms the raw-name map misses.
+/// Falls back to [`subtypes_of_from_workspace`] when `subtype_urls` is empty.
+pub fn subtypes_of_mir_backed(
+    item: &TypeHierarchyItem,
+    item_fqn: Option<&str>,
+    wi: &crate::db::workspace_index::WorkspaceIndexData,
+    subtype_urls: &[Url],
+) -> Vec<TypeHierarchyItem> {
+    if subtype_urls.is_empty() {
+        return subtypes_of_from_workspace(item, wi);
+    }
+    use crate::index::file_index::ClassKind;
+    use crate::navigation::implementation::{alias_resolves_to, name_matches};
+    let url_set: HashSet<&Url> = subtype_urls.iter().collect();
+    let mut result = Vec::new();
+    for (uri, idx) in &wi.files {
+        if !url_set.contains(uri) {
+            continue;
+        }
+        for cls in &idx.classes {
+            let extends_match = cls
+                .parent
+                .as_deref()
+                .map(|p| {
+                    name_matches(p, &item.name, item_fqn)
+                        || item_fqn.is_some_and(|f| alias_resolves_to(p, f, &idx.use_imports))
+                })
+                .unwrap_or(false);
+            let implements_match = cls.implements.iter().any(|iface| {
+                name_matches(iface.as_ref(), &item.name, item_fqn)
+                    || item_fqn
+                        .is_some_and(|f| alias_resolves_to(iface.as_ref(), f, &idx.use_imports))
+            });
+            let uses_match = cls.traits.iter().any(|t| {
+                name_matches(t.as_ref(), &item.name, item_fqn)
+                    || item_fqn.is_some_and(|f| alias_resolves_to(t.as_ref(), f, &idx.use_imports))
+            });
+            if extends_match || implements_match || uses_match {
+                let kind = match cls.kind {
+                    ClassKind::Class | ClassKind::Trait => SymbolKind::CLASS,
+                    ClassKind::Interface => SymbolKind::INTERFACE,
+                    ClassKind::Enum => SymbolKind::ENUM,
+                };
+                result.push(make_item_from_index(&cls.name, kind, uri, cls.start_line));
+            }
         }
     }
     result

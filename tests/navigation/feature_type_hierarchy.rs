@@ -303,3 +303,30 @@ class Child$0 extends BaseA {}
     // Unique parent name: must resolve to exactly the right class.
     expect!["BaseA (Class) @ A/Base.php:0"].assert_eq(&out);
 }
+
+// ── mir-backed subtypes: aliased extends ─────────────────────────────────────
+
+/// `class Child extends BaseAlias {}` where `use App\Base as BaseAlias;` must
+/// appear as a subtype of `Base` when cursor is on `Base`.
+/// The raw-name `subtypes_of` map stores "BaseAlias" so `subtypes_of["Base"]`
+/// is empty; mir's resolved inheritance graph finds it correctly.
+#[tokio::test]
+async fn subtypes_aliased_extends_cross_file() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_subtypes(
+            r#"//- /App/Base.php
+<?php
+namespace App;
+interface Bas$0e {}
+
+//- /Other/Child.php
+<?php
+namespace Other;
+use App\Base as BaseAlias;
+class Child extends BaseAlias {}
+"#,
+        )
+        .await;
+    expect!["Child (Class) @ Other/Child.php:3"].assert_eq(&out);
+}

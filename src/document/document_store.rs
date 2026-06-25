@@ -173,6 +173,22 @@ impl DocumentStore {
         *self.php_version.lock().unwrap()
     }
 
+    /// File URIs of all direct and transitive subclasses of `class_fqn`,
+    /// resolved via mir's inheritance graph. Returns an empty vec when the mir
+    /// session hasn't ingested the class yet (cold start, excluded paths).
+    ///
+    /// Used by `goto_implementation` and `subtypes` to scope their lookups to
+    /// the correct files, fixing aliased `extends` and FQN-qualified forms that
+    /// the raw-name `subtypes_of` map misses.
+    pub fn class_subtype_urls(&self, class_fqn: &str) -> Vec<tower_lsp::lsp_types::Url> {
+        let session = self.analysis_session(self.workspace_php_version());
+        session
+            .subtype_files(class_fqn)
+            .into_iter()
+            .filter_map(|p| tower_lsp::lsp_types::Url::parse(&p).ok())
+            .collect()
+    }
+
     /// Return the `Arc<ArcSwap<Psr4Map>>` so callers can share it.
     /// `Backend` clones this arc at construction time so writes
     /// (e.g. loading composer.json on `initialized`) are immediately visible

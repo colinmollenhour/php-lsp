@@ -1,5 +1,6 @@
 /// `textDocument/implementation` — find all classes that implement an interface
 /// or extend a class with the given name.
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use php_ast::{ExprKind, NamespaceBody, Stmt, StmtKind};
@@ -24,7 +25,7 @@ use crate::document::ast::{ParsedDoc, SourceView};
 ///   namespace form) and the cursor sits on a global-namespace `Animal`
 ///   interface with no `use` import.
 #[inline]
-fn name_matches(repr: &str, word: &str, fqn: Option<&str>) -> bool {
+pub(crate) fn name_matches(repr: &str, word: &str, fqn: Option<&str>) -> bool {
     repr == word
         || fqn.is_some_and(|f| repr.trim_start_matches('\\') == f)
         || (fqn.is_none() && !word.contains('\\') && repr.trim_start_matches('\\') == word)
@@ -236,6 +237,124 @@ fn collect_implementations(
             _ => {}
         }
     }
+}
+
+/// Returns `true` when `name` is a use-import alias in `use_imports` that
+/// resolves to `fqn`. Handles both `Ns\Name` and `\Ns\Name` stored forms.
+pub(crate) fn alias_resolves_to(
+    name: &str,
+    fqn: &str,
+    use_imports: &[(Box<str>, Box<str>)],
+) -> bool {
+    use_imports.iter().any(|(alias, resolved)| {
+        alias.as_ref() == name
+            && (resolved.as_ref() == fqn || resolved.trim_start_matches('\\') == fqn)
+    })
+}
+
+/// Mir-backed variant of [`find_implementations_from_workspace`].
+///
+/// `subtype_urls` is the set of files mir identified as containing subtypes of
+/// the target (from `DocumentStore::class_subtype_urls`). Fixes aliased
+/// `extends` (`use App\Base as X; class C extends X {}`) and FQN-qualified
+/// forms that the raw-name `subtypes_of` map misses. Falls back to
+/// [`find_implementations_from_workspace`] when `subtype_urls` is empty (cold
+/// mir session or class not yet ingested).
+pub fn find_implementations_mir_backed(
+    word: &str,
+    fqn: Option<&str>,
+    wi: &crate::db::workspace_index::WorkspaceIndexData,
+    subtype_urls: &[Url],
+) -> Vec<Location> {
+    if subtype_urls.is_empty() {
+        return find_implementations_from_workspace(word, fqn, wi);
+    }
+    let url_set: HashSet<&Url> = subtype_urls.iter().collect();
+    let mut locations = Vec::new();
+    for (uri, idx) in &wi.files {
+        if !url_set.contains(uri) {
+            continue;
+        }
+        for cls in &idx.classes {
+            let extends_match = cls
+                .parent
+                .as_deref()
+                .map(|p| {
+                    name_matches(p, word, fqn)
+                        || fqn.is_some_and(|f| alias_resolves_to(p, f, &idx.use_imports))
+                })
+                .unwrap_or(false);
+            let implements_match = cls.implements.iter().any(|iface| {
+                name_matches(iface.as_ref(), word, fqn)
+                    || fqn.is_some_and(|f| alias_resolves_to(iface.as_ref(), f, &idx.use_imports))
+            });
+            if extends_match || implements_match {
+                let pos = tower_lsp::lsp_types::Position {
+                    line: cls.start_line,
+                    character: 0,
+                };
+                locations.push(Location {
+                    uri: uri.clone(),
+                    range: tower_lsp::lsp_types::Range {
+                        start: pos,
+                        end: pos,
+                    },
+                });
+            }
+        }
+    }
+    locations.sort_by(|a, b| {
+        a.uri
+            .as_str()
+            .cmp(b.uri.as_str())
+            .then(a.range.start.line.cmp(&b.range.start.line))
+    });
+    locations.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+    locations
+}
+
+/// Mir-backed variant of [`find_method_implementations_from_workspace`].
+///
+/// `subtype_urls` is the set of files mir identified as containing subtypes of
+/// the declaring class. Scopes the search to those files instead of walking
+/// the raw-name `subtypes_of` map. Falls back to
+/// [`find_method_implementations_from_workspace`] when `subtype_urls` is empty.
+pub fn find_method_implementations_mir_backed(
+    method_name: &str,
+    declaring_class: &str,
+    wi: &crate::db::workspace_index::WorkspaceIndexData,
+    subtype_urls: &[Url],
+) -> Vec<tower_lsp::lsp_types::Location> {
+    if subtype_urls.is_empty() {
+        return find_method_implementations_from_workspace(method_name, declaring_class, wi);
+    }
+    let url_set: HashSet<&Url> = subtype_urls.iter().collect();
+    let mut locations = Vec::new();
+    for (uri, idx) in &wi.files {
+        if !url_set.contains(uri) {
+            continue;
+        }
+        for cls in &idx.classes {
+            if let Some(method) = cls
+                .methods
+                .iter()
+                .find(|m| m.name.as_ref() == method_name && !m.is_abstract)
+            {
+                locations.push(tower_lsp::lsp_types::Location {
+                    uri: uri.clone(),
+                    range: crate::text::zero_width_range(method.start_line),
+                });
+            }
+        }
+    }
+    locations.sort_by(|a, b| {
+        a.uri
+            .as_str()
+            .cmp(b.uri.as_str())
+            .then(a.range.start.line.cmp(&b.range.start.line))
+    });
+    locations.dedup_by(|a, b| a.uri == b.uri && a.range.start.line == b.range.start.line);
+    locations
 }
 
 /// Recurse into an expression to find `new class {}` anonymous class declarations
