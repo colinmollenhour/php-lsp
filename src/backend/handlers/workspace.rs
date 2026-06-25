@@ -356,11 +356,39 @@ impl Backend {
                                 title: "php-lsp: indexing workspace".to_string(),
                                 cancellable: Some(false),
                                 message: None,
-                                percentage: None,
+                                percentage: Some(0),
                             },
                         )),
                     })
                     .await;
+
+                // Channel for per-chunk progress from scan_workspace.
+                // The receiver task sends $/progress Report notifications as chunks
+                // complete; the sender is cloned into each scan_workspace call and
+                // dropped here after all roots have been scanned to close the channel.
+                let (progress_tx, mut progress_rx) =
+                    tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+                tokio::spawn({
+                    let client = client.clone();
+                    let token = token.clone();
+                    async move {
+                        while let Some((done, total_files)) = progress_rx.recv().await {
+                            let pct = (done * 100).checked_div(total_files).unwrap_or(100) as u32;
+                            client
+                                .send_notification::<ProgressNotification>(ProgressParams {
+                                    token: token.clone(),
+                                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                                        WorkDoneProgressReport {
+                                            cancellable: Some(false),
+                                            message: Some(format!("{done}/{total_files}")),
+                                            percentage: Some(pct),
+                                        },
+                                    )),
+                                })
+                                .await;
+                        }
+                    }
+                });
 
                 let scan_start = std::time::Instant::now();
                 let mut total = 0usize;
@@ -385,11 +413,15 @@ impl Backend {
                         &exclude_paths,
                         &include_paths,
                         max_indexed_files,
+                        Some(progress_tx.clone()),
                     )
                     .await;
                     total += n;
                     from_cache += c;
                 }
+                // Drop the sender to close the channel; the receiver task exits once
+                // it has processed all remaining messages.
+                drop(progress_tx);
                 let elapsed = scan_start.elapsed();
                 let elapsed_s = elapsed.as_secs_f64();
 

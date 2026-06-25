@@ -197,6 +197,7 @@ impl LanguageServer for Backend {
                                 &ex,
                                 &ip,
                                 max_indexed_files,
+                                None,
                             )
                             .await;
                             send_refresh_requests(&client).await;

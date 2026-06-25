@@ -25,6 +25,29 @@ async fn index_ready_fires_after_scan_and_workspace_symbols_work() {
     expect![[r#"Class       User @ src/Model/User.php:4"#]].assert_eq(&out);
 }
 
+/// The workspace scan must emit standard `$/progress` Report notifications
+/// (with `kind: "report"` and a `percentage`) between Begin and End so editors
+/// can render a live progress bar during multi-second cold scans.
+#[tokio::test]
+async fn workspace_scan_emits_work_done_progress_reports() {
+    let mut s = TestServer::with_fixture("psr4-mini").await;
+    let notifications = s.client().collect_until_index_ready().await;
+
+    // At minimum one $/progress Report notification must arrive. A single-chunk
+    // scan (all files fit in one chunk) still emits one report at 100% so that
+    // editors always see a concrete progress update before the End notification.
+    let has_report = notifications.iter().any(|n| {
+        n["method"].as_str() == Some("$/progress")
+            && n["params"]["value"]["kind"].as_str() == Some("report")
+            && n["params"]["value"]["percentage"].as_u64().is_some()
+    });
+    assert!(
+        has_report,
+        "expected at least one $/progress notification with kind='report' and 'percentage';\n\
+         got: {notifications:#?}"
+    );
+}
+
 // ── CREATED ──────────────────────────────────────────────────────────────────
 
 #[serial_test::serial]

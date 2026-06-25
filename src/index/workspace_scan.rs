@@ -44,9 +44,13 @@ pub(crate) async fn send_refresh_requests(client: &Client) {
 /// Phase 2a — file reading: async, up to 64 concurrent reads (I/O-bound).
 /// Phase 2b — parsing + indexing: parallel via rayon (CPU-bound, work-stealing pool).
 ///
+/// Progress update emitted after each indexing chunk: `(files_indexed, total_files)`.
+pub(crate) type ScanProgressTx = tokio::sync::mpsc::UnboundedSender<(usize, usize)>;
+
 /// Post-salsa: we only populate the DocumentStore here. The codebase is built
 /// on demand by the salsa `codebase` query the first time a feature asks for
 /// it — every indexed file's FileIndex, memoized thereafter.
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(
     skip(docs, open_files, cache, exclude_paths, include_paths),
     fields(root = %root.display())
@@ -61,6 +65,7 @@ pub(crate) async fn scan_workspace(
     exclude_paths: &[String],
     include_paths: &[String],
     max_files: usize,
+    progress: Option<ScanProgressTx>,
 ) -> (usize, usize) {
     // Phase 1: synchronous directory walk in the blocking pool.
     //
@@ -212,6 +217,7 @@ pub(crate) async fn scan_workspace(
     // key from content rather than mtime+size is zero extra I/O and avoids
     // stale hits when a size-preserving edit occurs within the same 1-second
     // mtime tick (common with formatters / single-char swaps).
+    let total_files = file_contents.len();
     tokio::task::spawn_blocking(move || {
         let cache_hits = std::sync::atomic::AtomicUsize::new(0);
 
@@ -248,6 +254,9 @@ pub(crate) async fn scan_workspace(
         for chunk in file_contents.chunks(500) {
             total += chunk.par_iter().map(index_file).sum::<usize>();
             docs.sync_workspace_files();
+            if let Some(ref tx) = progress {
+                let _ = tx.send((total, total_files));
+            }
         }
         let from_cache = cache_hits.load(std::sync::atomic::Ordering::Relaxed);
         (total, from_cache)
@@ -321,6 +330,7 @@ mod tests {
             &[],
             &[],
             50_000,
+            None,
         )
         .await;
         assert_eq!(count1.0, 1, "first scan should index 1 file");
@@ -347,6 +357,7 @@ mod tests {
             &[],
             &[],
             50_000,
+            None,
         )
         .await;
         assert_eq!(count2.0, 1, "second scan should still index 1 file");
@@ -390,6 +401,7 @@ mod tests {
             &[],
             &[],
             50_000,
+            None,
         )
         .await;
 
