@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use tower_lsp::lsp_types::{
-    Documentation, ParameterInformation, ParameterLabel, Position, SignatureHelp,
-    SignatureInformation, Url,
+    Documentation, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position,
+    SignatureHelp, SignatureInformation, Url,
 };
 
 use crate::document::ast::ParsedDoc;
@@ -112,10 +112,20 @@ pub fn signature_help(
         Some(active_param.min(n - 1) as u32)
     };
 
+    let sig_doc = docblock
+        .as_ref()
+        .filter(|db| !db.description.is_empty())
+        .map(|db| {
+            Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: db.description.clone(),
+            })
+        });
+
     Some(SignatureHelp {
         signatures: vec![SignatureInformation {
             label,
-            documentation: None,
+            documentation: sig_doc,
             parameters: if params.is_empty() {
                 None
             } else {

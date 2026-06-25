@@ -465,3 +465,51 @@ class App extends Base {
         .await;
     expect!["▶ boot(string $env, bool $debug = ...)  @param0"].assert_eq(&out);
 }
+
+/// A function with a docblock description surfaces that description as
+/// `SignatureInformation.documentation` so clients can display it in the
+/// signature panel alongside the parameter list.
+#[tokio::test]
+async fn signature_help_shows_function_description() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_signature_help(
+            r#"<?php
+/**
+ * Greet a user by name.
+ *
+ * @param string $name The user's name
+ */
+function greet(string $name): string { return "Hello, $name"; }
+greet($0);
+"#,
+        )
+        .await;
+    expect![[r#"
+        ▶ greet(string $name)  @param0
+          doc: Greet a user by name."#]]
+    .assert_eq(&out);
+}
+
+/// A function with only @param / @return tags and no description must NOT
+/// produce a signature-level documentation field (avoids sending empty docs).
+#[tokio::test]
+async fn signature_help_no_description_no_sig_doc() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_signature_help(
+            r#"<?php
+/**
+ * @param string $name The user's name
+ * @return string
+ */
+function greet(string $name): string { return "Hello, $name"; }
+greet($0);
+"#,
+        )
+        .await;
+    // No "doc:" line because there is no free-text description.
+    expect!["▶ greet(string $name)  @param0"].assert_eq(&out);
+}

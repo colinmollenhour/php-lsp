@@ -424,6 +424,11 @@ pub fn render_signature_help(resp: &Value) -> String {
         {
             out.push_str(&format!("  @param{p}"));
         }
+        // Render signature-level documentation on the next line when present.
+        let doc = sig["documentation"]["value"].as_str().unwrap_or("");
+        if !doc.is_empty() {
+            out.push_str(&format!("\n  doc: {doc}"));
+        }
         out.push('\n');
     }
     out.trim_end().to_owned()
