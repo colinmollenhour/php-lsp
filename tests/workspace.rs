@@ -12,6 +12,8 @@ pub use common::{
     render_locations, render_pull_diagnostics, render_semantic_tokens, render_workspace_symbols,
 };
 
+#[path = "workspace/feature_cache_warm_start.rs"]
+mod feature_cache_warm_start;
 #[path = "workspace/feature_configuration.rs"]
 mod feature_configuration;
 #[path = "workspace/feature_doc_lifecycle.rs"]

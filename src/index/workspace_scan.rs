@@ -208,10 +208,10 @@ pub(crate) async fn scan_workspace(
     }
 
     // Phase 2b: parse and index files in parallel (CPU-bound).
-    // The cache key is derived from mtime+size via a synchronous std::fs::metadata()
-    // call inside the rayon closure. In a blocking context this costs only the
-    // stat syscall (~5 µs/file with no async scheduling overhead), far cheaper
-    // than hashing the full file content (~1 ms/file CPU on warm starts).
+    // File content is already read above (file_contents); computing the cache
+    // key from content rather than mtime+size is zero extra I/O and avoids
+    // stale hits when a size-preserving edit occurs within the same 1-second
+    // mtime tick (common with formatters / single-char swaps).
     tokio::task::spawn_blocking(move || {
         let cache_hits = std::sync::atomic::AtomicUsize::new(0);
 
@@ -220,21 +220,9 @@ pub(crate) async fn scan_workspace(
                 return 0;
             }
 
-            let cache_key = cache.as_ref().and_then(|_| {
-                let path = uri.to_file_path().ok()?;
-                let meta = std::fs::metadata(&path).ok()?;
-                let mtime_secs = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                Some(crate::index::cache::WorkspaceCache::key_for_stat(
-                    uri.as_str(),
-                    mtime_secs,
-                    meta.len(),
-                ))
-            });
+            let cache_key = cache
+                .as_ref()
+                .map(|_| crate::index::cache::WorkspaceCache::key_for(uri.as_str(), text));
             if let (Some(cache), Some(key)) = (cache.as_ref(), cache_key.as_ref())
                 && let Some(index) = cache.read::<crate::index::file_index::FileIndex>(key)
             {
@@ -337,23 +325,16 @@ mod tests {
         .await;
         assert_eq!(count1.0, 1, "first scan should index 1 file");
 
-        // Overwrite the cache entry with a sentinel. The scan now uses a
-        // stat-based key (mtime + size), so we must derive the same key
-        // from the file's actual metadata rather than from its content.
+        // Overwrite the cache entry with a sentinel. The scan uses a
+        // content-based key, so derive the same key from the file content.
         let foo_path = src_dir.path().join("Foo.php");
         let uri = Url::from_file_path(&foo_path).unwrap();
-        let meta = std::fs::metadata(&foo_path).unwrap();
-        let mtime_secs = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let foo_content = std::fs::read_to_string(&foo_path).unwrap();
         let sentinel = crate::index::file_index::FileIndex {
             namespace: Some("CACHE_HIT_MARKER".into()),
             ..Default::default()
         };
-        let key = WorkspaceCache::key_for_stat(uri.as_str(), mtime_secs, meta.len());
+        let key = WorkspaceCache::key_for(uri.as_str(), &foo_content);
         cache.write(&key, &sentinel).unwrap();
 
         // Second scan: same cache dir → must read the sentinel from disk.
@@ -549,53 +530,32 @@ mod tests {
         let parse_cpu_ms = parse_ns.load(Ordering::Relaxed) / 1_000_000;
         let extract_cpu_ms = extract_ns.load(Ordering::Relaxed) / 1_000_000;
 
-        // ── Phase 2b-warm: mtime key + cache read (current production) ──────
+        // ── Phase 2b-warm: content key + cache read (current production) ────
         let cache_dir = tempfile::tempdir().unwrap();
         let cache = WorkspaceCache::with_dir(cache_dir.path().to_path_buf());
-        // Populate cache via stat key.
+        // Populate cache via content key (text is already in memory).
         file_contents.par_iter().for_each(|(uri, text)| {
-            if let Ok(path) = uri.to_file_path()
-                && let Ok(meta) = std::fs::metadata(&path)
-            {
-                let mtime = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let key = WorkspaceCache::key_for_stat(uri.as_str(), mtime, meta.len());
-                let doc = parse_document_no_diags(text);
-                let idx = crate::index::file_index::FileIndex::extract(&doc);
-                let _ = cache.write(&key, &idx);
-            }
+            let key = WorkspaceCache::key_for(uri.as_str(), text);
+            let doc = parse_document_no_diags(text);
+            let idx = crate::index::file_index::FileIndex::extract(&doc);
+            let _ = cache.write(&key, &idx);
         });
         let t4 = Instant::now();
-        let stat_ns = Arc::new(AtomicU64::new(0));
+        let hash_ns = Arc::new(AtomicU64::new(0));
         let cache_read_ns = Arc::new(AtomicU64::new(0));
         let hits = Arc::new(AtomicU64::new(0));
-        file_contents.par_iter().for_each(|(uri, _)| {
-            if let Ok(path) = uri.to_file_path() {
-                let ts = Instant::now();
-                let meta = std::fs::metadata(&path).ok();
-                stat_ns.fetch_add(ts.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                if let Some(meta) = meta {
-                    let mtime = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let key = WorkspaceCache::key_for_stat(uri.as_str(), mtime, meta.len());
-                    let tr = Instant::now();
-                    if cache
-                        .read::<crate::index::file_index::FileIndex>(&key)
-                        .is_some()
-                    {
-                        hits.fetch_add(1, Ordering::Relaxed);
-                    }
-                    cache_read_ns.fetch_add(tr.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                }
+        file_contents.par_iter().for_each(|(uri, text)| {
+            let th = Instant::now();
+            let key = WorkspaceCache::key_for(uri.as_str(), text);
+            hash_ns.fetch_add(th.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            let tr = Instant::now();
+            if cache
+                .read::<crate::index::file_index::FileIndex>(&key)
+                .is_some()
+            {
+                hits.fetch_add(1, Ordering::Relaxed);
             }
+            cache_read_ns.fetch_add(tr.elapsed().as_nanos() as u64, Ordering::Relaxed);
         });
         let t_warm_wall = t4.elapsed();
 
@@ -610,7 +570,7 @@ mod tests {
 
         // ── Report ───────────────────────────────────────────────────────────
         let h = hits.load(Ordering::Relaxed) as usize;
-        let stat_ms = stat_ns.load(Ordering::Relaxed) / 1_000_000;
+        let hash_ms = hash_ns.load(Ordering::Relaxed) / 1_000_000;
         let cread_ms = cache_read_ns.load(Ordering::Relaxed) / 1_000_000;
 
         println!();
@@ -639,13 +599,13 @@ mod tests {
             (parse_cpu_ms + extract_cpu_ms) as f64 / t_parse_wall.as_millis() as f64
         );
         println!();
-        println!("Phase 2b WARM (mtime key)");
+        println!("Phase 2b WARM (content key)");
         println!(
             "  wall (rayon {rayon_threads}T)         : {t_warm_wall:.2?}  ({h}/{n_files} hits)"
         );
         println!(
-            "  CPU stat total              : {stat_ms} ms  ({:.3} ms/file)",
-            stat_ms as f64 / n_files as f64
+            "  CPU blake3 hash total       : {hash_ms} ms  ({:.3} ms/file)",
+            hash_ms as f64 / n_files as f64
         );
         println!(
             "  CPU cache read total        : {cread_ms} ms  ({:.3} ms/file)",

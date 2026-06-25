@@ -231,6 +231,12 @@ pub struct LspConfig {
     /// fast machines / Neovim users; set higher for slow machines or large
     /// files to reduce thrashing.
     pub debounce_ms: u64,
+    /// Override the on-disk cache directory. When set, used verbatim (no
+    /// schema-version or workspace-hash subdirectories appended). Primarily
+    /// useful in tests and CI environments with non-standard cache locations.
+    /// When absent, falls back to the platform default (`$XDG_CACHE_HOME` /
+    /// `$HOME/.cache` on Unix, `%LOCALAPPDATA%` on Windows).
+    pub cache_path: Option<std::path::PathBuf>,
 }
 
 impl Default for LspConfig {
@@ -245,6 +251,7 @@ impl Default for LspConfig {
             index_vendor: false,
             debug: false,
             debounce_ms: 100,
+            cache_path: None,
         }
     }
 }
@@ -329,6 +336,9 @@ impl LspConfig {
         }
         if let Some(n) = v.get("debounceMs").and_then(|x| x.as_u64()) {
             cfg.debounce_ms = n.max(1);
+        }
+        if let Some(s) = v.get("cachePath").and_then(|x| x.as_str()) {
+            cfg.cache_path = Some(std::path::PathBuf::from(s));
         }
         cfg
     }

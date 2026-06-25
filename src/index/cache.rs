@@ -117,43 +117,21 @@ impl WorkspaceCache {
         Ok(total)
     }
 
-    /// Override the root directory directly. Intended for tests; the
-    /// directory is used verbatim (no schema / workspace subdirectories
-    /// are appended).
-    #[cfg(test)]
+    /// Override the root directory directly. The directory is used verbatim
+    /// (no schema / workspace subdirectories are appended). Use for tests or
+    /// when the caller provides an explicit `cachePath` initializationOption.
     pub fn with_dir(dir: PathBuf) -> Self {
         Self { dir }
     }
 
     /// Build a cache key from file content. Combines `uri` and `content`
     /// so that two files with identical content but different URIs get
-    /// different keys. Used by the cache-key tests.
-    #[cfg(test)]
+    /// different keys.
     pub fn key_for(uri: &str, content: &str) -> CacheKey {
         let mut hasher = blake3::Hasher::new();
         hasher.update(uri.as_bytes());
         hasher.update(&[0u8]);
         hasher.update(content.as_bytes());
-        let full = hasher.finalize().to_hex();
-        CacheKey(full.as_str()[..32].to_string())
-    }
-
-    /// Build a cache key from file metadata instead of content.
-    ///
-    /// Hashing the full file content costs ~1 ms/file CPU on warm starts,
-    /// nearly cancelling the parse savings. An mtime+size key is O(constant)
-    /// per file and is invalidated automatically when the file changes.
-    ///
-    /// Tradeoffs vs content hash: `touch` without an edit invalidates the
-    /// entry (safe cache miss, re-parses once) and clock skew on network
-    /// mounts can in theory produce a stale hit. Both are acceptable for a
-    /// developer tool where a spurious miss is safe.
-    pub fn key_for_stat(uri: &str, mtime_secs: u64, size: u64) -> CacheKey {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(uri.as_bytes());
-        hasher.update(&[1u8]); // distinct domain from key_for
-        hasher.update(&mtime_secs.to_le_bytes());
-        hasher.update(&size.to_le_bytes());
         let full = hasher.finalize().to_hex();
         CacheKey(full.as_str()[..32].to_string())
     }

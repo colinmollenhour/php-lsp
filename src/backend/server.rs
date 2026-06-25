@@ -154,12 +154,13 @@ impl LanguageServer for Backend {
             }
 
             // Add new folders and kick off background scans for each.
-            let (exclude_paths, include_paths, max_indexed_files) = {
+            let (exclude_paths, include_paths, max_indexed_files, cache_path) = {
                 let cfg = self.config.load();
                 (
                     cfg.exclude_paths.clone(),
                     cfg.include_paths.clone(),
                     cfg.max_indexed_files,
+                    cfg.cache_path.clone(),
                 )
             };
             for added in &params.event.added {
@@ -181,8 +182,13 @@ impl LanguageServer for Backend {
                         let ip = include_paths.clone();
                         let path_clone = path.clone();
                         let client = self.client.clone();
+                        let cp = cache_path.clone();
                         tokio::spawn(async move {
-                            let cache = crate::index::cache::WorkspaceCache::new(&path_clone);
+                            let cache = if let Some(p) = cp {
+                                Some(crate::index::cache::WorkspaceCache::with_dir(p))
+                            } else {
+                                crate::index::cache::WorkspaceCache::new(&path_clone)
+                            };
                             scan_workspace(
                                 path_clone,
                                 docs,
@@ -361,41 +367,26 @@ impl LanguageServer for Backend {
 
             // Persist the FileIndex to the disk cache so that a server restart
             // can skip re-parsing this file even for edits that happened between
-            // workspace scans. Use the same stat-based key as the workspace scan
-            // so the entry is found on the next cold start.
-            //
-            // Both the stat and the content are read from disk inside the blocking
-            // task so they come from the same on-disk snapshot. Using the editor
-            // buffer (open_files text) instead would risk writing an index derived
-            // from unsaved edits typed after the save but before this task runs,
-            // producing a cache entry where the key (disk stat) and the value
-            // (index of newer buffer content) describe different file versions.
-            if let (Some(root), Ok(path)) =
-                (self.root_paths.load().first().cloned(), uri.to_file_path())
-            {
+            // workspace scans. Content-keyed so the entry matches the scan's key
+            // on restart regardless of mtime granularity.
+            let cache_path = self.config.load().cache_path.clone();
+            if let Ok(path) = uri.to_file_path() {
+                let root = self.root_paths.load().first().cloned();
                 tokio::task::spawn_blocking(move || {
-                    let Some(cache) = crate::index::cache::WorkspaceCache::new(&root) else {
-                        return;
-                    };
-                    // Stat before read to match workspace_scan ordering and
-                    // minimise the TOCTOU window.
-                    let Ok(meta) = std::fs::metadata(&path) else {
+                    let cache = if let Some(p) = cache_path {
+                        crate::index::cache::WorkspaceCache::with_dir(p)
+                    } else if let Some(r) = root {
+                        let Some(c) = crate::index::cache::WorkspaceCache::new(&r) else {
+                            return;
+                        };
+                        c
+                    } else {
                         return;
                     };
                     let Ok(text) = std::fs::read_to_string(&path) else {
                         return;
                     };
-                    let mtime_secs = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let key = crate::index::cache::WorkspaceCache::key_for_stat(
-                        uri.as_str(),
-                        mtime_secs,
-                        meta.len(),
-                    );
+                    let key = crate::index::cache::WorkspaceCache::key_for(uri.as_str(), &text);
                     let doc = parse_document_no_diags(&text);
                     let index = crate::index::file_index::FileIndex::extract(&doc);
                     let _ = cache.write(&key, &index);

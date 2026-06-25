@@ -333,7 +333,7 @@ impl Backend {
             let open_files = self.open_files.clone();
             let client = self.client.clone();
             let psr4 = self.psr4.clone();
-            let (exclude_paths, include_paths, max_indexed_files, debug) = {
+            let (exclude_paths, include_paths, max_indexed_files, debug, cache_path) = {
                 let cfg = self.config.load();
                 let mut exclude = cfg.exclude_paths.clone();
                 if !cfg.index_vendor && !exclude.iter().any(|p| p == "vendor" || p == "vendor/") {
@@ -344,6 +344,7 @@ impl Backend {
                     cfg.include_paths.clone(),
                     cfg.max_indexed_files,
                     cfg.debug,
+                    cfg.cache_path.clone(),
                 )
             };
             tokio::spawn(async move {
@@ -366,7 +367,11 @@ impl Backend {
                 let mut from_cache = 0usize;
                 let mut session_cache_set = false;
                 for root in &roots {
-                    let cache = crate::index::cache::WorkspaceCache::new(root);
+                    let cache = if let Some(ref p) = cache_path {
+                        Some(crate::index::cache::WorkspaceCache::with_dir(p.clone()))
+                    } else {
+                        crate::index::cache::WorkspaceCache::new(root)
+                    };
                     if !session_cache_set && let Some(ref c) = cache {
                         let session_dir = c.cache_dir().join("session");
                         docs.set_session_cache_dir(session_dir);
