@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::{
 
 use crate::document::ast::ParsedDoc;
 use crate::hover::format_params_str;
-use crate::index::file_index::{FileIndex, ParamDef};
+use crate::index::file_index::{DocMethodParam, FileIndex, ParamDef};
 use crate::lang::docblock::find_docblock;
 use crate::text::{fqn_short_name, split_params};
 
@@ -281,6 +281,26 @@ fn format_param(p: &ParamDef) -> String {
     s
 }
 
+fn format_doc_param(p: &DocMethodParam) -> String {
+    let mut s = String::new();
+    if let Some(t) = &p.type_hint {
+        s.push_str(t);
+        s.push(' ');
+    }
+    if p.is_byref {
+        s.push('&');
+    }
+    if p.is_variadic {
+        s.push_str("...");
+    }
+    s.push('$');
+    s.push_str(&p.name);
+    if p.is_optional {
+        s.push_str(" = ...");
+    }
+    s
+}
+
 /// Walk the class hierarchy starting from `class_name` (short name) and return
 /// the parameter list string of the first matching method. Follows `parent`
 /// links stored in `FileIndex` up to 10 levels deep to handle inherited methods.
@@ -308,6 +328,17 @@ fn find_method_params_in_hierarchy(
                             m.params
                                 .iter()
                                 .map(format_param)
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        );
+                    }
+                }
+                for dm in &cls.doc_methods {
+                    if dm.name.as_ref() == method_name {
+                        return Some(
+                            dm.params
+                                .iter()
+                                .map(format_doc_param)
                                 .collect::<Vec<_>>()
                                 .join(", "),
                         );

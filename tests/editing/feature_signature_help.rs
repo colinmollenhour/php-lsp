@@ -492,6 +492,90 @@ greet($0);
     .assert_eq(&out);
 }
 
+/// Signature help for a method declared only via `@method` in a docblock shows
+/// the parameter list extracted from the tag.
+#[tokio::test]
+async fn signature_help_doc_method_instance() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_signature_help(
+            r#"<?php
+/**
+ * @method User find(int $id)
+ */
+class Model {}
+
+$m = new Model();
+$m->find($0);
+"#,
+        )
+        .await;
+    expect!["▶ find(int $id)  @param0"].assert_eq(&out);
+}
+
+/// Signature help for a static `@method` declaration surfaced via `ClassName::`.
+#[tokio::test]
+async fn signature_help_doc_method_static() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_signature_help(
+            r#"<?php
+/**
+ * @method static User create(string $name, int $age)
+ */
+class Model {}
+
+Model::create($0);
+"#,
+        )
+        .await;
+    expect!["▶ create(string $name, int $age)  @param0"].assert_eq(&out);
+}
+
+/// An optional parameter in a `@method` tag is shown with `= ...` placeholder.
+#[tokio::test]
+async fn signature_help_doc_method_optional_param() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_signature_help(
+            r#"<?php
+/**
+ * @method User findOrDefault(int $id, mixed $default = null)
+ */
+class Model {}
+
+$m = new Model();
+$m->findOrDefault($0);
+"#,
+        )
+        .await;
+    expect!["▶ findOrDefault(int $id, mixed $default = ...)  @param0"].assert_eq(&out);
+}
+
+/// A `@method` with no parameters shows an empty signature (no @param marker).
+#[tokio::test]
+async fn signature_help_doc_method_no_params() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_signature_help(
+            r#"<?php
+/**
+ * @method void reset()
+ */
+class Model {}
+
+$m = new Model();
+$m->reset($0);
+"#,
+        )
+        .await;
+    expect!["▶ reset()"].assert_eq(&out);
+}
+
 /// A function with only @param / @return tags and no description must NOT
 /// produce a signature-level documentation field (avoids sending empty docs).
 #[tokio::test]

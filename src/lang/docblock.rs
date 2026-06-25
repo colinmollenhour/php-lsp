@@ -113,10 +113,20 @@ pub struct DocProperty {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct DocMethodParam {
+    pub name: String,
+    pub type_hint: String,
+    pub is_variadic: bool,
+    pub is_byref: bool,
+    pub is_optional: bool,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct DocMethod {
     pub return_type: String,
     pub name: String,
     pub is_static: bool,
+    pub params: Vec<DocMethodParam>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -419,6 +429,17 @@ pub fn parse_docblock(raw: &str) -> Docblock {
             return_type: m.return_type.clone(),
             name: m.name.clone(),
             is_static: m.is_static,
+            params: m
+                .params
+                .iter()
+                .map(|p| DocMethodParam {
+                    name: p.name.clone(),
+                    type_hint: p.type_hint.clone(),
+                    is_variadic: p.is_variadic,
+                    is_byref: p.is_byref,
+                    is_optional: p.is_optional,
+                })
+                .collect(),
         })
         .collect();
 

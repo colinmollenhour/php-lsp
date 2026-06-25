@@ -100,6 +100,16 @@ pub struct TraitMethodAlias {
     pub trait_name: Option<Box<str>>,
 }
 
+/// A parameter from a `@method` docblock tag.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DocMethodParam {
+    pub name: Box<str>,
+    pub type_hint: Option<Box<str>>,
+    pub is_variadic: bool,
+    pub is_byref: bool,
+    pub is_optional: bool,
+}
+
 /// A method declared only via a `@method` docblock tag (no real body).
 /// Kept separate from `MethodDef` so consumers that build signatures or inlay
 /// hints don't accidentally iterate over methods with no parameter information.
@@ -111,6 +121,8 @@ pub struct DocMethodEntry {
     pub return_type: Option<Box<str>>,
     /// Source line of the `@method` tag (0-based).
     pub start_line: u32,
+    /// Parameters extracted from the `@method` tag signature.
+    pub params: Vec<DocMethodParam>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -368,6 +380,21 @@ fn collect_stmts(
                             is_static: dm.is_static,
                             return_type: ret,
                             start_line: line,
+                            params: dm
+                                .params
+                                .iter()
+                                .map(|p| DocMethodParam {
+                                    name: Box::from(p.name.as_str()),
+                                    type_hint: if p.type_hint.is_empty() {
+                                        None
+                                    } else {
+                                        Some(Box::from(p.type_hint.as_str()))
+                                    },
+                                    is_variadic: p.is_variadic,
+                                    is_byref: p.is_byref,
+                                    is_optional: p.is_optional,
+                                })
+                                .collect(),
                         });
                     }
                     for mixin in &db.mixins {
