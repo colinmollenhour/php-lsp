@@ -167,7 +167,10 @@ pub(crate) async fn scan_workspace(
         out
     })
     .await
-    .unwrap_or_default();
+    .unwrap_or_else(|e| {
+        tracing::warn!("workspace scan (phase 1 walk) panicked: {e}");
+        Vec::new()
+    });
 
     // Prepend explicit autoload.files so they are always indexed regardless of
     // whether the directory walk would reach them.
@@ -262,7 +265,10 @@ pub(crate) async fn scan_workspace(
         (total, from_cache)
     })
     .await
-    .unwrap_or((0, 0))
+    .unwrap_or_else(|e| {
+        tracing::warn!("workspace scan (phase 2b index) panicked: {e}");
+        (0, 0)
+    })
 }
 
 fn matches_any(rel_path: &str, patterns: &[String]) -> bool {

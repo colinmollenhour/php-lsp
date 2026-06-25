@@ -288,7 +288,10 @@ impl LanguageServer for Backend {
                 let (_doc, parse_diags) =
                     tokio::task::spawn_blocking(move || parse_document(&text))
                         .await
-                        .unwrap_or_else(|_| (ParsedDoc::default(), vec![]));
+                        .unwrap_or_else(|e| {
+                            tracing::warn!("parse_document panicked for {uri}: {e}");
+                            (ParsedDoc::default(), vec![])
+                        });
 
                 // Only apply if no newer edit arrived while we were parsing.
                 if open_files.current_version(&uri) == Some(version) {
@@ -641,15 +644,28 @@ impl LanguageServer for Backend {
             let hover_session = self
                 .docs
                 .analysis_session(self.docs.workspace_php_version());
-            let result = hover_info_with_maps(
-                &source,
-                &doc,
-                analysis.as_deref(),
-                position,
-                &other_docs,
-                &other_maps,
-                Some(&hover_session),
-            );
+            let source_clone = source.clone();
+            let doc_clone = Arc::clone(&doc);
+            let uri_str = uri.to_string();
+            let result = match tokio::task::spawn_blocking(move || {
+                hover_info_with_maps(
+                    &source_clone,
+                    &doc_clone,
+                    analysis.as_deref(),
+                    position,
+                    &other_docs,
+                    &other_maps,
+                    Some(&hover_session),
+                )
+            })
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!("hover panicked for {uri_str}: {e}");
+                    None
+                }
+            };
             if result.is_some() {
                 return Ok(result);
             }
@@ -734,13 +750,25 @@ impl LanguageServer for Backend {
             };
             let analysis = self.cached_analysis_async(uri).await;
             let wi = self.workspace_index_async().await;
-            Ok(Some(inlay_hints(
-                doc.source(),
-                &doc,
-                analysis.as_deref(),
-                params.range,
-                &wi.files,
-            )))
+            let uri_str = uri.to_string();
+            let hints = match tokio::task::spawn_blocking(move || {
+                inlay_hints(
+                    doc.source(),
+                    &doc,
+                    analysis.as_deref(),
+                    params.range,
+                    &wi.files,
+                )
+            })
+            .await
+            {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::warn!("inlay_hint panicked for {uri_str}: {e}");
+                    Vec::new()
+                }
+            };
+            Ok(Some(hints))
         })
         .await
     }
@@ -781,7 +809,18 @@ impl LanguageServer for Backend {
             // workspace-symbol queries (every keystroke in the picker) share the
             // same `Arc` until a file changes.
             let wi = self.workspace_index_async().await;
-            let results = workspace_symbols_from_workspace(&params.query, &wi);
+            let query = params.query;
+            let results = match tokio::task::spawn_blocking(move || {
+                workspace_symbols_from_workspace(&query, &wi)
+            })
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!("workspace/symbol panicked: {e}");
+                    Vec::new()
+                }
+            };
             Ok(Some(results))
         })
         .await

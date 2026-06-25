@@ -96,10 +96,14 @@ impl Backend {
             return Some(hit);
         }
         let docs = Arc::clone(&self.docs);
-        let uri = uri.clone();
-        tokio::task::spawn_blocking(move || docs.cached_analysis(&uri))
-            .await
-            .unwrap_or(None)
+        let uri_owned = uri.clone();
+        match tokio::task::spawn_blocking(move || docs.cached_analysis(&uri_owned)).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("cached_analysis panicked for {uri}: {e}");
+                None
+            }
+        }
     }
 
     /// Fetch the salsa-memoized workspace aggregate without blocking the async
