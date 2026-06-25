@@ -1,5 +1,6 @@
-//! Code action: "Convert to arrow function" — converts a closure whose body is
-//! a single `return` statement into a PHP 7.4+ arrow function expression.
+//! Code actions for arrow function ↔ closure conversions:
+//! - "Convert to arrow function": closure with single `return` → arrow function
+//! - "Convert to closure": arrow function → closure with `{ return …; }`
 
 use super::*;
 use expect_test::expect;
@@ -254,6 +255,222 @@ $fn = $0function(?string $s): ?string { return $s; }$0;
     expect![[r#"
         <?php
         $fn = fn(?string $s): ?string => $s;
+    "#]]
+    .assert_eq(&out);
+}
+
+// ── Convert to closure ────────────────────────────────────────────────────────
+
+// --- Offered ---
+
+#[tokio::test]
+async fn to_closure_offered_for_simple_arrow_function() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_actions(
+            r#"<?php
+$fn = $0fn() => 42$0;
+"#,
+        )
+        .await;
+    assert!(
+        out.contains("Convert to closure"),
+        "expected action in: {out}"
+    );
+}
+
+#[tokio::test]
+async fn to_closure_offered_when_cursor_inside_body() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_actions(
+            r#"<?php
+$fn = fn($x) => $0$x * 2;
+"#,
+        )
+        .await;
+    assert!(
+        out.contains("Convert to closure"),
+        "expected action in: {out}"
+    );
+}
+
+// --- Not offered ---
+
+#[tokio::test]
+async fn to_closure_not_offered_when_cursor_is_outside() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    // Cursor is before the fn keyword
+    let out = s
+        .check_code_actions(
+            r#"<?php
+$fn$0 = fn() => 42;
+"#,
+        )
+        .await;
+    assert!(
+        !out.contains("Convert to closure"),
+        "should not offer when cursor is outside arrow function, got: {out}"
+    );
+}
+
+// --- Applied edits ---
+
+#[tokio::test]
+async fn to_closure_converts_no_param_arrow() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$fn = $0fn() => 42$0;
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        $fn = function() { return 42; };
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn to_closure_converts_arrow_with_params() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$fn = $0fn(int $x, int $y) => $x + $y$0;
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        $fn = function(int $x, int $y) { return $x + $y; };
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn to_closure_converts_arrow_with_return_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$fn = $0fn(string $s): string => strtoupper($s)$0;
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        $fn = function(string $s): string { return strtoupper($s); };
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn to_closure_converts_static_arrow() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$fn = $0static fn(int $n): int => $n * 2$0;
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        $fn = static function(int $n): int { return $n * 2; };
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn to_closure_converts_arrow_inside_array_map() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$result = array_map($0fn(int $n) => $n * $n$0, $items);
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        $result = array_map(function(int $n) { return $n * $n; }, $items);
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn to_closure_converts_innermost_nested_arrow() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$outer = fn($a) => $0fn($b) => $a + $b$0;
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        $outer = fn($a) => function($b) { return $a + $b; };
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn to_closure_converts_arrow_inside_closure_body() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$outer = function(int $a) {
+    return $0fn(int $b) => $a + $b$0;
+};
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        $outer = function(int $a) {
+            return function(int $b) { return $a + $b; };
+        };
+    "#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn to_closure_with_nullable_return_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+$fn = $0fn(?string $s): ?string => $s$0;
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        $fn = function(?string $s): ?string { return $s; };
     "#]]
     .assert_eq(&out);
 }
