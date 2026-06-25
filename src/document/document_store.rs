@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use arc_swap::ArcSwap;
@@ -71,6 +71,12 @@ pub struct DocumentStore {
     /// only applies once this is `true`; before then it falls back to the full
     /// workspace scope so references are never under-reported.
     index_ready: AtomicBool,
+    /// Monotonically increasing counter bumped on every actual text write
+    /// (including file deletions). Long-running read operations (e.g.
+    /// `session_references_to`) capture this value before starting and
+    /// cancel themselves if it advances — avoiding stale results and
+    /// unbounded retry loops after concurrent edits.
+    write_revision: AtomicU64,
 }
 
 impl Default for DocumentStore {
@@ -94,6 +100,7 @@ impl DocumentStore {
             autoload_uris: std::sync::RwLock::new(Vec::new()),
             vendor_index_cache: DashMap::new(),
             index_ready: AtomicBool::new(false),
+            write_revision: AtomicU64::new(0),
         }
     }
 
@@ -106,6 +113,14 @@ impl DocumentStore {
     /// Whether the workspace reference index has finished building.
     pub fn is_index_ready(&self) -> bool {
         self.index_ready.load(Ordering::Acquire)
+    }
+
+    /// Snapshot of the write-revision counter. Long-running reads should
+    /// capture this before starting and pass it to cancellable operations;
+    /// if the counter advances, those operations abort and return empty rather
+    /// than looping indefinitely against a newly-invalidated database.
+    pub fn write_rev(&self) -> u64 {
+        self.write_revision.load(Ordering::Acquire)
     }
 
     /// Set the directory used to persist stub-parse and analysis results across
@@ -286,6 +301,7 @@ impl DocumentStore {
             // Evict only this file's analysis; cross-file invalidation is handled
             // lazily in `cached_analysis` via the declaration fingerprint.
             self.caches.evict_analysis(uri);
+            self.write_revision.fetch_add(1, Ordering::Release);
         } else {
             let wf = session.with_db_mut(|db| {
                 let sf = db.upsert_source_file_with_durability(path, text_arc.clone(), dur);
@@ -294,6 +310,7 @@ impl DocumentStore {
             self.lsp_ws_files.insert(uri.clone(), wf);
             self.caches.text_cache.insert(uri.clone(), text_arc);
             self.workspace_files_dirty.store(true, Ordering::Release);
+            self.write_revision.fetch_add(1, Ordering::Release);
         }
     }
 
@@ -395,6 +412,7 @@ impl DocumentStore {
         if let Some((_, session)) = guard.as_ref() {
             session.invalidate_file(uri.as_str());
         }
+        self.write_revision.fetch_add(1, Ordering::Release);
     }
 
     // ── Salsa-backed accessors ─────────────────────────────────────────────
@@ -543,10 +561,17 @@ impl DocumentStore {
     /// session. `files` should be the text-pre-filtered candidate set.
     ///
     /// Returns LSP-style 0-based line/column.
+    ///
+    /// `cancel_rev`: when `Some(rev)`, the loop throws `salsa::Cancelled` and
+    /// returns empty if a concurrent write advances the `write_revision` counter
+    /// past `rev` — preventing unbounded retries against a newly-invalidated db.
+    /// Pass `None` to retain the original indefinite-retry behaviour (fast ops
+    /// like single-file reads where a stale result is not a concern).
     pub fn session_references_to(
         &self,
         symbol: &mir_analyzer::Name,
         files: &[Arc<str>],
+        cancel_rev: Option<u64>,
     ) -> Vec<(Arc<str>, u32, u32, u32)> {
         let php_version = self.workspace_php_version();
         // Retry: concurrent db writes (background indexing) cancel snapshot
@@ -558,6 +583,16 @@ impl DocumentStore {
                 session.references_to_in_files(symbol, files)
             })) {
                 break refs;
+            }
+            // If the caller supplied a revision snapshot, abort when a
+            // concurrent write has invalidated the db — the request is now
+            // stale and looping further wastes CPU on a result nobody wants.
+            if let Some(rev) = cancel_rev
+                && self.write_revision.load(Ordering::Acquire) != rev
+            {
+                // Propagate as salsa::Cancelled so spawn_blocking callers
+                // see a JoinError::Panicked and return empty via unwrap_or_default.
+                std::panic::resume_unwind(Box::new(salsa::Cancelled::PendingWrite));
             }
         };
         raw.into_iter()
@@ -1641,5 +1676,40 @@ mod tests {
             Arc::ptr_eq(&prog_b_first, &prog_b_second),
             "B's owned_program Arc should be identical (cache hit) after sibling declaration change"
         );
+    }
+
+    /// write_rev() increments on each real text write (identical text is a no-op).
+    #[test]
+    fn write_rev_increments_on_write() {
+        let store = DocumentStore::new();
+        let u = uri("/rev_test.php");
+        let before = store.write_rev();
+        store.mirror_text(&u, "<?php echo 1;");
+        let after_first = store.write_rev();
+        assert!(after_first > before, "first write must bump the revision");
+        // Identical text must NOT bump the revision (fast path).
+        store.mirror_text(&u, "<?php echo 1;");
+        assert_eq!(
+            store.write_rev(),
+            after_first,
+            "identical text must not bump the revision"
+        );
+        // Different text must bump again.
+        store.mirror_text(&u, "<?php echo 2;");
+        assert!(
+            store.write_rev() > after_first,
+            "changed text must bump the revision"
+        );
+    }
+
+    /// write_rev() increments when a file is removed.
+    #[test]
+    fn write_rev_increments_on_remove() {
+        let store = DocumentStore::new();
+        let u = uri("/rev_remove.php");
+        store.mirror_text(&u, "<?php class A {}");
+        let before = store.write_rev();
+        store.remove(&u);
+        assert!(store.write_rev() > before, "remove must bump the revision");
     }
 }

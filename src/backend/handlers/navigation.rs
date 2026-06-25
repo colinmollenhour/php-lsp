@@ -350,6 +350,7 @@ impl Backend {
             });
 
             let docs = Arc::clone(&self.docs);
+            let cancel_rev = self.docs.write_rev();
             let locations = tokio::task::spawn_blocking(move || {
                 let query = ReferenceQuery {
                     word: &word,
@@ -362,6 +363,7 @@ impl Backend {
                     &candidate_urls,
                     include_declaration,
                     declaration_location,
+                    Some(cancel_rev),
                 )
             })
             .await

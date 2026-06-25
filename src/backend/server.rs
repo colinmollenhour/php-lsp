@@ -449,16 +449,14 @@ impl LanguageServer for Backend {
                 .into_iter()
                 .map(|(_, d)| d)
                 .collect();
+            // Clone to owned so the closure is 'static + Send.
             let trigger = params
                 .context
                 .as_ref()
-                .and_then(|c| c.trigger_character.as_deref());
-            let meta_loaded = self.meta.load();
-            let meta_opt = if meta_loaded.is_empty() {
-                None
-            } else {
-                Some(&**meta_loaded)
-            };
+                .and_then(|c| c.trigger_character.clone());
+            // load_full() returns Arc<PhpStormMeta> — avoids a non-'static borrow
+            // that would prevent moving into spawn_blocking.
+            let meta_arc = self.meta.load_full();
             let imports = self.file_imports(uri);
             let wi = self.workspace_index_async().await;
             let docs_for_lookup = Arc::clone(&self.docs);
@@ -474,28 +472,51 @@ impl LanguageServer for Backend {
             let docs_for_tm = Arc::clone(&self.docs);
             let doc_for_tm = Arc::clone(&doc);
             let uri_for_tm = uri.clone();
-            let get_type_map =
-                move || docs_for_tm.cached_type_map(&uri_for_tm, &doc_for_tm, meta_opt);
+            let meta_arc_for_tm = Arc::clone(&meta_arc);
+            let get_type_map = move || {
+                let meta = if meta_arc_for_tm.is_empty() {
+                    None
+                } else {
+                    Some(&*meta_arc_for_tm)
+                };
+                docs_for_tm.cached_type_map(&uri_for_tm, &doc_for_tm, meta)
+            };
             let session = self
                 .docs
                 .analysis_session(self.docs.workspace_php_version());
-            let ctx = CompletionCtx {
-                source: Some(&source),
-                position: Some(position),
-                meta: meta_opt,
-                doc_uri: Some(uri),
-                file_imports: Some(&imports),
-                find_class_doc: Some(&find_class_doc_fn),
-                analysis: analysis.as_deref(),
-                type_map: Some(&get_type_map),
-                session: Some(session),
+            let uri_owned = uri.clone();
+            let uri_str = uri.to_string();
+            // Offload to spawn_blocking: filtered_completions_at walks the full
+            // AST + workspace index which can take tens of milliseconds on large
+            // files, blocking the async executor from unrelated requests.
+            let items = match tokio::task::spawn_blocking(move || {
+                let meta_opt = if meta_arc.is_empty() {
+                    None
+                } else {
+                    Some(&*meta_arc)
+                };
+                let ctx = CompletionCtx {
+                    source: Some(&source),
+                    position: Some(position),
+                    meta: meta_opt,
+                    doc_uri: Some(&uri_owned),
+                    file_imports: Some(&imports),
+                    find_class_doc: Some(&find_class_doc_fn),
+                    analysis: analysis.as_deref(),
+                    type_map: Some(&get_type_map),
+                    session: Some(session),
+                };
+                filtered_completions_at(&doc, &other_docs, trigger.as_deref(), &ctx)
+            })
+            .await
+            {
+                Ok(items) => items,
+                Err(e) => {
+                    tracing::warn!("completion panicked for {uri_str}: {e}");
+                    vec![]
+                }
             };
-            Ok(Some(CompletionResponse::Array(filtered_completions_at(
-                &doc,
-                &other_docs,
-                trigger,
-                &ctx,
-            ))))
+            Ok(Some(CompletionResponse::Array(items)))
         })
         .await
     }

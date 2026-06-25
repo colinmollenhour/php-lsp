@@ -811,6 +811,7 @@ impl<'a> ReferenceQuery<'a> {
         candidate_urls: &[Url],
         include_declaration: bool,
         declaration_location: Option<Location>,
+        cancel_rev: Option<u64>,
     ) -> Vec<Location> {
         let candidate_files = || -> Vec<Arc<str>> {
             candidate_urls
@@ -826,7 +827,7 @@ impl<'a> ReferenceQuery<'a> {
             && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
         {
             let locs: Vec<Location> = docs
-                .session_references_to(&sym, &candidate_files())
+                .session_references_to(&sym, &candidate_files(), cancel_rev)
                 .into_iter()
                 .filter_map(|tuple| {
                     let loc = session_tuple_to_location(tuple)?;
@@ -882,7 +883,7 @@ impl<'a> ReferenceQuery<'a> {
             Some(SymbolKind::Method) | Some(SymbolKind::Property)
         ) && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
         {
-            let extra = docs.session_references_to(&sym, &candidate_files());
+            let extra = docs.session_references_to(&sym, &candidate_files(), cancel_rev);
             if !extra.is_empty() {
                 let mut seen: HashSet<(String, u32, u32, u32)> =
                     locations.iter().map(ref_location_key).collect();
