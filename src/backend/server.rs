@@ -989,13 +989,20 @@ impl LanguageServer for Backend {
             // Genuinely needs every doc (call sites are body-level, not indexed);
             // run the workspace scan on the blocking pool.
             let docs = Arc::clone(&self.docs);
+            let item_uri = params.item.uri.to_string();
             let item = params.item;
-            let calls = tokio::task::spawn_blocking(move || {
+            let calls = match tokio::task::spawn_blocking(move || {
                 let all_docs = docs.all_docs_for_scan();
                 incoming_calls(&item, &all_docs)
             })
             .await
-            .unwrap_or_default();
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("incoming_calls panicked for {item_uri}: {e}");
+                    vec![]
+                }
+            };
             Ok(if calls.is_empty() { None } else { Some(calls) })
         })
         .await
@@ -1010,13 +1017,20 @@ impl LanguageServer for Backend {
             // path re-scanned the whole workspace once per distinct callee.
             let wi = self.workspace_index_async().await;
             let docs = Arc::clone(&self.docs);
+            let item_uri = params.item.uri.to_string();
             let item = params.item;
-            let calls = tokio::task::spawn_blocking(move || {
+            let calls = match tokio::task::spawn_blocking(move || {
                 let get_doc = |u: &Url| docs.get_doc_salsa(u);
                 outgoing_calls_indexed(&item, &wi, &get_doc)
             })
             .await
-            .unwrap_or_default();
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("outgoing_calls panicked for {item_uri}: {e}");
+                    vec![]
+                }
+            };
             Ok(if calls.is_empty() { None } else { Some(calls) })
         })
         .await
@@ -1275,12 +1289,19 @@ impl LanguageServer for Backend {
             // whole computation on the blocking pool.
             let docs = Arc::clone(&self.docs);
             let uri_owned = uri.clone();
-            let lenses = tokio::task::spawn_blocking(move || {
+            let uri_str = uri.to_string();
+            let lenses = match tokio::task::spawn_blocking(move || {
                 let all_docs = docs.all_docs_for_scan();
                 code_lenses(&uri_owned, &doc, &all_docs)
             })
             .await
-            .unwrap_or_default();
+            {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::warn!("code_lens panicked for {uri_str}: {e}");
+                    vec![]
+                }
+            };
             Ok(if lenses.is_empty() {
                 None
             } else {
