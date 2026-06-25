@@ -5,6 +5,7 @@ pub mod extract_method_action;
 pub mod generate_action;
 pub mod implement_action;
 pub mod inline_action;
+pub mod local_to_property_action;
 pub mod phpdoc_action;
 pub mod promote_action;
 pub mod switch_to_match_action;

@@ -29,6 +29,8 @@ mod feature_code_action_generate;
 mod feature_code_action_implement_interface;
 #[path = "editing/feature_code_action_inline_variable.rs"]
 mod feature_code_action_inline_variable;
+#[path = "editing/feature_code_action_local_to_property.rs"]
+mod feature_code_action_local_to_property;
 #[path = "editing/feature_code_action_organize_imports.rs"]
 mod feature_code_action_organize_imports;
 #[path = "editing/feature_code_action_phpdoc.rs"]

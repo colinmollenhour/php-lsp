@@ -10,6 +10,7 @@ use crate::actions::extract_action::extract_variable_actions;
 use crate::actions::extract_constant_action::extract_constant_actions;
 use crate::actions::extract_method_action::extract_method_actions;
 use crate::actions::inline_action::inline_variable_actions;
+use crate::actions::local_to_property_action::local_to_property_actions;
 use crate::actions::switch_to_match_action::switch_to_match_actions;
 use crate::actions::visibility_action::change_visibility_actions;
 use crate::editing::organize_imports::organize_imports_action;
@@ -148,6 +149,7 @@ impl Backend {
             uri,
         ));
         actions.extend(switch_to_match_actions(&source, &doc, params.range, uri));
+        actions.extend(local_to_property_actions(&source, &doc, params.range, uri));
         if let Some(action) = organize_imports_action(&source, uri) {
             actions.push(action);
         }
