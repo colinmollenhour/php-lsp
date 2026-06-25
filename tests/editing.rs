@@ -21,6 +21,8 @@ mod feature_code_action_add_throws;
 mod feature_code_action_arrow_function;
 #[path = "editing/feature_code_action_extract_constant.rs"]
 mod feature_code_action_extract_constant;
+#[path = "editing/feature_code_action_extract_interface.rs"]
+mod feature_code_action_extract_interface;
 #[path = "editing/feature_code_action_extract_method.rs"]
 mod feature_code_action_extract_method;
 #[path = "editing/feature_code_action_extract_variable.rs"]

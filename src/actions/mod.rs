@@ -2,6 +2,7 @@ pub mod add_throws_action;
 pub mod arrow_function_action;
 pub mod extract_action;
 pub mod extract_constant_action;
+pub mod extract_interface_action;
 pub mod extract_method_action;
 pub mod generate_action;
 pub mod implement_action;
