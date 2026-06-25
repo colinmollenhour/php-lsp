@@ -7,3 +7,4 @@ pub mod inline_action;
 pub mod phpdoc_action;
 pub mod promote_action;
 pub mod type_action;
+pub mod visibility_action;

@@ -33,6 +33,8 @@ mod feature_code_action_organize_imports;
 mod feature_code_action_phpdoc;
 #[path = "editing/feature_code_action_return_type.rs"]
 mod feature_code_action_return_type;
+#[path = "editing/feature_code_action_visibility.rs"]
+mod feature_code_action_visibility;
 #[path = "editing/feature_code_actions.rs"]
 mod feature_code_actions;
 #[path = "editing/feature_completion.rs"]
