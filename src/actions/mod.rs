@@ -1,3 +1,4 @@
+pub mod add_throws_action;
 pub mod arrow_function_action;
 pub mod extract_action;
 pub mod extract_constant_action;

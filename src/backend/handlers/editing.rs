@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
+use crate::actions::add_throws_action::add_throws_actions;
 use crate::actions::arrow_function_action::{
     arrow_function_to_closure_actions, closure_to_arrow_function_actions,
 };
@@ -152,6 +153,7 @@ impl Backend {
         actions.extend(switch_to_match_actions(&source, &doc, params.range, uri));
         actions.extend(local_to_property_actions(&source, &doc, params.range, uri));
         actions.extend(update_phpdoc_actions(uri, &doc, params.range));
+        actions.extend(add_throws_actions(uri, &doc, params.range));
         if let Some(action) = organize_imports_action(&source, uri) {
             actions.push(action);
         }
