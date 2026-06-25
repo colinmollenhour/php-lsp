@@ -35,6 +35,8 @@ mod feature_code_action_organize_imports;
 mod feature_code_action_phpdoc;
 #[path = "editing/feature_code_action_return_type.rs"]
 mod feature_code_action_return_type;
+#[path = "editing/feature_code_action_switch_to_match.rs"]
+mod feature_code_action_switch_to_match;
 #[path = "editing/feature_code_action_visibility.rs"]
 mod feature_code_action_visibility;
 #[path = "editing/feature_code_actions.rs"]

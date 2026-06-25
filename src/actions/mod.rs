@@ -7,5 +7,6 @@ pub mod implement_action;
 pub mod inline_action;
 pub mod phpdoc_action;
 pub mod promote_action;
+pub mod switch_to_match_action;
 pub mod type_action;
 pub mod visibility_action;
