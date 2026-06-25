@@ -12,6 +12,7 @@ use crate::actions::extract_method_action::extract_method_actions;
 use crate::actions::inline_action::inline_variable_actions;
 use crate::actions::local_to_property_action::local_to_property_actions;
 use crate::actions::switch_to_match_action::switch_to_match_actions;
+use crate::actions::update_phpdoc_action::update_phpdoc_actions;
 use crate::actions::visibility_action::change_visibility_actions;
 use crate::editing::organize_imports::organize_imports_action;
 use crate::editing::use_import::{
@@ -150,6 +151,7 @@ impl Backend {
         ));
         actions.extend(switch_to_match_actions(&source, &doc, params.range, uri));
         actions.extend(local_to_property_actions(&source, &doc, params.range, uri));
+        actions.extend(update_phpdoc_actions(uri, &doc, params.range));
         if let Some(action) = organize_imports_action(&source, uri) {
             actions.push(action);
         }

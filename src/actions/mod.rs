@@ -10,4 +10,5 @@ pub mod phpdoc_action;
 pub mod promote_action;
 pub mod switch_to_match_action;
 pub mod type_action;
+pub mod update_phpdoc_action;
 pub mod visibility_action;
