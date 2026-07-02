@@ -12,6 +12,7 @@ use crate::hover::{
     class_hover_from_index, docs_for_symbol_from_index, extract_static_class_before_cursor,
     hover_info_with_maps, method_hover_from_index, signature_for_symbol_from_index,
 };
+use crate::index::file_index::ClassKind;
 use crate::index::workspace_scan::{scan_workspace, send_refresh_requests};
 use crate::lang::config::LspConfig;
 use crate::navigation::symbols::{
@@ -451,12 +452,54 @@ impl LanguageServer for Backend {
             let meta_arc = self.meta.load_full();
             let imports = self.file_imports(uri);
             let wi = self.workspace_index_async().await;
+            let wi_for_class_search = Arc::clone(&wi);
+            let uri_for_class_search = uri.clone();
             let docs_for_lookup = Arc::clone(&self.docs);
             let find_class_doc_fn = move |name: &str| -> Option<Arc<ParsedDoc>> {
                 let cr = *wi.classes_by_name.get(name)?.first()?;
                 let (uri, _) = wi.at(cr)?;
                 docs_for_lookup.get_doc_salsa(uri)
             };
+            // Finds classes anywhere in the workspace index — including
+            // vendor/ and other files that are never opened as editor
+            // buffers — whose short name starts with `prefix`. Complements
+            // `other_docs`, which only covers currently open documents.
+            //
+            // `classes_by_lowercase_name` is sorted once per workspace
+            // revision (shared via `Arc` across every completion request
+            // until a file changes), so this does a binary search for the
+            // prefix range instead of scanning + re-lowercasing every class
+            // name on every keystroke.
+            const WORKSPACE_CLASS_SEARCH_LIMIT: usize = 50;
+            let workspace_class_search_fn =
+                move |prefix: &str| -> Vec<(String, CompletionItemKind, String)> {
+                    let prefix_lc = prefix.to_lowercase();
+                    let table = &wi_for_class_search.classes_by_lowercase_name;
+                    let start =
+                        table.partition_point(|(name, _)| name.as_ref() < prefix_lc.as_str());
+                    let mut out = Vec::new();
+                    for (name, cr) in &table[start..] {
+                        if !name.starts_with(prefix_lc.as_str()) {
+                            break;
+                        }
+                        let Some((file_uri, cls)) = wi_for_class_search.at(*cr) else {
+                            continue;
+                        };
+                        if *file_uri == uri_for_class_search {
+                            continue;
+                        }
+                        let kind = match cls.kind {
+                            ClassKind::Class | ClassKind::Trait => CompletionItemKind::CLASS,
+                            ClassKind::Interface => CompletionItemKind::INTERFACE,
+                            ClassKind::Enum => CompletionItemKind::ENUM,
+                        };
+                        out.push((cls.name.to_string(), kind, cls.fqn.to_string()));
+                        if out.len() >= WORKSPACE_CLASS_SEARCH_LIMIT {
+                            break;
+                        }
+                    }
+                    out
+                };
             let analysis = self.cached_analysis_async(uri).await;
             // Cross-request TypeMap cache: rebuilt only when the document text
             // (or PHPStorm meta) changes, instead of one full AST walk per
@@ -494,6 +537,7 @@ impl LanguageServer for Backend {
                     doc_uri: Some(&uri_owned),
                     file_imports: Some(&imports),
                     find_class_doc: Some(&find_class_doc_fn),
+                    workspace_class_search: Some(&workspace_class_search_fn),
                     analysis: analysis.as_deref(),
                     type_map: Some(&get_type_map),
                     session: Some(session),

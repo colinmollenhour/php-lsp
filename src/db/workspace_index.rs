@@ -81,12 +81,18 @@ pub struct WorkspaceIndexData {
     /// property (stored without `$`), class constant, and enum case in the
     /// workspace; enables O(1) go-to-definition lookups.
     pub decls_by_name: HashMap<String, Vec<DeclRef>>,
+    /// One `(lowercase_short_name, ClassRef)` pair per distinct class name,
+    /// sorted by the lowercase key. Built once per revision so completion's
+    /// prefix search can binary-search a range instead of scanning every
+    /// class name (and re-lowercasing it) on every keystroke.
+    pub classes_by_lowercase_name: Vec<(Box<str>, ClassRef)>,
 }
 
 pub(crate) type BuildMapsResult = (
     HashMap<String, Vec<ClassRef>>,
     HashMap<Arc<str>, Vec<ClassRef>>,
     HashMap<String, Vec<DeclRef>>,
+    Vec<(Box<str>, ClassRef)>,
 );
 
 pub(crate) fn build_maps(files: &[(Url, Arc<FileIndex>)]) -> BuildMapsResult {
@@ -189,7 +195,17 @@ pub(crate) fn build_maps(files: &[(Url, Arc<FileIndex>)]) -> BuildMapsResult {
             }
         }
     }
-    (classes_by_name, subtypes_of, decls_by_name)
+    let mut classes_by_lowercase_name: Vec<(Box<str>, ClassRef)> = classes_by_name
+        .iter()
+        .filter_map(|(name, refs)| refs.first().map(|cr| (name.to_lowercase().into(), *cr)))
+        .collect();
+    classes_by_lowercase_name.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    (
+        classes_by_name,
+        subtypes_of,
+        decls_by_name,
+        classes_by_lowercase_name,
+    )
 }
 
 impl WorkspaceIndexData {
@@ -242,12 +258,14 @@ impl WorkspaceIndexData {
     /// the aggregate-shaped helpers directly. Production code goes through
     /// the `workspace_index` salsa query instead.
     pub fn from_files(files: Vec<(Url, Arc<FileIndex>)>) -> Self {
-        let (classes_by_name, subtypes_of, decls_by_name) = build_maps(&files);
+        let (classes_by_name, subtypes_of, decls_by_name, classes_by_lowercase_name) =
+            build_maps(&files);
         Self {
             files,
             classes_by_name,
             subtypes_of,
             decls_by_name,
+            classes_by_lowercase_name,
         }
     }
 }

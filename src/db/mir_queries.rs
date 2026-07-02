@@ -77,11 +77,13 @@ pub fn workspace_index(db: &dyn MirDatabase, ws: LspWorkspace) -> WorkspaceIndex
         let idx = file_index(db, *wf).0.clone();
         files.push((url, idx));
     }
-    let (classes_by_name, subtypes_of, decls_by_name) = build_maps(&files);
+    let (classes_by_name, subtypes_of, decls_by_name, classes_by_lowercase_name) =
+        build_maps(&files);
     WorkspaceIndexArc(Arc::new(WorkspaceIndexData {
         files,
         classes_by_name,
         subtypes_of,
         decls_by_name,
+        classes_by_lowercase_name,
     }))
 }

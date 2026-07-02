@@ -5158,6 +5158,202 @@ async fn completion_static_from_index_namespaced() {
     .assert_eq(&out);
 }
 
+// ── index-only (unopened) classes referenced by bare short name ──────────────
+
+/// Facade-style static member completion works when the class is index-only
+/// (never opened), in a different namespace than the caller, and unimported
+/// — methods are declared via `@method static` docblock tags, the pattern
+/// Laravel facades use.
+#[tokio::test]
+async fn completion_static_facade_methods_from_unopened_cross_namespace_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Http.php"),
+        "<?php\n\nnamespace Acme\\Support\\Facades;\n\n/**\n * @method static \\Acme\\Http\\Client\\Response get(string $url, $query = null)\n * @method static \\Acme\\Http\\Client\\Response post(string $url, array $data = [])\n */\nclass Http\n{\n}\n",
+    )
+    .unwrap();
+    let caller = "<?php\n$r = Http::get('x');\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "get('x')", 0);
+    let resp = s.completion("caller.php", line, ch).await;
+    let out = render_completion_ordered(&resp);
+    expect![[r#"
+        Method      get
+        Method      post"#]]
+    .assert_eq(&out);
+}
+
+/// Typing the bare short name of a class that lives in a file which was
+/// never opened in the editor (e.g. a vendor package) must still surface it
+/// as a completion candidate, with an `additionalTextEdits` auto-import.
+#[tokio::test]
+async fn completion_bare_class_name_from_unopened_file_adds_use_import() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Http.php"),
+        "<?php\n\nnamespace Acme\\Support\\Facades;\n\nclass Http\n{\n}\n",
+    )
+    .unwrap();
+    let caller = "<?php\n$r = Htt;\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "Htt", 0);
+    let resp = s.completion("caller.php", line, ch + 3).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let http_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("Http"))
+        .expect("Http class (defined in an unopened file) must be in completions");
+    assert_eq!(
+        http_item["detail"].as_str(),
+        Some("Acme\\Support\\Facades\\Http")
+    );
+    let edits = http_item["additionalTextEdits"]
+        .as_array()
+        .expect("Http must have additionalTextEdits");
+    assert!(
+        !edits.is_empty(),
+        "must have edits for cross-namespace class"
+    );
+    let edit_text = edits[0]["newText"]
+        .as_str()
+        .expect("edit must have newText");
+    assert!(
+        edit_text.contains("use") && edit_text.contains("Acme\\Support\\Facades\\Http"),
+        "edit must contain use statement for the FQN, got: {edit_text}"
+    );
+}
+
+/// `vendor/` is excluded from the workspace scan by default (a deliberate
+/// perf tradeoff — see `index_vendor` in `lang/config.rs`), so a class
+/// defined there is invisible to the workspace index, and by extension to
+/// bare-name completion, unless `indexVendor: true` is set. Pins this known
+/// boundary so it doesn't silently change.
+#[tokio::test]
+async fn completion_bare_class_name_vendor_dir_not_indexed_by_default() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("vendor/acme/http-client/src")).unwrap();
+    std::fs::write(
+        tmp.path().join("vendor/acme/http-client/src/Http.php"),
+        "<?php\n\nnamespace Acme\\Support\\Facades;\n\nclass Http\n{\n}\n",
+    )
+    .unwrap();
+    let caller = "<?php\n$r = Htt;\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "Htt", 0);
+    let resp = s.completion("caller.php", line, ch + 3).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    assert!(
+        !items.iter().any(|i| i["label"].as_str() == Some("Http")),
+        "vendor/-defined class must not appear without indexVendor: true"
+    );
+}
+
+/// Setting `indexVendor: true` brings vendor-defined classes into the
+/// workspace index, so bare-name completion (with auto-import) covers them
+/// too — this is the configuration a Laravel project needs for facade
+/// classes under `vendor/` to be completable.
+#[tokio::test]
+async fn completion_bare_class_name_vendor_dir_with_index_vendor_true() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("vendor/acme/http-client/src")).unwrap();
+    std::fs::write(
+        tmp.path().join("vendor/acme/http-client/src/Http.php"),
+        "<?php\n\nnamespace Acme\\Support\\Facades;\n\nclass Http\n{\n}\n",
+    )
+    .unwrap();
+    let caller = "<?php\n$r = Htt;\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s =
+        TestServer::with_root_and_options(tmp.path(), serde_json::json!({ "indexVendor": true }))
+            .await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "Htt", 0);
+    let resp = s.completion("caller.php", line, ch + 3).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let http_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("Http"))
+        .expect("vendor/-defined class must appear when indexVendor is true");
+    assert_eq!(
+        http_item["detail"].as_str(),
+        Some("Acme\\Support\\Facades\\Http")
+    );
+    let edits = http_item["additionalTextEdits"]
+        .as_array()
+        .expect("must have additionalTextEdits");
+    assert!(!edits.is_empty());
+}
+
+/// The current document's own class must not be offered as a spurious
+/// self-import: the workspace-index search sees every file's classes,
+/// including the file currently being edited.
+#[tokio::test]
+async fn completion_bare_class_name_excludes_own_file_self_import() {
+    let tmp = tempfile::tempdir().unwrap();
+    let caller = "<?php\n\nclass HttpClient {}\n\n$r = HttpCli;\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "HttpCli", 1);
+    let resp = s
+        .completion("caller.php", line, ch + "HttpCli".len() as u32)
+        .await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let http_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("HttpClient"))
+        .expect("HttpClient must be suggested (declared in the current file)");
+    assert!(
+        http_item["additionalTextEdits"].is_null()
+            || http_item["additionalTextEdits"]
+                .as_array()
+                .is_some_and(|e| e.is_empty()),
+        "must not suggest importing a class from its own file"
+    );
+}
+
 // ── Type system — generic and docblock annotations ────────────────────────────
 
 /// `@var Collection<User>` — generic type param stripped so member lookup

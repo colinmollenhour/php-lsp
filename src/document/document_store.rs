@@ -767,6 +767,7 @@ impl DocumentStore {
                 classes_by_name: std::collections::HashMap::new(),
                 subtypes_of: std::collections::HashMap::new(),
                 decls_by_name: std::collections::HashMap::new(),
+                classes_by_lowercase_name: Vec::new(),
             });
         };
         self.snapshot_mir_query(move |db| crate::db::mir_queries::workspace_index(db, ws).0.clone())

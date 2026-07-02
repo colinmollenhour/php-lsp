@@ -198,6 +198,13 @@ fn resolve_call_params(
 /// `all_static_members` to avoid scanning all workspace docs linearly.
 pub type ClassDocLookup<'a> = &'a dyn Fn(&str) -> Option<Arc<ParsedDoc>>;
 
+/// Workspace-index-backed class name search: given a typed prefix, returns
+/// `(short_name, kind, fqn)` for every workspace class whose short name
+/// starts with it — including classes defined in files that are not open
+/// in the editor (e.g. `vendor/`). Complements `other_docs`, which only
+/// covers currently open documents.
+pub type WorkspaceClassSearch<'a> = &'a dyn Fn(&str) -> Vec<(String, CompletionItemKind, String)>;
+
 /// Optional context for completion requests that enables richer results
 /// (e.g. auto-import edits, `->` scoping to a class).
 #[derive(Default)]
@@ -213,6 +220,11 @@ pub struct CompletionCtx<'a> {
     /// linearly (O(n files × inheritance depth) → O(depth)).
     /// Pass `None` to fall back to the existing linear scan.
     pub find_class_doc: Option<ClassDocLookup<'a>>,
+    /// Optional workspace-wide class name search backed by the workspace
+    /// index (see [`WorkspaceClassSearch`]). Used to suggest — and
+    /// auto-import — classes from files that aren't currently open, such as
+    /// vendor code. `None` in unit tests that don't supply it.
+    pub workspace_class_search: Option<WorkspaceClassSearch<'a>>,
     /// Retained mir body analysis for the primary doc. Receiver-variable types
     /// (`$obj->`, match subjects) are read from its `symbol_at`; `None` in unit
     /// tests that don't supply it.
@@ -738,41 +750,58 @@ pub fn filtered_completions_at(
             items.extend(magic_items);
 
             let cur_ns = current_file_namespace(&doc.program().stmts);
+            // Extract the typed prefix early: also used to bound the
+            // workspace-wide class search below.
+            let prefix = typed_prefix(source, position).unwrap_or_default();
+
+            // Same for every class candidate in this request (depends only on
+            // `source`) — computed once instead of per candidate, since a single
+            // request may build up to dozens of class items (open-doc classes
+            // plus up to `WORKSPACE_CLASS_SEARCH_LIMIT` workspace-index matches).
+            let use_pos = source.map(use_insert_position);
+
+            // Builds a class completion item, adding a `use` insertion edit
+            // unless the class is already reachable (same namespace, global,
+            // or already imported).
+            let push_class_item = |items: &mut Vec<CompletionItem>,
+                                   label: &str,
+                                   kind: CompletionItemKind,
+                                   fqn: &str| {
+                let additional_text_edits = if let Some(pos) = use_pos {
+                    let in_same_ns = !cur_ns.is_empty() && fqn == format!("{}\\{}", cur_ns, label);
+                    let is_global = !fqn.contains('\\');
+                    let already = imports.contains_key(label);
+                    if !in_same_ns && !is_global && !already {
+                        Some(vec![TextEdit {
+                            range: Range {
+                                start: pos,
+                                end: pos,
+                            },
+                            new_text: format!("use {};\n", fqn),
+                        }])
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                items.push(CompletionItem {
+                    label: label.to_string(),
+                    kind: Some(kind),
+                    detail: if fqn.contains('\\') {
+                        Some(fqn.to_string())
+                    } else {
+                        None
+                    },
+                    additional_text_edits,
+                    ..Default::default()
+                });
+            };
 
             for (other, classes) in other_docs.iter().zip(other_classes()) {
                 // Class-like symbols: add `use` insertion when needed.
                 for (label, kind, fqn) in classes {
-                    let additional_text_edits = if let Some(src) = source {
-                        let in_same_ns =
-                            !cur_ns.is_empty() && *fqn == format!("{}\\{}", cur_ns, label);
-                        let is_global = !fqn.contains('\\');
-                        let already = imports.contains_key(label);
-                        if !in_same_ns && !is_global && !already {
-                            let pos = use_insert_position(src);
-                            Some(vec![TextEdit {
-                                range: Range {
-                                    start: pos,
-                                    end: pos,
-                                },
-                                new_text: format!("use {};\n", fqn),
-                            }])
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    items.push(CompletionItem {
-                        label: label.clone(),
-                        kind: Some(*kind),
-                        detail: if fqn.contains('\\') {
-                            Some(fqn.clone())
-                        } else {
-                            None
-                        },
-                        additional_text_edits,
-                        ..Default::default()
-                    });
+                    push_class_item(&mut items, label, *kind, fqn);
                 }
                 // Non-class symbols (functions, methods, constants) need no use statement.
                 let cross: Vec<CompletionItem> = symbol_completions(other)
@@ -788,11 +817,23 @@ pub fn filtered_completions_at(
                     .collect();
                 items.extend(cross);
             }
+
+            // Classes from files that aren't open in the editor (e.g.
+            // vendor/), found via the workspace index. Only fires once a
+            // prefix is typed, both to bound the search and because an
+            // empty-prefix workspace-wide dump would swamp the list.
+            if !prefix.is_empty()
+                && !prefix.contains('\\')
+                && let Some(search) = ctx.workspace_class_search
+            {
+                for (label, kind, fqn) in search(&prefix) {
+                    push_class_item(&mut items, &label, kind, &fqn);
+                }
+            }
+
             let mut seen = std::collections::HashSet::new();
             items.retain(|i| seen.insert(i.label.clone()));
 
-            // Extract the typed prefix for fuzzy camel/underscore filtering.
-            let prefix = typed_prefix(source, position).unwrap_or_default();
             if prefix.contains('\\') {
                 // Namespace-qualified prefix: filter by FQN prefix match.
                 let ns_prefix = prefix.trim_start_matches('\\').to_lowercase();

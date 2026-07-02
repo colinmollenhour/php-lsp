@@ -134,6 +134,38 @@ mod perf_measure {
             t_init, t_ready
         );
     }
+
+    /// Manual benchmark for the workspace-wide class-name search behind
+    /// bare-class-name completion, against symfony-demo's full vendor tree
+    /// (~5200 PHP files). Run with `cargo test --test frameworks
+    /// measure_workspace_class_search -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "manual benchmark; run with --nocapture to see timings"]
+    async fn measure_workspace_class_search_cost_eager_vendor() {
+        let mut server = TestServer::with_fixture_and_options(
+            "symfony-demo",
+            serde_json::json!({ "diagnostics": { "enabled": true }, "indexVendor": true }),
+        )
+        .await;
+        server.wait_for_index_ready_secs(60).await;
+        let caller = "<?php\n$r = Con;\n";
+        server.open("caller.php", caller).await;
+        // "$r = Con;" — cursor right after "Con" (line 1, byte offset 8).
+        let (line, ch) = (1, 8);
+        // Warm up (first request pays one-time salsa/JIT costs).
+        server.completion("caller.php", line, ch).await;
+        let n = 20;
+        let t0 = std::time::Instant::now();
+        for _ in 0..n {
+            server.completion("caller.php", line, ch).await;
+        }
+        let elapsed = t0.elapsed();
+        println!(
+            "MEASURE workspace_class_search: {n} completions in {:?} ({:?}/req)",
+            elapsed,
+            elapsed / n
+        );
+    }
 }
 
 mod call_hierarchy {
