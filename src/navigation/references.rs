@@ -826,23 +826,33 @@ impl<'a> ReferenceQuery<'a> {
         if matches!(self.kind, Some(SymbolKind::Method))
             && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
         {
-            let locs: Vec<Location> = docs
-                .session_references_to(&sym, &candidate_files(), cancel_rev)
-                .into_iter()
-                .filter_map(|tuple| {
-                    let loc = session_tuple_to_location(tuple)?;
-                    if let Some(short) = self.owner_short {
-                        let mentions = docs
-                            .source_text(&loc.uri)
+            // Reachability pre-filter (rust-analyzer's `SearchScope` idea for the
+            // public-method case): a resolvable `Owner::method` reference requires
+            // the file to name `Owner` somewhere (type hint, `use`, `new`, return
+            // type), so a file that text-matches the *method* name but never
+            // mentions the *owner* class cannot resolve to it. Prune those BEFORE
+            // `analyze_file` runs over the candidate set — not after — so a common
+            // method name shared across unrelated classes no longer analyzes the
+            // whole workspace. Files whose source isn't cached are kept
+            // (conservative); this is exactly the predicate the old post-filter
+            // applied to results, moved ahead of the expensive analysis.
+            let method_candidates: Vec<Arc<str>> = match self.owner_short {
+                Some(short) => candidate_urls
+                    .iter()
+                    .filter(|u| {
+                        docs.source_text(u)
                             .as_ref()
                             .map(|src| src.contains(short))
-                            .unwrap_or(true);
-                        if !mentions {
-                            return None;
-                        }
-                    }
-                    Some(loc)
-                })
+                            .unwrap_or(true)
+                    })
+                    .map(|u| Arc::from(u.as_str()))
+                    .collect(),
+                None => candidate_files(),
+            };
+            let locs: Vec<Location> = docs
+                .session_references_to(&sym, &method_candidates, cancel_rev)
+                .into_iter()
+                .filter_map(session_tuple_to_location)
                 .collect();
 
             if !locs.is_empty() {
