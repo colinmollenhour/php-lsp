@@ -2,6 +2,41 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.15.0] — 2026-07-02
+
+### Features
+
+- **"Extract interface from class" refactor action**: Generates an interface from a class's public non-constructor methods and inserts it above the class declaration, appending `implements Name` to the class header. Handles existing `implements` lists, static methods, union/nullable return types, and unbraced namespaces.
+- **"Add missing @throws tags" refactor action**: Offers to add `@throws` tags to a docblock for `throw new ClassName()` sites not yet documented, for both a single missing tag and multiple.
+- **"Update PHPDoc to match signature" refactor action**: Regenerates an out-of-sync `@param`/`@return` block from the actual signature, preserving descriptions, `@throws`, and `@see` tags.
+- **"Convert local variable to instance property" refactor action**.
+- **"Convert switch to match" refactor action**: Offered when every non-empty case body is a single `return`; requires a `default` arm to preserve the exhaustiveness contract. Fall-through cases are grouped into comma-separated arms and dead `break;` is stripped.
+- **"Convert to closure" refactor action**: Inverse of "Convert to arrow function" — converts `fn($p): T => expr` to `function($p): T { return expr; }`, handling `static`, by-ref returns, and nested arrow functions.
+- **"Convert to arrow function" refactor action**: Converts an eligible closure (single-statement return, no by-ref `use`, no `yield`) to a PHP 7.4 arrow function.
+- **"Change visibility" refactor action**: Offers "Make public / protected / private" on a method, property, or class-constant declaration line.
+- **`@method` parameter lists in signature help**: `@method` tag signatures from docblocks are now used as a fallback source of parameter info when no real method body is found.
+- **Docblock descriptions in signature help**: The free-text description preceding a function/method's docblock tags is now shown in `SignatureInformation.documentation`.
+- **Workspace scan progress percentage**: `$/progress` now reports `WorkDoneProgressReport` with a percentage after each 500-file chunk, so editors can show a live progress bar during workspace scan.
+- **`cachePath` initialization option**: Pins the on-disk cache to an explicit directory without touching `XDG_CACHE_HOME`.
+
+### Performance
+
+- **Document highlight stays responsive under write pressure**: `textDocument/documentHighlight` now reads through a stale-tolerant accessor that serves the last-good cached parse instead of joining the cancellation retry loop when a concurrent edit stream keeps invalidating the snapshot.
+- **Cache eviction gains LRU shedding**: `parsed_cache`, `analysis_cache`, `owned_program_cache`, and `type_map_cache` share recency tracking with bounded caps; the least-recently-used half is shed on overflow instead of an arbitrary front slice, so actively edited files survive a references sweep over a large candidate set.
+- **Find-references prunes by owner reachability earlier**: The owner-class reachability check now runs before per-candidate analysis instead of as a post-filter, skipping expensive analysis on files that only text-match the method name. Cold references are 1.4×–3.2× faster across 100–3 000 files.
+- **`code_lens` and `workspace/diagnostic` cancel on concurrent write**: Both handlers now poll a write-revision counter and abandon a stale scan instead of computing results that would be discarded.
+- **Completion, hover, inlay-hint, and workspace-symbol CPU work offloaded**: These handlers now run on `spawn_blocking` instead of the async executor, so a slow request no longer stalls unrelated requests on the same worker thread. References also cancel on a concurrent write.
+
+### Fixed
+
+- **Cache correctness on size-preserving edits**: The on-disk cache key switched from `mtime + size` to `blake3(uri || content)`, so a size-preserving edit within the same mtime second is no longer missed.
+- **Silent panics in call hierarchy and code lens now logged**: `incoming_calls`, `outgoing_calls`, and `code_lens` now emit `tracing::warn!` with the target URI when their `spawn_blocking` task panics, instead of silently returning an empty result.
+- **`vendor_index_cache` no longer grows unbounded**: Moved into the shared `CacheRegistry` so it is evicted alongside the other per-file caches instead of only ever being inserted into.
+
+### Dependencies
+
+- **mir updated to 0.50.1**, salsa to 0.27.2.
+
 ## [0.14.0] — 2026-06-25
 
 ### Features
