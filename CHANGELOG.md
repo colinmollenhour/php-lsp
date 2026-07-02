@@ -21,6 +21,7 @@ All notable changes to php-lsp are documented here.
 
 ### Performance
 
+- **Dependent-diagnostics sweep is cancellable**: When a file that others depend on is edited, the workspace-wide re-analysis of its dependents now runs under a cancel token that the next edit flips. A newer keystroke preempts an in-flight sweep at the next file boundary instead of letting it run to completion, so typing over a widely-depended-on base class, interface, or trait stays responsive; superseded sweeps also drop their partial results so they can't land out of order.
 - **Document highlight stays responsive under write pressure**: `textDocument/documentHighlight` now reads through a stale-tolerant accessor that serves the last-good cached parse instead of joining the cancellation retry loop when a concurrent edit stream keeps invalidating the snapshot.
 - **Cache eviction gains LRU shedding**: `parsed_cache`, `analysis_cache`, `owned_program_cache`, and `type_map_cache` share recency tracking with bounded caps; the least-recently-used half is shed on overflow instead of an arbitrary front slice, so actively edited files survive a references sweep over a large candidate set.
 - **Find-references prunes by owner reachability earlier**: The owner-class reachability check now runs before per-candidate analysis instead of as a post-filter, skipping expensive analysis on files that only text-match the method name. Cold references are 1.4×–3.2× faster across 100–3 000 files.
@@ -29,6 +30,7 @@ All notable changes to php-lsp are documented here.
 
 ### Fixed
 
+- **Completion suggests unimported classes from unopened files**: Class-name completion now searches a workspace-index-backed table in addition to open documents, so a class defined in a file never opened in the editor (a sibling package, or `vendor/` when `indexVendor` is enabled) appears as a candidate and triggers auto-import (#240).
 - **Cache correctness on size-preserving edits**: The on-disk cache key switched from `mtime + size` to `blake3(uri || content)`, so a size-preserving edit within the same mtime second is no longer missed.
 - **Silent panics in call hierarchy and code lens now logged**: `incoming_calls`, `outgoing_calls`, and `code_lens` now emit `tracing::warn!` with the target URI when their `spawn_blocking` task panics, instead of silently returning an empty result.
 - **`vendor_index_cache` no longer grows unbounded**: Moved into the shared `CacheRegistry` so it is evicted alongside the other per-file caches instead of only ever being inserted into.

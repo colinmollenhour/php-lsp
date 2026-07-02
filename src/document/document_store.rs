@@ -71,6 +71,11 @@ pub struct DocumentStore {
     /// cancel themselves if it advances — avoiding stale results and
     /// unbounded retry loops after concurrent edits.
     write_revision: AtomicU64,
+    /// Cancel token for the in-flight dependent-diagnostics sweep. A newer
+    /// edit's sweep cancels the previous one via [`Self::begin_reanalyze`], so
+    /// fast typing preempts stale workspace re-analysis rather than queueing
+    /// behind it.
+    reanalyze_cancel: Mutex<mir_analyzer::IndexCancel>,
 }
 
 impl Default for DocumentStore {
@@ -94,7 +99,21 @@ impl DocumentStore {
             autoload_uris: std::sync::RwLock::new(Vec::new()),
             index_ready: AtomicBool::new(false),
             write_revision: AtomicU64::new(0),
+            reanalyze_cancel: Mutex::new(mir_analyzer::IndexCancel::new()),
         }
+    }
+
+    /// Install a fresh cancel token for a dependent-diagnostics sweep,
+    /// cancelling whichever sweep was previously in flight. Pass the returned
+    /// token to `reanalyze_dependents_cancellable`; when a newer edit calls
+    /// this again the old token flips and that older sweep stops at its next
+    /// file boundary instead of racing this one to publish stale diagnostics.
+    pub fn begin_reanalyze(&self) -> mir_analyzer::IndexCancel {
+        let fresh = mir_analyzer::IndexCancel::new();
+        let mut guard = self.reanalyze_cancel.lock().unwrap();
+        guard.cancel();
+        *guard = fresh.clone();
+        fresh
     }
 
     /// Mark the workspace reference index as fully built. Called by the scan
@@ -2031,6 +2050,24 @@ mod tests {
         assert!(
             store.write_rev() > after_first,
             "changed text must bump the revision"
+        );
+    }
+
+    /// begin_reanalyze() cancels the previously-issued sweep token so a newer
+    /// edit preempts an in-flight dependent walk, and hands back a fresh token.
+    #[test]
+    fn begin_reanalyze_cancels_previous_token() {
+        let store = DocumentStore::new();
+        let first = store.begin_reanalyze();
+        assert!(!first.is_cancelled(), "a fresh token starts un-cancelled");
+        let second = store.begin_reanalyze();
+        assert!(
+            first.is_cancelled(),
+            "issuing a new token must cancel the previous in-flight sweep"
+        );
+        assert!(
+            !second.is_cancelled(),
+            "the newly-issued token must itself be un-cancelled"
         );
     }
 

@@ -373,8 +373,15 @@ async fn compute_dependent_publishes_owned(
         // surface the orphaned dependents.
         let php_version = docs.workspace_php_version();
         let session = docs.analysis_session(php_version);
-        let analyses = session.reanalyze_dependents(changed_uri.as_str());
-        if analyses.is_empty() {
+        // Cancel any older in-flight sweep and take a fresh token: when the
+        // next edit starts its own sweep, this one stops at its next file
+        // boundary instead of blocking typing behind a full dependent walk.
+        let cancel = docs.begin_reanalyze();
+        let analyses = session.reanalyze_dependents_cancellable(changed_uri.as_str(), &cancel);
+        // A newer edit that flipped `cancel` mid-sweep is now authoritative and
+        // will republish; drop this sweep's partial results so they can't land
+        // out of order and leave stale diagnostics as the final state.
+        if cancel.is_cancelled() || analyses.is_empty() {
             return Vec::new();
         }
 
