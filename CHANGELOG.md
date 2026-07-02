@@ -37,7 +37,7 @@ All notable changes to php-lsp are documented here.
 
 ### Dependencies
 
-- **mir updated to 0.50.1**, salsa to 0.27.2.
+- **mir updated to 0.50.2**, salsa to 0.27.2. 0.50.2 fixes a concurrent-read salsa query-stack abort (`index_generation` read the shared db handle) that could SIGABRT under simultaneous indexing and reference queries.
 
 ## [0.14.0] — 2026-06-25
 
