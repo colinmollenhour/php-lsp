@@ -12,6 +12,15 @@ use crate::index::file_index::FileIndex;
 /// pin more ASTs alive than salsa's memo already bounds.
 pub(crate) const PARSED_CACHE_CAP: usize = 2048;
 
+/// Upper bounds for the heavy per-file caches that otherwise grow with every
+/// distinct file touched across a session (`FileAnalysis` ~50 KiB, owned
+/// `Program` ~100 KiB, `TypeMap` varies). Entries self-evict on edit but
+/// never on file count, so multi-hour sessions accumulate them unboundedly
+/// without these caps.
+pub(crate) const ANALYSIS_CACHE_CAP: usize = 512;
+pub(crate) const OWNED_PROGRAM_CACHE_CAP: usize = 256;
+pub(crate) const TYPE_MAP_CACHE_CAP: usize = 512;
+
 /// All per-file caches owned by `DocumentStore`, grouped so eviction logic
 /// lives in one place. Adding a new cache only requires: add the field here,
 /// then add `self.field.remove(uri)` to `evict()`.
@@ -45,6 +54,14 @@ pub(crate) struct CacheRegistry {
     /// ingested by `psr4_method_goto` are not in the salsa workspace_index.
     /// Evicted alongside all other per-file caches via `evict()`.
     pub(crate) vendor_index_cache: DashMap<Url, Arc<FileIndex>>,
+    /// Monotonic counter driving `last_access`.
+    access_tick: AtomicU64,
+    /// Last-use tick per file, shared by every bounded per-file cache. Updated
+    /// on cache hits and inserts; `shed_stale` drops the least-recently-used
+    /// half of a cache that has reached its cap. Shared recency is deliberate:
+    /// all per-file caches correlate with "this file was recently involved in
+    /// a request", and one map keeps the bookkeeping off the hot paths.
+    last_access: DashMap<Url, u64>,
 }
 
 impl CacheRegistry {
@@ -60,6 +77,34 @@ impl CacheRegistry {
             type_map_cache: DashMap::new(),
             owned_program_cache: DashMap::new(),
             vendor_index_cache: DashMap::new(),
+            access_tick: AtomicU64::new(0),
+            last_access: DashMap::new(),
+        }
+    }
+
+    /// Record a use of `uri`'s per-file caches (hit or insert). Recency feeds
+    /// [`Self::shed_stale`].
+    pub(crate) fn touch(&self, uri: &Url) {
+        let tick = self.access_tick.fetch_add(1, Ordering::Relaxed);
+        self.last_access.insert(uri.clone(), tick);
+    }
+
+    /// When `map` has reached `cap`, drop the least-recently-touched half.
+    /// Entries with no recorded access sort oldest and shed first.
+    pub(crate) fn shed_stale<V>(&self, map: &DashMap<Url, V>, cap: usize) {
+        if map.len() < cap {
+            return;
+        }
+        let mut entries: Vec<(Url, u64)> = map
+            .iter()
+            .map(|e| {
+                let tick = self.last_access.get(e.key()).map(|t| *t).unwrap_or(0);
+                (e.key().clone(), tick)
+            })
+            .collect();
+        entries.sort_unstable_by_key(|(_, tick)| *tick);
+        for (uri, _) in entries.iter().take(cap / 2) {
+            map.remove(uri);
         }
     }
 
@@ -73,6 +118,7 @@ impl CacheRegistry {
         self.type_map_cache.remove(uri);
         self.owned_program_cache.remove(uri);
         self.vendor_index_cache.remove(uri);
+        self.last_access.remove(uri);
     }
 
     /// Evict only the mir analysis cache for `uri`. Used on text change so the
@@ -111,21 +157,14 @@ impl CacheRegistry {
             .map(|e| Arc::clone(&e.1))
     }
 
-    /// Publish a fresh `ParsedDoc` into `parsed_cache`, shedding roughly
-    /// half the cache first when it has grown past [`PARSED_CACHE_CAP`].
+    /// Publish a fresh `ParsedDoc` into `parsed_cache`, shedding the
+    /// least-recently-used half first when it has grown past
+    /// [`PARSED_CACHE_CAP`]. Recency-based (not arbitrary): a references
+    /// sweep over a large candidate set must not evict the open files the
+    /// user is actively editing.
     pub(crate) fn insert_parsed(&self, uri: Url, text: Arc<str>, doc: Arc<ParsedDoc>) {
-        if self.parsed_cache.len() >= PARSED_CACHE_CAP {
-            let drop_target = self.parsed_cache.len() / 2;
-            let mut dropped = 0usize;
-            self.parsed_cache.retain(|_, _| {
-                if dropped < drop_target {
-                    dropped += 1;
-                    false
-                } else {
-                    true
-                }
-            });
-        }
+        self.shed_stale(&self.parsed_cache, PARSED_CACHE_CAP);
+        self.touch(&uri);
         self.parsed_cache.insert(uri, (text, doc));
     }
 

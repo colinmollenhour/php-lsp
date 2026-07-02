@@ -1045,11 +1045,25 @@ impl LanguageServer for Backend {
             let uri = &params.text_document_position_params.text_document.uri;
             let position = params.text_document_position_params.position;
             let source = self.get_open_text(uri).unwrap_or_default();
-            let doc = match self.get_doc(uri) {
+            // Stale-tolerant: a highlight fired on every cursor move must never
+            // spin on the salsa `Cancelled` retry loop while the user types.
+            let doc = match self.get_doc_stale(uri) {
                 Some(d) => d,
                 None => return Ok(None),
             };
-            let highlights = document_highlights(&source, &doc, position);
+            let uri_str = uri.to_string();
+            // The AST walk is CPU-bound; keep it off the async runtime worker.
+            let highlights = match tokio::task::spawn_blocking(move || {
+                document_highlights(&source, &doc, position)
+            })
+            .await
+            {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::warn!("document_highlight panicked for {uri_str}: {e}");
+                    Vec::new()
+                }
+            };
             Ok(if highlights.is_empty() {
                 None
             } else {

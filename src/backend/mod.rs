@@ -125,6 +125,10 @@ impl Backend {
         self.open_files.get_doc(&self.docs, uri)
     }
 
+    fn get_doc_stale(&self, uri: &Url) -> Option<Arc<ParsedDoc>> {
+        self.open_files.get_doc_stale(&self.docs, uri)
+    }
+
     /// `use Foo as Bar;` map for a single file, read directly from the AST.
     fn file_imports(&self, uri: &Url) -> std::collections::HashMap<String, String> {
         self.docs

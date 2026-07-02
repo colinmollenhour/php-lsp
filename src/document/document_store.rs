@@ -247,6 +247,28 @@ impl DocumentStore {
         }
     }
 
+    /// Bounded variant of [`Self::snapshot_mir_query`] for cosmetic,
+    /// cursor-triggered reads that must not spin under sustained write pressure.
+    /// Returns `None` if a concurrent writer cancels the query `attempts` times
+    /// in a row (the caller then falls back to a stale result). Same
+    /// drop-before-retry discipline as `snapshot_mir_query`.
+    fn try_snapshot_mir_query<R>(
+        &self,
+        attempts: usize,
+        f: impl Fn(&mir_analyzer::db::MirDbStorage) -> R,
+    ) -> Option<R> {
+        use std::panic::AssertUnwindSafe;
+        let session = self.get_or_build_session(self.workspace_php_version());
+        for _ in 0..attempts {
+            let db = session.snapshot_db();
+            match salsa::Cancelled::catch(AssertUnwindSafe(|| f(&db))) {
+                Ok(r) => return Some(r),
+                Err(_) => drop(db),
+            }
+        }
+        None
+    }
+
     /// Mirror a file's current text into the salsa layer. Creates the
     /// `FileText` input on first sight, otherwise updates `text` on the
     /// existing input (bumping the salsa revision so downstream queries
@@ -475,7 +497,10 @@ impl DocumentStore {
             && let Some(entry) = self.caches.parsed_cache.get(uri)
             && Arc::ptr_eq(&*current_text, &entry.0)
         {
-            return Some(entry.1.clone());
+            let doc = entry.1.clone();
+            drop(entry);
+            self.caches.touch(uri);
+            return Some(doc);
         }
 
         // Parse runs on the shared mir db.
@@ -489,6 +514,40 @@ impl DocumentStore {
         });
         self.caches.insert_parsed(uri.clone(), text, doc.clone());
         Some(doc)
+    }
+
+    /// Parsed doc for a cosmetic, cursor-triggered read (e.g. `documentHighlight`)
+    /// that must stay responsive while the user types. Unlike [`Self::get_doc_salsa`]
+    /// it never spins on the `Cancelled` retry loop: it tries the lock-free
+    /// `parsed_cache`, then a bounded snapshot parse, and if a concurrent write
+    /// stream keeps cancelling it, returns the last-good cached `ParsedDoc`
+    /// (possibly one edit stale — invisible for a highlight, unlike a hang).
+    /// `None` only when the file has never been parsed.
+    pub fn get_doc_snapshot_or_stale(&self, uri: &Url) -> Option<Arc<ParsedDoc>> {
+        if let Some(current_text) = self.caches.text_cache.get(uri)
+            && let Some(entry) = self.caches.parsed_cache.get(uri)
+            && Arc::ptr_eq(&*current_text, &entry.0)
+        {
+            let doc = entry.1.clone();
+            drop(entry);
+            self.caches.touch(uri);
+            return Some(doc);
+        }
+
+        if let Some(wf) = self.lsp_ws_file(uri)
+            && let Some((text, doc)) = self.try_snapshot_mir_query(3, move |db| {
+                let sf = wf.source(db);
+                let text = sf.text(db);
+                let doc = crate::db::mir_queries::parsed_doc(db, sf).0.clone();
+                (text, doc)
+            })
+        {
+            self.caches.bump_parse_count();
+            self.caches.insert_parsed(uri.clone(), text, doc.clone());
+            return Some(doc);
+        }
+
+        self.caches.parsed_cache.get(uri).map(|e| e.1.clone())
     }
 
     /// Refresh `workspace.files` to mirror the current active file set.
@@ -572,25 +631,36 @@ impl DocumentStore {
         cancel_rev: Option<u64>,
     ) -> Vec<(Arc<str>, u32, u32, u32)> {
         let php_version = self.workspace_php_version();
+        // Staleness probe threaded into mir: polled at Phase-1 file boundaries
+        // and between Phase-2 retry attempts, so a request invalidated by a
+        // concurrent edit aborts *inside* mir's retry loop instead of spinning
+        // there indefinitely (mir catches `Cancelled` internally, so an outer
+        // catch alone never fires for Phase 2).
+        let stale =
+            || cancel_rev.is_some_and(|rev| self.write_revision.load(Ordering::Acquire) != rev);
         // Retry: concurrent db writes (background indexing) cancel snapshot
         // queries via resume_unwind; without the loop the panic propagates out
         // of the caller's spawn_blocking and the request silently returns empty.
         let raw = loop {
             let session = self.analysis_session(php_version);
-            if let Ok(refs) = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
-                session.references_to_in_files(symbol, files)
+            match salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                session.references_to_in_files_cancellable(symbol, files, &stale)
             })) {
-                break refs;
-            }
-            // If the caller supplied a revision snapshot, abort when a
-            // concurrent write has invalidated the db — the request is now
-            // stale and looping further wastes CPU on a result nobody wants.
-            if let Some(rev) = cancel_rev
-                && self.write_revision.load(Ordering::Acquire) != rev
-            {
-                // Propagate as salsa::Cancelled so spawn_blocking callers
-                // see a JoinError::Panicked and return empty via unwrap_or_default.
-                std::panic::resume_unwind(Box::new(salsa::Cancelled::PendingWrite));
+                Ok(Some(refs)) => break refs,
+                // mir aborted via the staleness probe — or a Phase-1 unwind
+                // hit an already-stale request. Propagate as salsa::Cancelled
+                // so spawn_blocking callers see a JoinError::Panicked and
+                // return empty via unwrap_or_default.
+                Ok(None) => {
+                    std::panic::resume_unwind(Box::new(salsa::Cancelled::PendingWrite));
+                }
+                Err(_) if stale() => {
+                    std::panic::resume_unwind(Box::new(salsa::Cancelled::PendingWrite));
+                }
+                // Phase-1 unwind from a write that doesn't invalidate this
+                // request (mir-internal load_class, scan writes with no
+                // cancel_rev) — retry.
+                Err(_) => {}
             }
         };
         raw.into_iter()
@@ -789,11 +859,19 @@ impl DocumentStore {
             && Arc::ptr_eq(&entry.0, &source)
             && entry.1 == meta_key
         {
-            return Arc::clone(&entry.2);
+            let map = Arc::clone(&entry.2);
+            drop(entry);
+            self.caches.touch(uri);
+            return map;
         }
         let map = Arc::new(crate::types::type_map::TypeMap::from_doc_with_meta(
             doc, meta,
         ));
+        self.caches.shed_stale(
+            &self.caches.type_map_cache,
+            crate::document::cache_registry::TYPE_MAP_CACHE_CAP,
+        );
+        self.caches.touch(uri);
         self.caches
             .type_map_cache
             .insert(uri.clone(), (source, meta_key, Arc::clone(&map)));
@@ -808,9 +886,13 @@ impl DocumentStore {
     pub fn cached_analysis_if_fresh(&self, uri: &Url) -> Option<Arc<mir_analyzer::FileAnalysis>> {
         let doc = self.get_doc_salsa(uri)?;
         let source = doc.source_arc();
-        let entry = self.caches.analysis_cache.get(uri)?;
         let cur_ver = self.caches.decl_version();
-        (Arc::ptr_eq(&entry.0, &source) && entry.1 == cur_ver).then(|| Arc::clone(&entry.2))
+        let analysis = {
+            let entry = self.caches.analysis_cache.get(uri)?;
+            (Arc::ptr_eq(&entry.0, &source) && entry.1 == cur_ver).then(|| Arc::clone(&entry.2))?
+        };
+        self.caches.touch(uri);
+        Some(analysis)
     }
 
     #[tracing::instrument(skip_all)]
@@ -824,7 +906,10 @@ impl DocumentStore {
             && Arc::ptr_eq(&entry.0, &source)
             && entry.1 == cur_ver
         {
-            return Some(Arc::clone(&entry.2));
+            let analysis = Arc::clone(&entry.2);
+            drop(entry);
+            self.caches.touch(uri);
+            return Some(analysis);
         }
 
         let php_version = self.workspace_php_version();
@@ -838,6 +923,10 @@ impl DocumentStore {
             Arc::clone(&cached.1)
         } else {
             let prog = Arc::new(php_ast::owned::to_owned_program(doc.program()));
+            self.caches.shed_stale(
+                &self.caches.owned_program_cache,
+                crate::document::cache_registry::OWNED_PROGRAM_CACHE_CAP,
+            );
             self.caches
                 .owned_program_cache
                 .insert(uri.clone(), (Arc::clone(&source), Arc::clone(&prog)));
@@ -898,8 +987,18 @@ impl DocumentStore {
                 self.caches.decl_fingerprints.insert(uri.clone(), idx);
             }
             self.caches.bump_decl_version();
+            // Text reaches mir via direct salsa `set_text` writes, so mir can't
+            // see declaration deletions itself. A deleted declaration may
+            // unshadow a lazy-loadable symbol — invalidate mir's warm-up skip
+            // set so reference queries re-run their prepare pass once.
+            session.bump_prepare_generation();
         }
         let ver = self.caches.decl_version();
+        self.caches.shed_stale(
+            &self.caches.analysis_cache,
+            crate::document::cache_registry::ANALYSIS_CACHE_CAP,
+        );
+        self.caches.touch(uri);
         self.caches
             .analysis_cache
             .insert(uri.clone(), (source, ver, Arc::clone(&analysis)));
@@ -1092,7 +1191,7 @@ mod tests {
         store.ingest(uri("/lib.php"), "<?php\nfunction lib_fn() {}");
         let idx = store.get_index_salsa(&uri("/lib.php")).unwrap();
         assert_eq!(idx.functions.len(), 1);
-        assert_eq!(idx.functions[0].name, "lib_fn".into());
+        assert_eq!(&*idx.functions[0].name, "lib_fn");
     }
 
     #[test]
@@ -1202,7 +1301,7 @@ mod tests {
         store.ingest(uri("/a.php"), "<?php\nfunction hello() {}");
         let idx = store.get_index_salsa(&uri("/a.php")).unwrap();
         assert_eq!(idx.functions.len(), 1);
-        assert_eq!(idx.functions[0].name, "hello".into());
+        assert_eq!(&*idx.functions[0].name, "hello");
     }
 
     #[test]
@@ -1211,7 +1310,7 @@ mod tests {
         open(&store, uri("/a.php"), "<?php\nclass Foo {}".to_string());
         let idx = store.get_index_salsa(&uri("/a.php")).unwrap();
         assert_eq!(idx.classes.len(), 1);
-        assert_eq!(idx.classes[0].name, "Foo".into());
+        assert_eq!(&*idx.classes[0].name, "Foo");
     }
 
     // ── Mirror invariants ────────────────────────────────────────────────
@@ -1315,6 +1414,63 @@ mod tests {
         );
     }
 
+    /// The shed is recency-based: an entry touched right before overflow (an
+    /// open file being edited) must survive a sweep of cold inserts, while
+    /// untouched cold entries are the ones dropped.
+    #[test]
+    fn parsed_cache_shed_keeps_recently_used_entries() {
+        let store = DocumentStore::new();
+        use crate::document::cache_registry::PARSED_CACHE_CAP;
+
+        let hot = uri("/cap/hot.php");
+        store.ingest(hot.clone(), "<?php\nclass Hot {}");
+        let _ = store.get_doc_salsa(&hot);
+
+        // Fill to just below the cap with cold entries, then re-touch the hot
+        // file so it is the most recently used entry at shed time.
+        for i in 0..(PARSED_CACHE_CAP - 2) {
+            let u = uri(&format!("/cap/cold{i}.php"));
+            store.ingest(u.clone(), "<?php\nclass A {}");
+            let _ = store.get_doc_salsa(&u);
+        }
+        let _ = store.get_doc_salsa(&hot);
+
+        // Overflow: this insert triggers the shed of the LRU half.
+        let trigger = uri("/cap/trigger.php");
+        store.ingest(trigger.clone(), "<?php\nclass T {}");
+        let _ = store.get_doc_salsa(&trigger);
+
+        assert!(
+            store.caches.parsed_cache.contains_key(&hot),
+            "recently-touched entry must survive the recency shed"
+        );
+        assert!(
+            store.caches.parsed_cache.len() <= PARSED_CACHE_CAP,
+            "cache must stay bounded after the shed"
+        );
+    }
+
+    /// `analysis_cache` must stay bounded when many distinct files are
+    /// analyzed across a session (multi-hour usage previously grew it
+    /// without limit).
+    #[test]
+    fn analysis_cache_stays_bounded_under_many_files() {
+        use crate::document::cache_registry::ANALYSIS_CACHE_CAP;
+        let store = DocumentStore::new();
+        let overflow = ANALYSIS_CACHE_CAP + 16;
+        for i in 0..overflow {
+            let u = uri(&format!("/acap/file{i}.php"));
+            store.ingest(u.clone(), "<?php\nfunction f() { return 1; }");
+            let _ = store.cached_analysis(&u);
+        }
+        assert!(
+            store.caches.analysis_cache.len() <= ANALYSIS_CACHE_CAP,
+            "analysis_cache grew to {} entries (cap {})",
+            store.caches.analysis_cache.len(),
+            ANALYSIS_CACHE_CAP
+        );
+    }
+
     #[test]
     fn get_doc_salsa_cache_hits_across_calls() {
         let store = DocumentStore::new();
@@ -1344,6 +1500,168 @@ mod tests {
         let u = uri("/e4_doc.php");
         store.ingest(u.clone(), "<?php\nclass P {}");
         assert!(store.get_doc_salsa(&u).is_some());
+    }
+
+    #[test]
+    fn get_doc_snapshot_or_stale_matches_salsa_on_settled_buffer() {
+        let store = DocumentStore::new();
+        let u = uri("/stale_settled.php");
+        open(&store, u.clone(), "<?php\nclass S {}".to_string());
+        let fresh = store.get_doc_salsa(&u).unwrap();
+        let stale = store.get_doc_snapshot_or_stale(&u).unwrap();
+        assert!(
+            Arc::ptr_eq(&fresh, &stale),
+            "on a settled buffer the stale-tolerant accessor must serve the cached parse"
+        );
+    }
+
+    /// WS1: the cursor-triggered highlight accessor must stay responsive under a
+    /// sustained write stream — never spin (the deadline join hangs if it does)
+    /// and always yield a fresh or last-good parse for an open file.
+    #[test]
+    fn get_doc_snapshot_or_stale_stays_responsive_under_writes() {
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let store = Arc::new(DocumentStore::new());
+        let urls: Vec<Url> = (0..8).map(|i| uri(&format!("/hl{i}.php"))).collect();
+        for (i, u) in urls.iter().enumerate() {
+            open(&store, u.clone(), format!("<?php\nclass H{i} {{}}"));
+            // Warm the parse cache so the stale fallback always has a last-good doc.
+            assert!(store.get_doc_salsa(u).is_some());
+        }
+
+        let deadline = Instant::now() + Duration::from_millis(400);
+        let mut handles = Vec::new();
+
+        {
+            let store = Arc::clone(&store);
+            let urls = urls.clone();
+            handles.push(thread::spawn(move || {
+                let mut rev = 0u32;
+                while Instant::now() < deadline {
+                    for u in &urls {
+                        store.mirror_text(u, &format!("<?php\nclass H {{}}\n// rev {rev}"));
+                    }
+                    rev += 1;
+                }
+            }));
+        }
+
+        for _ in 0..4 {
+            let store = Arc::clone(&store);
+            let urls = urls.clone();
+            handles.push(thread::spawn(move || {
+                while Instant::now() < deadline {
+                    for u in &urls {
+                        assert!(
+                            store.get_doc_snapshot_or_stale(u).is_some(),
+                            "open file must resolve to a fresh or stale parse, never None"
+                        );
+                    }
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join()
+                .expect("stale accessor must not panic or spin under concurrent writes");
+        }
+    }
+
+    /// WS1 A/B measurement (not a pass/fail guard): compares the old unbounded
+    /// `get_doc_salsa` against the new bounded `get_doc_snapshot_or_stale` under
+    /// an identical continuous write stream. Run explicitly:
+    /// `cargo test --lib ws1_ab_latency -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "timing measurement; run with --ignored --nocapture"]
+    fn ws1_ab_latency_under_write_pressure() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        // A large file: each parse is long enough that a concurrent write can
+        // cancel it mid-flight — the condition under which the unbounded retry
+        // actually spins (a tiny file parses faster than the writer's gap).
+        fn big_source(rev: u32) -> String {
+            let mut s = String::from("<?php\nclass Big {\n");
+            for i in 0..3000 {
+                s.push_str(&format!(
+                    "    public function m{i}(int $a, string $b): int {{ return $a + {i}; }}\n"
+                ));
+            }
+            s.push_str(&format!("}}\n// rev {rev}\n"));
+            s
+        }
+
+        fn measure(
+            store: &Arc<DocumentStore>,
+            url: &Url,
+            writers: usize,
+            label: &str,
+            call: impl Fn(&DocumentStore, &Url) -> bool,
+        ) {
+            let stop = Arc::new(AtomicBool::new(false));
+            let mut writer_handles = Vec::new();
+            for w in 0..writers {
+                let store = Arc::clone(store);
+                let url = url.clone();
+                let stop = Arc::clone(&stop);
+                writer_handles.push(thread::spawn(move || {
+                    let mut rev = (w as u32) * 1_000_000;
+                    while !stop.load(Ordering::Relaxed) {
+                        store.mirror_text(&url, &big_source(rev));
+                        rev = rev.wrapping_add(1);
+                    }
+                }));
+            }
+            thread::sleep(Duration::from_millis(30)); // let the writers get hot
+
+            let n = 100usize;
+            let mut max = Duration::ZERO;
+            let mut total = Duration::ZERO;
+            for _ in 0..n {
+                let t = Instant::now();
+                let ok = call(store, url);
+                let dt = t.elapsed();
+                assert!(ok, "{label}: accessor returned None");
+                max = max.max(dt);
+                total += dt;
+            }
+            stop.store(true, Ordering::Relaxed);
+            for h in writer_handles {
+                h.join().unwrap();
+            }
+            println!(
+                "{label}: {n} calls, {writers} writers — max {:>10.3?}, mean {:>10.3?}",
+                max,
+                total / n as u32
+            );
+        }
+
+        let store = Arc::new(DocumentStore::new());
+        let url = uri("/perf_big.php");
+        open(&store, url.clone(), big_source(0));
+        assert!(store.get_doc_salsa(&url).is_some()); // warm the cache
+
+        for writers in [2usize, 4] {
+            measure(
+                &store,
+                &url,
+                writers,
+                "NEW get_doc_snapshot_or_stale",
+                |s, u| s.get_doc_snapshot_or_stale(u).is_some(),
+            );
+            measure(
+                &store,
+                &url,
+                writers,
+                "OLD get_doc_salsa (unbounded)  ",
+                |s, u| s.get_doc_salsa(u).is_some(),
+            );
+        }
     }
 
     #[test]

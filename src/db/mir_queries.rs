@@ -1,11 +1,7 @@
-//! php-lsp salsa queries retargeted onto mir's shared database
-//! (DB_CONVERGENCE_PLAN.md, Phase 2). These mirror the queries in `parse.rs` /
-//! `index.rs` / `symbol_map.rs` but key on mir's `SourceFile` input + run over
-//! `&dyn MirDatabase`, so they live in the single converged db.
-//!
-//! During the transition the originals in `parse.rs` etc. remain for the
-//! consumers not yet migrated (`file_index`, `workspace_index`); they are
-//! deleted once every consumer reads from here.
+//! php-lsp salsa queries on mir's shared database: keyed on mir's `SourceFile`
+//! input and run over `&dyn MirDatabase`, so they live in the single converged
+//! db. The Arc-wrapper types they return (`ParsedArc`, `IndexArc`,
+//! `SymbolMapArc`) live in `parse.rs` / `index.rs` / `symbol_map.rs`.
 
 use std::sync::Arc;
 
@@ -53,12 +49,6 @@ pub fn parsed_doc(db: &dyn MirDatabase, file: SourceFile) -> ParsedArc {
 pub fn symbol_map(db: &dyn MirDatabase, file: SourceFile) -> SymbolMapArc {
     let doc = parsed_doc(db, file);
     SymbolMapArc(Arc::new(SymbolMap::build(doc.get())))
-}
-
-/// Parse-error count for a file, derived from [`parsed_doc`].
-#[salsa::tracked(lru = 2048)]
-pub fn parse_error_count(db: &dyn MirDatabase, file: SourceFile) -> usize {
-    parsed_doc(db, file).get().errors.len()
 }
 
 /// Compact per-file declaration index. Warm-start fast path: if a disk-cached

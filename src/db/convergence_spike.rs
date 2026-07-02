@@ -1,4 +1,5 @@
-//! Phase 0 spike for the database-convergence work (DB_CONVERGENCE_PLAN.md).
+//! Phase 0 spike for the database-convergence work (now shipped; see
+//! ROADMAP.md PLAN 07.01 §"Absorbed status").
 //!
 //! Proves the load-bearing assumption: a `#[salsa::tracked]` query *defined in
 //! the php-lsp crate* can operate on mir-analyzer's concrete `MirDbStorage`,

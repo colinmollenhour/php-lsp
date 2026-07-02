@@ -94,6 +94,16 @@ impl OpenFiles {
         }
         docs.get_doc_salsa(uri)
     }
+
+    /// Open-gated, stale-tolerant parsed doc for cursor-triggered cosmetic reads
+    /// (`documentHighlight`). Never spins under write pressure — see
+    /// [`DocumentStore::get_doc_snapshot_or_stale`].
+    pub(crate) fn get_doc_stale(&self, docs: &DocumentStore, uri: &Url) -> Option<Arc<ParsedDoc>> {
+        if !self.contains(uri) {
+            return None;
+        }
+        docs.get_doc_snapshot_or_stale(uri)
+    }
 }
 
 /// Build the full diagnostic bundle for an already-open file.
