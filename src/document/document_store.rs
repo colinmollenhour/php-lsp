@@ -218,12 +218,14 @@ impl DocumentStore {
         self.caches.evict_analysis_all();
     }
 
-    /// Get or build the `AnalysisSession` for the given PHP version, **without**
-    /// loading PHP stubs. Stub loading is heavy (parses every built-in stub
-    /// file) and is only needed for semantic analysis, not for parse / index /
-    /// symbol-map queries. The parse path uses this; semantic callers use
-    /// [`Self::analysis_session`], which loads stubs idempotently on top.
-    fn get_or_build_session(
+    /// Get or build the `AnalysisSession` for the given PHP version. Rebuilds
+    /// when the version changes (e.g. user flipped config). The session owns
+    /// the shared salsa db and AnalysisCache; lazy-loads vendor files via the
+    /// shared PSR-4 map. Built-in stubs are *not* pre-loaded: mir's
+    /// `prepare_ast_for_analysis` ingests the stubs each analyzed file
+    /// references, and [`crate::types::stub_members`] faults in single stub
+    /// files for builtin member/hover lookups.
+    pub fn analysis_session(
         &self,
         php_version: mir_analyzer::PhpVersion,
     ) -> Arc<mir_analyzer::AnalysisSession> {
@@ -249,20 +251,6 @@ impl DocumentStore {
         }
         let session = Arc::new(builder);
         *guard = Some((php_version, Arc::clone(&session)));
-        session
-    }
-
-    /// The `AnalysisSession` for the given PHP version with PHP stubs loaded.
-    /// Rebuilds when the version changes (e.g. user flipped config). The
-    /// session owns the shared salsa db and AnalysisCache; lazy-loads vendor
-    /// files via the shared PSR-4 map. `ensure_all_stubs` is idempotent — cheap
-    /// after the first call on a given session.
-    pub fn analysis_session(
-        &self,
-        php_version: mir_analyzer::PhpVersion,
-    ) -> Arc<mir_analyzer::AnalysisSession> {
-        let session = self.get_or_build_session(php_version);
-        session.ensure_all_stubs();
         session
     }
 
@@ -324,7 +312,7 @@ impl DocumentStore {
     fn snapshot_mir_query<R>(&self, f: impl Fn(&mir_analyzer::db::MirDbStorage) -> R) -> R {
         use std::panic::AssertUnwindSafe;
         let _interactive = self.interactive_read_guard();
-        let session = self.get_or_build_session(self.workspace_php_version());
+        let session = self.analysis_session(self.workspace_php_version());
         // Each iteration's snapshot clone MUST drop before the next snapshot:
         // a concurrent writer's salsa `set` holds the mir write lock and waits
         // for outstanding db handles to drop, while the next `snapshot_db` needs
@@ -350,7 +338,7 @@ impl DocumentStore {
     ) -> Option<R> {
         use std::panic::AssertUnwindSafe;
         let _interactive = self.interactive_read_guard();
-        let session = self.get_or_build_session(self.workspace_php_version());
+        let session = self.analysis_session(self.workspace_php_version());
         for _ in 0..attempts {
             let db = session.snapshot_db();
             match salsa::Cancelled::catch(AssertUnwindSafe(|| f(&db))) {
@@ -390,7 +378,7 @@ impl DocumentStore {
     pub fn mirror_text_arc(&self, uri: &Url, text_arc: Arc<str>) {
         let dur = Self::input_durability(uri);
         let path: Arc<str> = Arc::from(uri.as_str());
-        let session = self.get_or_build_session(self.workspace_php_version());
+        let session = self.analysis_session(self.workspace_php_version());
         if let Some(wf) = self.lsp_ws_files.get(uri).map(|e| *e) {
             self.deleted_uris.remove(uri);
             // Fast path: byte-identical text already mirrored — skip the write
@@ -451,7 +439,7 @@ impl DocumentStore {
         let Some(wf) = self.lsp_ws_file(uri) else {
             return false;
         };
-        let session = self.get_or_build_session(self.workspace_php_version());
+        let session = self.analysis_session(self.workspace_php_version());
         session.with_db_mut(|db| wf.set_cached_index(db).to(Some(index)));
         true
     }
@@ -663,7 +651,7 @@ impl DocumentStore {
         entries.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         let files: Arc<[LspWsFile]> = entries.iter().map(|(_, wf)| *wf).collect();
 
-        let session = self.get_or_build_session(self.workspace_php_version());
+        let session = self.analysis_session(self.workspace_php_version());
         let mut guard = self.lsp_workspace.lock().unwrap();
         session.with_db_mut(|db| match *guard {
             Some(ws) => {
