@@ -56,7 +56,10 @@ an editing session), `republish_scaling` (per-edit republish flat as the
 ingested-file count grows), `references_degradation` (references flat across
 a simulated session), `cross_file_freshness` (base-class edit → *dependent*
 open file's publishDiagnostics through the real server, flat 100→5000
-ingested files, ceiling-gated).
+ingested files, ceiling-gated), `rss_session` (RSS across a 300-edit session
+with the production allocator + runtime config; gates on post-warm-up tail
+growth — `RSS_SESSION_MODE`/`RSS_SESSION_ROUNDS`/`--features dhat-heap`
+support leak diagnosis).
 
 ---
 
