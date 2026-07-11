@@ -103,6 +103,26 @@ async fn initialize_returns_server_capabilities() {
     );
 }
 
+/// `\` must be a completion trigger character: FQN completion after a bare
+/// `\` (e.g. typing `\App\Models\`) is implemented (see completion/mod.rs's
+/// sub-namespace completion), so clients that only auto-popup completion on
+/// registered trigger characters need it advertised or the feature is
+/// reachable only via manual invocation.
+#[tokio::test]
+async fn backslash_is_a_completion_trigger_character() {
+    let (_, init_resp) = TestServer::new_with_options(serde_json::json!({})).await;
+    let triggers = init_resp["result"]["capabilities"]["completionProvider"]["triggerCharacters"]
+        .as_array()
+        .expect("completionProvider should advertise triggerCharacters")
+        .iter()
+        .map(|v| v.as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert!(
+        triggers.contains(&"\\"),
+        "expected '\\\\' among trigger characters, got {triggers:?}"
+    );
+}
+
 #[tokio::test]
 async fn shutdown_responds_correctly() {
     let mut server = TestServer::new().await;
