@@ -129,10 +129,3 @@ opt-level = 2
 [profile.dev.package.salsa-macro-rules]
 opt-level = 2
 
-
-# DEV SEAM — do not commit: local mir checkout until 0.52.0 is released.
-[patch."https://github.com/jorgsowa/mir"]
-mir-analyzer = { path = "../mir/crates/mir-analyzer" }
-mir-issues = { path = "../mir/crates/mir-issues" }
-mir-codebase = { path = "../mir/crates/mir-codebase" }
-mir-types = { path = "../mir/crates/mir-types" }
