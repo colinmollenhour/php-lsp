@@ -882,3 +882,33 @@ enum Suit: string {
     )
     .await;
 }
+
+/// KNOWN FALSE POSITIVE, not fixable from php-lsp alone: a closure declared
+/// outside any class, using `$this`, later rebound to an object via
+/// `Closure::bind()`/`bindTo()`/`call()` is valid PHP (confirmed: `php -l`
+/// passes and it runs correctly) — a common idiom for macro-style helpers and
+/// PHPUnit/Laravel-style closure binding. mir's `InvalidScope` check
+/// (mir-analyzer `expr/variables.rs`) only binds `$this` into a closure's
+/// flow-state when the closure is lexically declared inside a method
+/// (`expr/closures.rs`, gated on `ctx.self_fqcn.is_some()`); it has no model
+/// for a free-standing closure later rebound via `Closure::bind`. This is a
+/// mir semantic gap (the flow-state closure model, not php-lsp's diagnostic
+/// wiring) — needs a mir-side fix and release.
+#[tokio::test]
+#[ignore = "mir's InvalidScope check has no model for Closure::bind() rebinding $this into a free-standing closure — needs a mir-side fix"]
+async fn closure_bind_rebinding_this_is_not_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+class Container {
+    private int $value = 42;
+}
+$getter = function (): int {
+    return $this->value;
+};
+$bound = Closure::bind($getter, new Container(), Container::class);
+echo $bound();
+"#,
+    )
+    .await;
+}
