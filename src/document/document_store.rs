@@ -128,6 +128,33 @@ impl DocumentStore {
         InteractiveReadGuard(&self.interactive_reads)
     }
 
+    /// Take an interactive-read guard, wait (bounded ~50 ms) for in-flight
+    /// background writes to go quiet, and return the settled write revision.
+    ///
+    /// For user-facing sweeps that abort when [`Self::write_rev`] advances:
+    /// snapshotting the revision this way ensures only genuine user edits —
+    /// not the background scan the guard just paused — void the sweep.
+    /// Sleeps; call from a blocking thread only.
+    pub fn settled_write_rev_guard(&self) -> (InteractiveReadGuard<'_>, u64) {
+        let guard = self.interactive_read_guard();
+        // Post-scan there is no background write storm to settle; skip the
+        // sleep so steady-state requests pay only the guard's atomic inc.
+        if !self.is_index_ready() {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
+            let mut rev = self.write_rev();
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                let now = self.write_rev();
+                let quiet = now == rev;
+                rev = now;
+                if quiet || std::time::Instant::now() >= deadline {
+                    break;
+                }
+            }
+        }
+        (guard, self.write_rev())
+    }
+
     /// Pause the calling (background-writer) thread while interactive reads
     /// are in flight, up to 500 ms per call. Bounded so a wedged reader can
     /// only slow the scan, never stop it; callers invoke this per file, so

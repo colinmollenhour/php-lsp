@@ -107,9 +107,12 @@ impl Backend {
             .collect();
 
         let docs = Arc::clone(&self.docs);
-        let cancel_rev = self.docs.write_rev();
         let diag_cfg_sweep = diag_cfg.clone();
         let items = tokio::task::spawn_blocking(move || {
+            // A user-facing pull: pause the background scan for the sweep and
+            // snapshot a settled revision, so only a genuine user edit aborts
+            // the sweep below.
+            let (_interactive, cancel_rev) = docs.settled_write_rev_guard();
             let mut results = Vec::new();
             for (uri, parse_diags, version) in all_parse_diags {
                 // A write during the sweep means the results are immediately

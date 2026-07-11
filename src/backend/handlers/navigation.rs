@@ -350,8 +350,10 @@ impl Backend {
             });
 
             let docs = Arc::clone(&self.docs);
-            let cancel_rev = self.docs.write_rev();
             let locations = tokio::task::spawn_blocking(move || {
+                // Pause the background scan and snapshot a settled revision so
+                // only a genuine user edit cancels the search.
+                let (_interactive, cancel_rev) = docs.settled_write_rev_guard();
                 let query = ReferenceQuery {
                     word: &word,
                     kind,
