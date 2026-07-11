@@ -237,7 +237,7 @@ impl Backend {
                     }
                 }),
                 document_link_provider: feat.document_link.then(|| DocumentLinkOptions {
-                    resolve_provider: Some(true),
+                    resolve_provider: Some(false),
                     work_done_progress_options: Default::default(),
                 }),
                 execute_command_provider: Some(ExecuteCommandOptions {

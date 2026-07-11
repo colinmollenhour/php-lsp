@@ -5,6 +5,20 @@ use super::*;
 use expect_test::expect;
 use serde_json::{Value, json};
 
+/// `document_link` always returns each link's fully-resolved target URI
+/// (see `document_link`'s doc comment on the resolve path), so there is
+/// nothing for `documentLink/resolve` to add. Advertising `resolveProvider`
+/// would force resolve-capable clients into a pointless extra round trip.
+#[tokio::test]
+async fn document_link_resolve_not_advertised() {
+    let (_, init_resp) = TestServer::new_with_options(json!({})).await;
+    let provider = &init_resp["result"]["capabilities"]["documentLinkProvider"];
+    assert_eq!(
+        provider["resolveProvider"], false,
+        "documentLink/resolve is a no-op passthrough and should not be advertised: {provider:?}"
+    );
+}
+
 fn render_document_links(result: &Value) -> String {
     let links = result.as_array().cloned().unwrap_or_default();
     if links.is_empty() {
