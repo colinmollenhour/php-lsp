@@ -904,10 +904,10 @@ async fn laravel_completion_this_members() {
 
 /// `Str::` triggers static member completion with camel, lower, upper, etc.
 ///
-/// **Gap**: `Str::` currently returns PHP keywords/globals instead of `Str`
-/// class methods. Static member completion does not resolve the class from a
-/// `use`-import alias (`use Illuminate\Support\Str`), resolved by expanding the
-/// alias to its FQCN and extracting the short class name for the workspace index lookup.
+/// Regression guard: static member completion resolves the class from a
+/// `use`-import alias (`use Illuminate\Support\Str`) by expanding the alias
+/// to its FQCN and extracting the short class name for the workspace index
+/// lookup, rather than falling back to PHP keyword/global completions.
 #[serial_test::serial]
 #[tokio::test]
 async fn laravel_completion_static_members() {
