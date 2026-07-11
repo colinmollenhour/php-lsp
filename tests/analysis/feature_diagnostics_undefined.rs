@@ -494,6 +494,62 @@ function test(Foo $f): void {
     .await;
 }
 
+/// `use function` importing a namespaced function (the common Laravel/
+/// Symfony helper-file pattern: `function_exists()`-guarded declarations
+/// inside a namespace, imported unqualified elsewhere) must not be flagged
+/// `UndefinedFunction`. No prior test covered `use function` resolution at all.
+#[tokio::test]
+async fn use_function_namespaced_import_not_flagged_as_undefined() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+namespace App\Helpers;
+if (! function_exists('App\Helpers\greet')) {
+    function greet($name) {
+        return $name;
+    }
+}
+namespace App;
+use function App\Helpers\greet;
+function run() {
+    return greet("world");
+}
+"#,
+    )
+    .await;
+}
+
+/// Same as above but across files: the function is declared in one file and
+/// imported via `use function` in another, mirroring how Laravel's
+/// `autoload.files` helpers (e.g. `enum_value()`) are declared and consumed.
+#[tokio::test]
+async fn use_function_namespaced_import_not_flagged_as_undefined_cross_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"},"files":["src/Helpers/functions.php"]}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Helpers")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Helpers/functions.php"),
+        "<?php\nnamespace App\\Helpers;\nif (! function_exists('App\\Helpers\\greet')) {\n    function greet($name) {\n        return $name;\n    }\n}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse function App\\Helpers\\greet;\nfunction run() {\n    return greet(\"world\");\n}\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready_secs(30).await;
+    let diag = s.open("src/Service/Handler.php", src).await;
+    let empty = vec![];
+    let all = diag["params"]["diagnostics"].as_array().unwrap_or(&empty);
+    assert!(all.is_empty(), "expected no diagnostics, got: {all:#?}");
+}
+
 /// A trait-aliased method call must not be flagged `UndefinedMethod`.
 #[tokio::test]
 async fn trait_aliased_method_call_no_false_undefined_method() {
