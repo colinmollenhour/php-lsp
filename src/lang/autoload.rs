@@ -411,8 +411,28 @@ pub fn resolve_php_version_from_roots(
     (PHP_8_5.to_string(), "default")
 }
 
-/// Detect the PHP version by running `php --version`.
+/// Detect the PHP version by running `php --version`, memoized on disk.
+///
+/// Booting the interpreter costs ~100–300 ms and this sits on the
+/// `initialize` critical path, so the result is cached keyed by the resolved
+/// binary's path + mtime + size — a PHP upgrade or PATH change re-detects.
 pub fn detect_php_binary_version() -> Option<String> {
+    let cache_file = crate::index::cache::cache_base_dir()
+        .map(|d| d.join("php-lsp").join("php-binary-version.json"));
+    detect_php_binary_version_with_cache(cache_file.as_deref())
+}
+
+fn detect_php_binary_version_with_cache(cache_file: Option<&Path>) -> Option<String> {
+    let key = php_binary_cache_key();
+    if let (Some(cache_file), Some(key)) = (cache_file, key.as_ref())
+        && let Ok(text) = std::fs::read_to_string(cache_file)
+        && let Ok(cached) = serde_json::from_str::<serde_json::Value>(&text)
+        && cached.get("key").and_then(|k| k.as_str()) == Some(key)
+        && let Some(ver) = cached.get("version").and_then(|v| v.as_str())
+    {
+        return Some(ver.to_string());
+    }
+
     let output = std::process::Command::new("php")
         .arg("--version")
         .output()
@@ -421,7 +441,36 @@ pub fn detect_php_binary_version() -> Option<String> {
     // First line: "PHP X.Y.Z (cli) ..."
     let first_line = stdout.lines().next()?;
     let version_str = first_line.strip_prefix("PHP ")?.split_whitespace().next()?;
-    extract_major_minor(version_str)
+    let ver = extract_major_minor(version_str)?;
+
+    if let (Some(cache_file), Some(key)) = (cache_file, key) {
+        let entry = serde_json::json!({"key": key, "version": ver});
+        if let Some(parent) = cache_file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(cache_file, entry.to_string());
+    }
+    Some(ver)
+}
+
+/// Identity of the `php` binary `Command::new("php")` would spawn:
+/// resolved path + mtime + size. `None` when it can't be resolved via PATH —
+/// callers then skip the cache and always spawn.
+fn php_binary_cache_key() -> Option<String> {
+    let exe = if cfg!(windows) { "php.exe" } else { "php" };
+    let path = std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(exe))
+            .find(|c| c.is_file())
+    })?;
+    let meta = std::fs::metadata(&path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(format!("{}|{mtime}|{}", path.display(), meta.len()))
 }
 
 /// Extract `"X.Y"` from a full version string like `"8.1.27"` or `"8.2"`.
@@ -817,6 +866,48 @@ mod tests {
             "unexpected source: {source}"
         );
         assert!(ver.contains('.'), "version should be X.Y format, got {ver}");
+    }
+
+    #[test]
+    fn php_binary_version_cache_round_trips_and_invalidates_on_key_change() {
+        // Only meaningful where a php binary resolves via PATH.
+        let Some(key) = php_binary_cache_key() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let cache_file = dir.path().join("php-binary-version.json");
+
+        // A fresh cache entry for the current binary is served without spawning.
+        std::fs::write(
+            &cache_file,
+            serde_json::json!({"key": key, "version": "7.0"}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            detect_php_binary_version_with_cache(Some(&cache_file)),
+            Some("7.0".to_string()),
+            "matching cache entry must be served as-is"
+        );
+
+        // A stale key (different binary identity) forces re-detection, which
+        // overwrites the entry with the real version.
+        std::fs::write(
+            &cache_file,
+            serde_json::json!({"key": "other|0|0", "version": "7.0"}).to_string(),
+        )
+        .unwrap();
+        let detected = detect_php_binary_version_with_cache(Some(&cache_file));
+        assert_ne!(
+            detected,
+            Some("7.0".to_string()),
+            "stale cache key must not be served"
+        );
+        if let Some(ref v) = detected {
+            let rewritten: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&cache_file).unwrap()).unwrap();
+            assert_eq!(rewritten["version"].as_str(), Some(v.as_str()));
+            assert_eq!(rewritten["key"].as_str(), Some(key.as_str()));
+        }
     }
 
     // --- parse_php_version_constraint edge cases ---

@@ -191,7 +191,7 @@ impl WorkspaceCache {
 /// Platform cache directory: `$XDG_CACHE_HOME` or `$HOME/.cache` on Unix,
 /// `%LOCALAPPDATA%` on Windows. Deliberately doesn't depend on the `dirs`
 /// crate — keeps the footprint small and the behaviour predictable.
-fn cache_base_dir() -> Option<PathBuf> {
+pub(crate) fn cache_base_dir() -> Option<PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME")
         && !xdg.is_empty()
     {
