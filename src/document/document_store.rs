@@ -76,6 +76,21 @@ pub struct DocumentStore {
     /// fast typing preempts stale workspace re-analysis rather than queueing
     /// behind it.
     reanalyze_cancel: Mutex<mir_analyzer::IndexCancel>,
+    /// Count of in-flight interactive reads (requests the user is waiting on).
+    /// The workspace scan yields at file boundaries while this is non-zero, so
+    /// its per-file salsa writes can't starve a request's snapshot into an
+    /// endless `Cancelled` retry loop. Advisory only — relaxed ordering.
+    interactive_reads: AtomicU64,
+}
+
+/// RAII handle marking an interactive read in flight; see
+/// [`DocumentStore::interactive_read_guard`].
+pub struct InteractiveReadGuard<'a>(&'a AtomicU64);
+
+impl Drop for InteractiveReadGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 impl Default for DocumentStore {
@@ -100,6 +115,30 @@ impl DocumentStore {
             index_ready: AtomicBool::new(false),
             write_revision: AtomicU64::new(0),
             reanalyze_cancel: Mutex::new(mir_analyzer::IndexCancel::new()),
+            interactive_reads: AtomicU64::new(0),
+        }
+    }
+
+    /// Mark an interactive read (a request the user is waiting on) as in
+    /// flight for the guard's lifetime. Background bulk writers poll
+    /// [`Self::yield_to_interactive_reads`] between files and pause while any
+    /// guard is live, giving the read a write-free window to complete.
+    pub fn interactive_read_guard(&self) -> InteractiveReadGuard<'_> {
+        self.interactive_reads.fetch_add(1, Ordering::Relaxed);
+        InteractiveReadGuard(&self.interactive_reads)
+    }
+
+    /// Pause the calling (background-writer) thread while interactive reads
+    /// are in flight, up to 500 ms per call. Bounded so a wedged reader can
+    /// only slow the scan, never stop it; callers invoke this per file, so
+    /// sustained interactive traffic keeps yielding at each boundary.
+    pub fn yield_to_interactive_reads(&self) {
+        let mut waited = std::time::Duration::ZERO;
+        const STEP: std::time::Duration = std::time::Duration::from_millis(2);
+        const MAX: std::time::Duration = std::time::Duration::from_millis(500);
+        while self.interactive_reads.load(Ordering::Relaxed) > 0 && waited < MAX {
+            std::thread::sleep(STEP);
+            waited += STEP;
         }
     }
 
@@ -257,6 +296,7 @@ impl DocumentStore {
     /// check it at coarser granularity rather than here.
     fn snapshot_mir_query<R>(&self, f: impl Fn(&mir_analyzer::db::MirDbStorage) -> R) -> R {
         use std::panic::AssertUnwindSafe;
+        let _interactive = self.interactive_read_guard();
         let session = self.get_or_build_session(self.workspace_php_version());
         // Each iteration's snapshot clone MUST drop before the next snapshot:
         // a concurrent writer's salsa `set` holds the mir write lock and waits
@@ -282,6 +322,7 @@ impl DocumentStore {
         f: impl Fn(&mir_analyzer::db::MirDbStorage) -> R,
     ) -> Option<R> {
         use std::panic::AssertUnwindSafe;
+        let _interactive = self.interactive_read_guard();
         let session = self.get_or_build_session(self.workspace_php_version());
         for _ in 0..attempts {
             let db = session.snapshot_db();
@@ -984,6 +1025,7 @@ impl DocumentStore {
         let class_fqns = crate::references::collect_referenced_class_fqns(&doc);
 
         // ingest_file/load_class/analyze take internal salsa snapshots; a concurrent db write cancels them via resume_unwind. Retry the idempotent sequence.
+        let _interactive = self.interactive_read_guard();
         let analysis = loop {
             let attempt = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
                 session.ingest_file(file.clone(), source.clone());
@@ -1218,6 +1260,50 @@ mod tests {
     // Removed `salsa_codebase_aggregates_all_files`: the salsa-side codebase
     // aggregation was deleted with the mir 0.22 migration. Equivalent
     // behaviour is now covered by mir-analyzer's own session tests.
+
+    #[test]
+    fn scan_writers_yield_while_interactive_reads_are_in_flight() {
+        let store = Arc::new(DocumentStore::new());
+
+        // No guard: returns immediately.
+        let t = std::time::Instant::now();
+        store.yield_to_interactive_reads();
+        assert!(t.elapsed() < std::time::Duration::from_millis(50));
+
+        // Guard held on another thread: the writer waits until it drops.
+        let guard = store.interactive_read_guard();
+        let waiter = {
+            let store = Arc::clone(&store);
+            std::thread::spawn(move || {
+                let t = std::time::Instant::now();
+                store.yield_to_interactive_reads();
+                t.elapsed()
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        drop(guard);
+        let waited = waiter.join().unwrap();
+        assert!(
+            waited >= std::time::Duration::from_millis(40),
+            "writer should have paused while the read guard was held (waited {waited:?})"
+        );
+        // Guard fully released: nested guards count correctly.
+        let g1 = store.interactive_read_guard();
+        let g2 = store.interactive_read_guard();
+        drop(g1);
+        let waiter = {
+            let store = Arc::clone(&store);
+            std::thread::spawn(move || {
+                let t = std::time::Instant::now();
+                store.yield_to_interactive_reads();
+                t.elapsed()
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        drop(g2);
+        assert!(waiter.join().unwrap() >= std::time::Duration::from_millis(20));
+        store.yield_to_interactive_reads(); // all guards dropped — no wait
+    }
 
     #[test]
     fn index_registers_file_in_salsa() {

@@ -222,6 +222,10 @@ pub(crate) async fn scan_workspace(
         let cache_hits = std::sync::atomic::AtomicUsize::new(0);
 
         let index_file = |(uri, text): &(Url, String)| -> usize {
+            // Requests the user is waiting on take priority over indexing:
+            // pause before this file's salsa writes while any interactive
+            // read is in flight, so its snapshot isn't repeatedly cancelled.
+            docs.yield_to_interactive_reads();
             if open_files.contains(uri) {
                 return 0;
             }
@@ -306,6 +310,43 @@ mod tests {
     use crate::document::document_store::DocumentStore;
     use crate::document::open_files::OpenFiles;
     use crate::index::cache::WorkspaceCache;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn scan_pauses_while_an_interactive_read_is_in_flight() {
+        let src_dir = tempfile::tempdir().unwrap();
+        for i in 0..3 {
+            std::fs::write(
+                src_dir.path().join(format!("F{i}.php")),
+                format!("<?php\nclass F{i} {{}}"),
+            )
+            .unwrap();
+        }
+
+        let docs = Arc::new(DocumentStore::new());
+        let guard = docs.interactive_read_guard();
+        let scan = tokio::spawn(scan_workspace(
+            src_dir.path().to_path_buf(),
+            Arc::clone(&docs),
+            OpenFiles::default(),
+            None,
+            &[],
+            &[],
+            50_000,
+            None,
+        ));
+
+        // The per-file yield is bounded at 500 ms; a 3-file scan otherwise
+        // finishes in a few ms, so still-running at 150 ms proves it paused.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(
+            !scan.is_finished(),
+            "scan should pause at file boundaries while a read guard is held"
+        );
+
+        drop(guard);
+        let (indexed, _) = scan.await.unwrap();
+        assert_eq!(indexed, 3, "scan must resume and index everything");
+    }
 
     #[tokio::test]
     async fn cache_round_trip_writes_then_reads_file_index() {

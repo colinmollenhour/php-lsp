@@ -385,6 +385,9 @@ async fn compute_dependent_publishes_owned(
 
         let php_version = docs.workspace_php_version();
         let session = docs.analysis_session(php_version);
+        // The user is typing: pause the background scan's write storm so this
+        // sweep's snapshots aren't repeatedly cancelled while indexing runs.
+        let _interactive = docs.interactive_read_guard();
         // Cancel any older in-flight sweep and take a fresh token: when the
         // next edit starts its own sweep, this one stops at its next file
         // boundary instead of blocking typing behind the previous sweep.
