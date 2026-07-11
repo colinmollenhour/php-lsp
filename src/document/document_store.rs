@@ -997,8 +997,21 @@ impl DocumentStore {
         Some(analysis)
     }
 
-    #[tracing::instrument(skip_all)]
     pub fn cached_analysis(&self, uri: &Url) -> Option<Arc<mir_analyzer::FileAnalysis>> {
+        self.cached_analysis_cancellable(uri, &|| false)
+    }
+
+    /// [`Self::cached_analysis`] with an early exit: `should_cancel` is
+    /// polled whenever a concurrent salsa write cancels the analysis attempt.
+    /// A handler passes its write-revision staleness probe so a request made
+    /// obsolete by newer typing stops burning a blocking-pool thread instead
+    /// of retrying until the writer pauses — the editor re-requests anyway.
+    #[tracing::instrument(skip_all)]
+    pub fn cached_analysis_cancellable(
+        &self,
+        uri: &Url,
+        should_cancel: &(dyn Fn() -> bool + Sync),
+    ) -> Option<Arc<mir_analyzer::FileAnalysis>> {
         // Need the parsed doc both for the analyzer and as the cache key.
         let doc = self.get_doc_salsa(uri)?;
         let source = doc.source_arc();
@@ -1065,8 +1078,23 @@ impl DocumentStore {
                 let analyzer = mir_analyzer::FileAnalyzer::new(&session);
                 analyzer.analyze(file.clone(), doc.source(), &owned_program, &source_map)
             }));
-            if let Ok(a) = attempt {
-                break Arc::new(a);
+            match attempt {
+                Ok(a) => break Arc::new(a),
+                Err(_) => {
+                    // A write cancelled the attempt. If it replaced THIS
+                    // file's text the result is already obsolete (the cache
+                    // key is the source Arc) and the editor re-requests after
+                    // its didChange — stop burning the blocking thread.
+                    // Writes elsewhere just retry as before.
+                    let text_changed = self
+                        .caches
+                        .text_cache
+                        .get(uri)
+                        .is_none_or(|t| !Arc::ptr_eq(&t, &source));
+                    if text_changed || should_cancel() {
+                        return None;
+                    }
+                }
             }
         };
         // Compare the new FileIndex against the stored fingerprint. If
