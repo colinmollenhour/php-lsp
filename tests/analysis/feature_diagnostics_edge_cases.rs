@@ -691,3 +691,97 @@ async fn syntax_error_produces_error_diagnostic() {
         2:0-2:1 [1] ?: expected '}', found end of file"#]]
     .assert_eq(&render_diagnostics_notification(&notif));
 }
+
+// ── nullsafe operator (?->) ───────────────────────────────────────────────────
+
+/// The nullsafe operator explicitly guards against null and must suppress the
+/// null-dereference diagnostic a plain `->` on the same value would trigger.
+#[tokio::test]
+async fn nullsafe_method_call_suppresses_null_diagnostic() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+class Box { public function value(): int { return 1; } }
+$box = null;
+$box?->value();
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn nullsafe_property_fetch_suppresses_null_diagnostic() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+class Box { public int $value = 0; }
+$box = null;
+echo $box?->value;
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn nullsafe_chain_suppresses_null_diagnostic() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+class Inner { public function value(): int { return 1; } }
+class Outer { public function inner(): ?Inner { return null; } }
+$outer = null;
+$outer?->inner()?->value();
+"#,
+    )
+    .await;
+}
+
+/// Contrast: the same definitely-null value WITHOUT the nullsafe operator
+/// must still be flagged, proving the tests above exercise real suppression
+/// rather than an analyzer that never checks null method/property access.
+#[tokio::test]
+async fn plain_method_call_on_null_is_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+class Box { public function value(): int { return 1; } }
+function _wrap(): void {
+    $box = null;
+    $box->value();
+//  ^^^^^^^^^^^^^ error: Cannot call method value() on null
+}
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn plain_property_fetch_on_null_is_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+class Box { public int $value = 0; }
+function _wrap(): void {
+    $box = null;
+    echo $box->value;
+//       ^^^^^^^^^^^ error: Cannot access property $value on null
+}
+"#,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn array_access_on_null_is_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+function _wrap(): void {
+    $arr = null;
+    echo $arr['key'];
+//       ^^^^^^^^^^^ error: Cannot access array on null
+}
+"#,
+    )
+    .await;
+}
