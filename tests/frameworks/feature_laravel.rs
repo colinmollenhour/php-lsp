@@ -1078,18 +1078,9 @@ async fn laravel_diagnostics_clean_file_no_noise() {
         .await;
     let empty = vec![];
     let all = diag["params"]["diagnostics"].as_array().unwrap_or(&empty);
-    // Global functions declared in composer `autoload.files` (e.g. functions.php)
-    // are a known analyzer gap: the mir session doesn't include them, so calls
-    // to enum_value() and similar helpers produce false-positive UndefinedFunction
-    // errors. Filter those out so the test guards against *new* regressions only.
-    let known_gaps = ["enum_value"];
     let errors: Vec<_> = all
         .iter()
         .filter(|d| d["severity"].as_u64() == Some(1))
-        .filter(|d| {
-            let msg = d["message"].as_str().unwrap_or("");
-            !known_gaps.iter().any(|g| msg.contains(g))
-        })
         .collect();
     assert!(
         errors.is_empty(),
