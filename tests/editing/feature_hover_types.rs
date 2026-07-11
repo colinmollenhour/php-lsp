@@ -161,6 +161,8 @@ $result = identi$0ty($myString);
 
             ---
 
+            **@return** `T`
+            **@param** `T` `$x`
             **@template** `T`"#]],
     )
     .await;
@@ -182,6 +184,8 @@ $result = box$0('hello');
 
             ---
 
+            **@return** `T`
+            **@param** `T` `$v`
             **@template** `T`"#]],
     )
     .await;
