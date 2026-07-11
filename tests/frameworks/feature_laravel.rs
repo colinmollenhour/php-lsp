@@ -368,8 +368,6 @@ async fn laravel_hover_on_call_site() {
 }
 
 /// Hover on a static method call (`Str::camel`) shows the camel() signature.
-///
-/// **Gap**: Hover on `Str::camel($ability)` returns `<no hover>`. The static
 #[serial_test::serial]
 #[tokio::test]
 async fn laravel_hover_on_static_call() {
