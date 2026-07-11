@@ -117,7 +117,7 @@ async fn workspace_diagnostic_circular_inheritance() {
     .assert_eq(&out);
 }
 
-// ── Abstract method enforcement gap ──────────────────────────────────────────
+// ── Abstract method enforcement ──────────────────────────────────────────────
 
 /// A concrete class that extends an abstract class without implementing all
 /// abstract methods produces an `UnimplementedAbstractMethod` diagnostic.
