@@ -464,10 +464,11 @@ async fn laravel_references_static_method_cross_file() {
         Illuminate/Foundation/Console/ViewMakeCommand.php:184:29-184:34
         Illuminate/Support/Str.php:1568:87-1568:92
         Illuminate/Support/Str.php:1594:29-1594:34
-        Illuminate/Support/Str.php:1850:23-1850:28
+        Illuminate/Support/Str.php:1719:41-1719:46
+        Illuminate/Support/Str.php:1860:23-1860:28
         Illuminate/Support/Stringable.php:486:31-486:36
-        Illuminate/Validation/Concerns/ValidatesAttributes.php:1459:41-1459:46
-        Illuminate/Validation/Concerns/ValidatesAttributes.php:2486:24-2486:29"#]]
+        Illuminate/Validation/Concerns/ValidatesAttributes.php:1466:41-1466:46
+        Illuminate/Validation/Concerns/ValidatesAttributes.php:2492:24-2492:29"#]]
     .assert_eq(&out);
 }
 
@@ -1324,147 +1325,147 @@ async fn laravel_document_symbols_large_file() {
           Method handleDiscardedAttributeViolationUsing @L623
           Method preventAccessingMissingAttributes @L634
           Method handleMissingAttributeViolationUsing @L645
-          Method withoutBroadcasting @L656
-          Method fill @L677
-          Method forceFill @L725
-          Method qualifyColumn @L736
-          Method qualifyColumns @L751
-          Method newInstance @L765
-          Method newFromBuilder @L794
-          Method on @L813
-          Method onWriteConnection @L826
-          Method all @L837
-          Method with @L850
-          Method load @L863
-          Method loadMorph @L881
-          Method loadMissing @L900
-          Method loadAggregate @L917
-          Method loadCount @L930
-          Method loadMax @L944
-          Method loadMin @L956
-          Method loadSum @L968
-          Method loadAvg @L980
-          Method loadExists @L991
-          Method loadMorphAggregate @L1005
-          Method loadMorphCount @L1025
-          Method loadMorphMax @L1038
-          Method loadMorphMin @L1051
-          Method loadMorphSum @L1064
-          Method loadMorphAvg @L1077
-          Method increment @L1090
-          Method decrement @L1103
-          Method incrementOrDecrement @L1117
-          Method update @L1153
-          Method updateOrFail @L1171
-          Method updateQuietly @L1187
-          Method incrementQuietly @L1204
-          Method decrementQuietly @L1219
-          Method incrementEach @L1233
-          Method decrementEach @L1245
-          Method incrementOrDecrementEach @L1258
-          Method push @L1301
-          Method pushQuietly @L1332
-          Method saveQuietly @L1343
-          Method save @L1354
-          Method saveOrIgnore @L1404
-          Method saveOrFail @L1440
-          Method finishSave @L1451
-          Method performUpdate @L1468
-          Method setKeysForSelectQuery @L1506
-          Method getKeyForSelectQuery @L1518
-          Method setKeysForSaveQuery @L1529
-          Method getKeyForSaveQuery @L1541
-          Method performInsert @L1552
-          Method performInsertOrIgnore @L1608
-          Method insertAndSetId @L1657
-          Method destroy @L1670
-          Method delete @L1709
-          Method deleteQuietly @L1748
-          Method deleteOrFail @L1760
-          Method forceDelete @L1776
-          Method forceDestroy @L1789
-          Method performDeleteOnModel @L1799
-          Method query @L1811
-          Method newQuery @L1821
-          Method newModelQuery @L1831
-          Method newQueryWithoutRelationships @L1843
-          Method registerGlobalScopes @L1854
-          Method newQueryWithoutScopes @L1868
-          Method newQueryWithoutScope @L1881
-          Method newQueryForRestoration @L1892
-          Method newEloquentBuilder @L1903
-          Method resolveCustomBuilderClass @L1919
-          Method newBaseQueryBuilder @L1934
-          Method newPivot @L1949
-          Method hasNamedScope @L1961
-          Method callNamedScope @L1974
-          Method isScopeMethodWithAttribute @L1989
-          Method toArray @L2001
-          Method toJson @L2017
-          Method toPrettyJson @L2036
-          Method jsonSerialize @L2046
-          Method fresh @L2057
-          Method refresh @L2074
-          Method replicate @L2103
-          Method replicateQuietly @L2132
-          Method is @L2143
-          Method isNot @L2157
-          Method getConnection @L2167
-          Method getConnectionName @L2177
-          Method setConnection @L2188
-          Method resolveConnection @L2201
-          Method getConnectionResolver @L2211
-          Method setConnectionResolver @L2222
-          Method unsetConnectionResolver @L2232
-          Method getTable @L2242
-          Method setTable @L2253
-          Method getKeyName @L2265
-          Method setKeyName @L2276
-          Method getQualifiedKeyName @L2288
-          Method getKeyType @L2298
-          Method setKeyType @L2309
-          Method getIncrementing @L2321
-          Method setIncrementing @L2332
-          Method getKey @L2344
-          Method getQueueableId @L2354
-          Method getQueueableRelations @L2364
-          Method getQueueableConnection @L2398
-          Method getRouteKey @L2408
-          Method getRouteKeyName @L2418
-          Method resolveRouteBinding @L2430
-          Method resolveSoftDeletableRouteBinding @L2442
-          Method resolveChildRouteBinding @L2455
-          Method resolveSoftDeletableChildRouteBinding @L2468
-          Method resolveChildRouteBindingQuery @L2481
-          Method childRouteBindingRelationshipName @L2503
-          Method resolveRouteBindingQuery @L2516
-          Method getForeignKey @L2526
-          Method getPerPage @L2536
-          Method setPerPage @L2547
-          Method isSoftDeletable @L2557
-          Method isPrunable @L2565
-          Method isMassPrunable @L2573
-          Method preventsLazyLoading @L2583
-          Method isAutomaticallyEagerLoadingRelationships @L2593
-          Method preventsSilentlyDiscardingAttributes @L2603
-          Method preventsAccessingMissingAttributes @L2613
-          Method broadcastChannelRoute @L2623
-          Method broadcastChannel @L2633
-          Method resolveClassAttribute @L2648
-          Method __get @L2683
-          Method __set @L2695
-          Method offsetExists @L2706
-          Method offsetGet @L2725
-          Method offsetSet @L2737
-          Method offsetUnset @L2748
-          Method __isset @L2764
-          Method __unset @L2775
-          Method __call @L2787
-          Method __callStatic @L2812
-          Method __toString @L2826
-          Method escapeWhenCastingToString @L2839
-          Method __sleep @L2851
-          Method __wakeup @L2878"#]]
+          Method withoutBroadcasting @L658
+          Method fill @L679
+          Method forceFill @L727
+          Method qualifyColumn @L738
+          Method qualifyColumns @L753
+          Method newInstance @L767
+          Method newFromBuilder @L796
+          Method on @L815
+          Method onWriteConnection @L828
+          Method all @L839
+          Method with @L852
+          Method load @L865
+          Method loadMorph @L883
+          Method loadMissing @L902
+          Method loadAggregate @L919
+          Method loadCount @L932
+          Method loadMax @L946
+          Method loadMin @L958
+          Method loadSum @L970
+          Method loadAvg @L982
+          Method loadExists @L993
+          Method loadMorphAggregate @L1007
+          Method loadMorphCount @L1027
+          Method loadMorphMax @L1040
+          Method loadMorphMin @L1053
+          Method loadMorphSum @L1066
+          Method loadMorphAvg @L1079
+          Method increment @L1092
+          Method decrement @L1105
+          Method incrementOrDecrement @L1119
+          Method update @L1155
+          Method updateOrFail @L1173
+          Method updateQuietly @L1189
+          Method incrementQuietly @L1206
+          Method decrementQuietly @L1221
+          Method incrementEach @L1235
+          Method decrementEach @L1247
+          Method incrementOrDecrementEach @L1260
+          Method push @L1303
+          Method pushQuietly @L1334
+          Method saveQuietly @L1345
+          Method save @L1356
+          Method saveOrIgnore @L1406
+          Method saveOrFail @L1442
+          Method finishSave @L1453
+          Method performUpdate @L1470
+          Method setKeysForSelectQuery @L1508
+          Method getKeyForSelectQuery @L1520
+          Method setKeysForSaveQuery @L1531
+          Method getKeyForSaveQuery @L1543
+          Method performInsert @L1554
+          Method performInsertOrIgnore @L1610
+          Method insertAndSetId @L1659
+          Method destroy @L1672
+          Method delete @L1711
+          Method deleteQuietly @L1750
+          Method deleteOrFail @L1762
+          Method forceDelete @L1778
+          Method forceDestroy @L1791
+          Method performDeleteOnModel @L1801
+          Method query @L1813
+          Method newQuery @L1823
+          Method newModelQuery @L1833
+          Method newQueryWithoutRelationships @L1845
+          Method registerGlobalScopes @L1856
+          Method newQueryWithoutScopes @L1870
+          Method newQueryWithoutScope @L1883
+          Method newQueryForRestoration @L1894
+          Method newEloquentBuilder @L1905
+          Method resolveCustomBuilderClass @L1921
+          Method newBaseQueryBuilder @L1936
+          Method newPivot @L1951
+          Method hasNamedScope @L1963
+          Method callNamedScope @L1976
+          Method isScopeMethodWithAttribute @L1991
+          Method toArray @L2007
+          Method toJson @L2023
+          Method toPrettyJson @L2042
+          Method jsonSerialize @L2052
+          Method fresh @L2063
+          Method refresh @L2080
+          Method replicate @L2109
+          Method replicateQuietly @L2138
+          Method is @L2149
+          Method isNot @L2163
+          Method getConnection @L2173
+          Method getConnectionName @L2183
+          Method setConnection @L2194
+          Method resolveConnection @L2207
+          Method getConnectionResolver @L2217
+          Method setConnectionResolver @L2228
+          Method unsetConnectionResolver @L2238
+          Method getTable @L2248
+          Method setTable @L2259
+          Method getKeyName @L2271
+          Method setKeyName @L2282
+          Method getQualifiedKeyName @L2294
+          Method getKeyType @L2304
+          Method setKeyType @L2315
+          Method getIncrementing @L2327
+          Method setIncrementing @L2338
+          Method getKey @L2350
+          Method getQueueableId @L2360
+          Method getQueueableRelations @L2370
+          Method getQueueableConnection @L2404
+          Method getRouteKey @L2414
+          Method getRouteKeyName @L2424
+          Method resolveRouteBinding @L2436
+          Method resolveSoftDeletableRouteBinding @L2448
+          Method resolveChildRouteBinding @L2461
+          Method resolveSoftDeletableChildRouteBinding @L2474
+          Method resolveChildRouteBindingQuery @L2487
+          Method childRouteBindingRelationshipName @L2509
+          Method resolveRouteBindingQuery @L2522
+          Method getForeignKey @L2532
+          Method getPerPage @L2542
+          Method setPerPage @L2553
+          Method isSoftDeletable @L2563
+          Method isPrunable @L2571
+          Method isMassPrunable @L2579
+          Method preventsLazyLoading @L2589
+          Method isAutomaticallyEagerLoadingRelationships @L2599
+          Method preventsSilentlyDiscardingAttributes @L2609
+          Method preventsAccessingMissingAttributes @L2619
+          Method broadcastChannelRoute @L2629
+          Method broadcastChannel @L2639
+          Method resolveClassAttribute @L2654
+          Method __get @L2689
+          Method __set @L2701
+          Method offsetExists @L2712
+          Method offsetGet @L2731
+          Method offsetSet @L2743
+          Method offsetUnset @L2754
+          Method __isset @L2770
+          Method __unset @L2781
+          Method __call @L2793
+          Method __callStatic @L2818
+          Method __toString @L2832
+          Method escapeWhenCastingToString @L2845
+          Method __sleep @L2857
+          Method __wakeup @L2884"#]]
     .assert_eq(&out);
 }
 
@@ -1513,24 +1514,24 @@ async fn laravel_workspace_symbols_partial_query() {
         Interface   Guard @ Illuminate/Contracts/Auth/Guard.php:4
         Interface   StatefulGuard @ Illuminate/Contracts/Auth/StatefulGuard.php:4
         Method      forgetGuards @ Illuminate/Auth/AuthManager.php:318
-        Method      getGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:99
+        Method      getGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:103
         Method      guard @ Illuminate/Auth/AuthManager.php:69
         Method      guard @ Illuminate/Contracts/Auth/Factory.php:12
-        Method      guard @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:112
+        Method      guard @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:116
         Method      guard @ Illuminate/Session/Middleware/AuthenticateSession.php:142
         Method      guards @ Illuminate/Auth/AuthenticationException.php:50
         Method      hasResolvedGuards @ Illuminate/Auth/AuthManager.php:308
         Method      initializeGuardsAttributes @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:44
-        Method      isGuardableColumn @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:240
-        Method      isGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:223
+        Method      isGuardableColumn @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:244
+        Method      isGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:227
         Method      isGuardedChannel @ Illuminate/Broadcasting/Broadcasters/AblyBroadcaster.php:161
         Method      isGuardedChannel @ Illuminate/Broadcasting/Broadcasters/UsePusherChannelConventions.php:14
-        Method      isUnguarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:158
-        Method      mergeGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:125
-        Method      reguard @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:148
-        Method      totallyGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:266
-        Method      unguard @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:138
-        Method      unguarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:171"#]].assert_eq(&out);
+        Method      isUnguarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:162
+        Method      mergeGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:129
+        Method      reguard @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:152
+        Method      totallyGuarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:270
+        Method      unguard @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:142
+        Method      unguarded @ Illuminate/Database/Eloquent/Concerns/GuardsAttributes.php:175"#]].assert_eq(&out);
 }
 
 /// `workspace/symbol` for the `Str` class returns the class from Support.
@@ -1569,7 +1570,7 @@ async fn laravel_workspace_symbols_str_class() {
         Class       PotentiallyTranslatedString @ Illuminate/Translation/PotentiallyTranslatedString.php:6
         Class       ResourceRegistrar @ Illuminate/Routing/ResourceRegistrar.php:6
         Class       RouteFileRegistrar @ Illuminate/Routing/RouteFileRegistrar.php:4
-        Class       RouteRegistrar @ Illuminate/Routing/RouteRegistrar.php:34
+        Class       RouteRegistrar @ Illuminate/Routing/RouteRegistrar.php:35
         Class       SesTransport @ Illuminate/Mail/Transport/SesTransport.php:14
         Class       Str @ Illuminate/Support/Str.php:22
         Class       StrayRequestException @ Illuminate/Http/Client/StrayRequestException.php:6
@@ -1623,7 +1624,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Auth/SessionGuard.php:145
         Method      __construct @ Illuminate/Auth/TokenGuard.php:50
         Method      __construct @ Illuminate/Broadcasting/AnonymousEvent.php:42
-        Method      __construct @ Illuminate/Broadcasting/BroadcastEvent.php:70
+        Method      __construct @ Illuminate/Broadcasting/BroadcastEvent.php:72
         Method      __construct @ Illuminate/Broadcasting/BroadcastManager.php:67
         Method      __construct @ Illuminate/Broadcasting/Broadcasters/AblyBroadcaster.php:29
         Method      __construct @ Illuminate/Broadcasting/Broadcasters/LogBroadcaster.php:20
@@ -1640,7 +1641,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Bus/BatchFactory.php:21
         Method      __construct @ Illuminate/Bus/ChainedBatch.php:42
         Method      __construct @ Illuminate/Bus/DatabaseBatchRepository.php:43
-        Method      __construct @ Illuminate/Bus/DebounceLock.php:27
+        Method      __construct @ Illuminate/Bus/DebounceLock.php:26
         Method      __construct @ Illuminate/Bus/Dispatcher.php:70
         Method      __construct @ Illuminate/Bus/DynamoBatchRepository.php:64
         Method      __construct @ Illuminate/Bus/Events/BatchCanceled.php:15
@@ -1655,7 +1656,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Cache/ArrayStore.php:49
         Method      __construct @ Illuminate/Cache/CacheLock.php:21
         Method      __construct @ Illuminate/Cache/CacheManager.php:53
-        Method      __construct @ Illuminate/Cache/Console/ClearCommand.php:49
+        Method      __construct @ Illuminate/Cache/Console/ClearCommand.php:52
         Method      __construct @ Illuminate/Cache/Console/ForgetCommand.php:37
         Method      __construct @ Illuminate/Cache/DatabaseLock.php:52
         Method      __construct @ Illuminate/Cache/DatabaseStore.php:90
@@ -1679,10 +1680,10 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Cache/FileStore.php:61
         Method      __construct @ Illuminate/Cache/Limiters/ConcurrencyLimiter.php:46
         Method      __construct @ Illuminate/Cache/Limiters/ConcurrencyLimiterBuilder.php:58
-        Method      __construct @ Illuminate/Cache/Lock.php:50
+        Method      __construct @ Illuminate/Cache/Lock.php:51
         Method      __construct @ Illuminate/Cache/MemcachedLock.php:21
         Method      __construct @ Illuminate/Cache/MemcachedStore.php:40
-        Method      __construct @ Illuminate/Cache/MemoizedStore.php:23
+        Method      __construct @ Illuminate/Cache/MemoizedStore.php:24
         Method      __construct @ Illuminate/Cache/PhpRedisLock.php:16
         Method      __construct @ Illuminate/Cache/RateLimiter.php:35
         Method      __construct @ Illuminate/Cache/RateLimiting/GlobalLimit.php:12
@@ -1690,15 +1691,16 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Cache/RateLimiting/Unlimited.php:9
         Method      __construct @ Illuminate/Cache/RedisLock.php:21
         Method      __construct @ Illuminate/Cache/RedisStore.php:65
-        Method      __construct @ Illuminate/Cache/Repository.php:87
+        Method      __construct @ Illuminate/Cache/Repository.php:94
         Method      __construct @ Illuminate/Cache/SessionStore.php:32
+        Method      __construct @ Illuminate/Cache/StorageStore.php:49
         Method      __construct @ Illuminate/Cache/TagSet.php:28
         Method      __construct @ Illuminate/Cache/TaggedCache.php:29
-        Method      __construct @ Illuminate/Collections/Collection.php:41
+        Method      __construct @ Illuminate/Collections/Collection.php:42
         Method      __construct @ Illuminate/Collections/HigherOrderCollectionProxy.php:34
         Method      __construct @ Illuminate/Collections/LazyCollection.php:46
         Method      __construct @ Illuminate/Collections/MultipleItemsFoundException.php:22
-        Method      __construct @ Illuminate/Concurrency/ProcessDriver.php:21
+        Method      __construct @ Illuminate/Concurrency/ProcessDriver.php:22
         Method      __construct @ Illuminate/Conditionable/HigherOrderWhenProxy.php:39
         Method      __construct @ Illuminate/Config/Repository.php:27
         Method      __construct @ Illuminate/Console/Application.php:68
@@ -1725,24 +1727,24 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Console/Scheduling/CacheEventMutex.php:29
         Method      __construct @ Illuminate/Console/Scheduling/CacheSchedulingMutex.php:30
         Method      __construct @ Illuminate/Console/Scheduling/CallbackEvent.php:51
-        Method      __construct @ Illuminate/Console/Scheduling/Event.php:100
-        Method      __construct @ Illuminate/Console/Scheduling/PendingEventAttributes.php:21
-        Method      __construct @ Illuminate/Console/Scheduling/Schedule.php:110
+        Method      __construct @ Illuminate/Console/Scheduling/Event.php:107
+        Method      __construct @ Illuminate/Console/Scheduling/PendingEventAttributes.php:50
+        Method      __construct @ Illuminate/Console/Scheduling/Schedule.php:124
         Method      __construct @ Illuminate/Console/Scheduling/ScheduleInterruptCommand.php:38
         Method      __construct @ Illuminate/Console/Scheduling/ScheduleRunCommand.php:89
         Method      __construct @ Illuminate/Console/Signals.php:35
         Method      __construct @ Illuminate/Console/View/Components/Component.php:33
         Method      __construct @ Illuminate/Console/View/Components/Factory.php:36
-        Method      __construct @ Illuminate/Container/Attributes/Auth.php:14
-        Method      __construct @ Illuminate/Container/Attributes/Authenticated.php:14
+        Method      __construct @ Illuminate/Container/Attributes/Auth.php:15
+        Method      __construct @ Illuminate/Container/Attributes/Authenticated.php:15
         Method      __construct @ Illuminate/Container/Attributes/Bind.php:35
-        Method      __construct @ Illuminate/Container/Attributes/Cache.php:14
+        Method      __construct @ Illuminate/Container/Attributes/Cache.php:15
         Method      __construct @ Illuminate/Container/Attributes/Config.php:14
         Method      __construct @ Illuminate/Container/Attributes/Context.php:15
         Method      __construct @ Illuminate/Container/Attributes/Database.php:15
         Method      __construct @ Illuminate/Container/Attributes/Give.php:17
         Method      __construct @ Illuminate/Container/Attributes/Log.php:20
-        Method      __construct @ Illuminate/Container/Attributes/RouteParameter.php:14
+        Method      __construct @ Illuminate/Container/Attributes/RouteParameter.php:15
         Method      __construct @ Illuminate/Container/Attributes/Storage.php:15
         Method      __construct @ Illuminate/Container/Attributes/Tag.php:13
         Method      __construct @ Illuminate/Container/ContextualBindingBuilder.php:36
@@ -1753,9 +1755,9 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Cookie/Middleware/EncryptCookies.php:48
         Method      __construct @ Illuminate/Database/Capsule/Manager.php:28
         Method      __construct @ Illuminate/Database/ClassMorphViolationException.php:20
-        Method      __construct @ Illuminate/Database/Connection.php:227
+        Method      __construct @ Illuminate/Database/Connection.php:241
         Method      __construct @ Illuminate/Database/ConnectionResolver.php:25
-        Method      __construct @ Illuminate/Database/Connectors/ConnectionFactory.php:29
+        Method      __construct @ Illuminate/Database/Connectors/ConnectionFactory.php:32
         Method      __construct @ Illuminate/Database/Console/Migrations/FreshCommand.php:45
         Method      __construct @ Illuminate/Database/Console/Migrations/InstallCommand.php:38
         Method      __construct @ Illuminate/Database/Console/Migrations/MigrateCommand.php:67
@@ -1789,7 +1791,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Database/Eloquent/Attributes/WithoutIncrementing.php:12
         Method      __construct @ Illuminate/Database/Eloquent/Attributes/WithoutTimestamps.php:12
         Method      __construct @ Illuminate/Database/Eloquent/BroadcastableModelEventOccurred.php:62
-        Method      __construct @ Illuminate/Database/Eloquent/Builder.php:172
+        Method      __construct @ Illuminate/Database/Eloquent/Builder.php:173
         Method      __construct @ Illuminate/Database/Eloquent/Casts/Attribute.php:40
         Method      __construct @ Illuminate/Database/Eloquent/Factories/Attributes/UseModel.php:14
         Method      __construct @ Illuminate/Database/Eloquent/Factories/BelongsToManyRelationship.php:37
@@ -1806,7 +1808,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Database/Eloquent/ModelInspector.php:42
         Method      __construct @ Illuminate/Database/Eloquent/PendingHasThroughRelationship.php:37
         Method      __construct @ Illuminate/Database/Eloquent/Relations/BelongsTo.php:62
-        Method      __construct @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:158
+        Method      __construct @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:159
         Method      __construct @ Illuminate/Database/Eloquent/Relations/HasOneOrMany.php:46
         Method      __construct @ Illuminate/Database/Eloquent/Relations/HasOneOrManyThrough.php:80
         Method      __construct @ Illuminate/Database/Eloquent/Relations/MorphOneOrMany.php:40
@@ -1816,7 +1818,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Database/Events/ConnectionEvent.php:25
         Method      __construct @ Illuminate/Database/Events/DatabaseBusy.php:12
         Method      __construct @ Illuminate/Database/Events/DatabaseRefreshed.php:14
-        Method      __construct @ Illuminate/Database/Events/MigrationEvent.php:29
+        Method      __construct @ Illuminate/Database/Events/MigrationEvent.php:37
         Method      __construct @ Illuminate/Database/Events/MigrationSkipped.php:13
         Method      __construct @ Illuminate/Database/Events/MigrationsEvent.php:14
         Method      __construct @ Illuminate/Database/Events/MigrationsPruned.php:35
@@ -1834,13 +1836,13 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Database/Migrations/MigrationCreator.php:38
         Method      __construct @ Illuminate/Database/Migrations/Migrator.php:104
         Method      __construct @ Illuminate/Database/MultipleRecordsFoundException.php:22
-        Method      __construct @ Illuminate/Database/Query/Builder.php:282
+        Method      __construct @ Illuminate/Database/Query/Builder.php:283
         Method      __construct @ Illuminate/Database/Query/Expression.php:17
         Method      __construct @ Illuminate/Database/Query/IndexHint.php:26
         Method      __construct @ Illuminate/Database/Query/JoinClause.php:57
         Method      __construct @ Illuminate/Database/QueryException.php:56
         Method      __construct @ Illuminate/Database/SQLiteDatabaseDoesNotExistException.php:20
-        Method      __construct @ Illuminate/Database/Schema/Blueprint.php:101
+        Method      __construct @ Illuminate/Database/Schema/Blueprint.php:102
         Method      __construct @ Illuminate/Database/Schema/BlueprintState.php:60
         Method      __construct @ Illuminate/Database/Schema/Builder.php:62
         Method      __construct @ Illuminate/Database/Schema/ForeignIdColumnDefinition.php:21
@@ -1860,8 +1862,12 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Foundation/AliasLoader.php:39
         Method      __construct @ Illuminate/Foundation/Application.php:215
         Method      __construct @ Illuminate/Foundation/Bus/PendingChain.php:66
-        Method      __construct @ Illuminate/Foundation/Bus/PendingDispatch.php:38
+        Method      __construct @ Illuminate/Foundation/Bus/PendingDispatch.php:40
         Method      __construct @ Illuminate/Foundation/CacheBasedMaintenanceMode.php:38
+        Method      __construct @ Illuminate/Foundation/Cloud/Events.php:20
+        Method      __construct @ Illuminate/Foundation/Cloud/FailedJobProvider.php:34
+        Method      __construct @ Illuminate/Foundation/Cloud/Queue.php:38
+        Method      __construct @ Illuminate/Foundation/Cloud/QueueConnector.php:26
         Method      __construct @ Illuminate/Foundation/Configuration/ApplicationBuilder.php:50
         Method      __construct @ Illuminate/Foundation/Configuration/Exceptions.php:16
         Method      __construct @ Illuminate/Foundation/Console/AboutCommand.php:56
@@ -1879,10 +1885,11 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Foundation/Console/RouteListCommand.php:79
         Method      __construct @ Illuminate/Foundation/Console/VendorPublishCommand.php:83
         Method      __construct @ Illuminate/Foundation/Console/ViewClearCommand.php:38
+        Method      __construct @ Illuminate/Foundation/DevCommand.php:21
         Method      __construct @ Illuminate/Foundation/Events/LocaleUpdated.php:26
         Method      __construct @ Illuminate/Foundation/Events/PublishingStubs.php:20
         Method      __construct @ Illuminate/Foundation/Events/VendorTagPublished.php:26
-        Method      __construct @ Illuminate/Foundation/Exceptions/Handler.php:202
+        Method      __construct @ Illuminate/Foundation/Exceptions/Handler.php:214
         Method      __construct @ Illuminate/Foundation/Exceptions/Renderer/Exception.php:50
         Method      __construct @ Illuminate/Foundation/Exceptions/Renderer/Frame.php:64
         Method      __construct @ Illuminate/Foundation/Exceptions/Renderer/Mappers/BladeMapper.php:67
@@ -1911,14 +1918,14 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Http/Client/Events/ConnectionFailed.php:29
         Method      __construct @ Illuminate/Http/Client/Events/RequestSending.php:20
         Method      __construct @ Illuminate/Http/Client/Events/ResponseReceived.php:29
-        Method      __construct @ Illuminate/Http/Client/Factory.php:94
-        Method      __construct @ Illuminate/Http/Client/PendingRequest.php:257
+        Method      __construct @ Illuminate/Http/Client/Factory.php:97
+        Method      __construct @ Illuminate/Http/Client/PendingRequest.php:259
         Method      __construct @ Illuminate/Http/Client/Pool.php:37
         Method      __construct @ Illuminate/Http/Client/Promises/FluentPromise.php:19
         Method      __construct @ Illuminate/Http/Client/Promises/LazyPromise.php:29
-        Method      __construct @ Illuminate/Http/Client/Request.php:40
+        Method      __construct @ Illuminate/Http/Client/Request.php:41
         Method      __construct @ Illuminate/Http/Client/RequestException.php:42
-        Method      __construct @ Illuminate/Http/Client/Response.php:76
+        Method      __construct @ Illuminate/Http/Client/Response.php:83
         Method      __construct @ Illuminate/Http/Client/ResponseSequence.php:38
         Method      __construct @ Illuminate/Http/Client/StrayRequestException.php:8
         Method      __construct @ Illuminate/Http/Exceptions/HttpResponseException.php:23
@@ -1939,29 +1946,33 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Http/Response.php:29
         Method      __construct @ Illuminate/Http/StreamedEvent.php:19
         Method      __construct @ Illuminate/Http/Testing/File.php:42
+        Method      __construct @ Illuminate/JsonSchema/Deserializer.php:37
+        Method      __construct @ Illuminate/JsonSchema/Types/AnyOfType.php:11
         Method      __construct @ Illuminate/JsonSchema/Types/ObjectType.php:16
+        Method      __construct @ Illuminate/JsonSchema/Types/UnionType.php:29
         Method      __construct @ Illuminate/Log/Context/Events/ContextDehydrating.php:18
         Method      __construct @ Illuminate/Log/Context/Events/ContextHydrated.php:18
         Method      __construct @ Illuminate/Log/Context/Repository.php:52
         Method      __construct @ Illuminate/Log/Events/MessageLogged.php:13
         Method      __construct @ Illuminate/Log/LogManager.php:77
         Method      __construct @ Illuminate/Log/Logger.php:44
-        Method      __construct @ Illuminate/Mail/Attachment.php:42
+        Method      __construct @ Illuminate/Mail/Attachment.php:44
         Method      __construct @ Illuminate/Mail/Events/MessageSending.php:14
         Method      __construct @ Illuminate/Mail/Events/MessageSent.php:19
-        Method      __construct @ Illuminate/Mail/MailManager.php:64
-        Method      __construct @ Illuminate/Mail/Mailables/Address.php:26
+        Method      __construct @ Illuminate/Mail/MailManager.php:65
+        Method      __construct @ Illuminate/Mail/Mailables/Address.php:28
         Method      __construct @ Illuminate/Mail/Mailables/Content.php:66
         Method      __construct @ Illuminate/Mail/Mailables/Envelope.php:91
         Method      __construct @ Illuminate/Mail/Mailables/Headers.php:42
         Method      __construct @ Illuminate/Mail/Mailer.php:98
         Method      __construct @ Illuminate/Mail/Markdown.php:57
-        Method      __construct @ Illuminate/Mail/Message.php:40
+        Method      __construct @ Illuminate/Mail/Message.php:41
         Method      __construct @ Illuminate/Mail/PendingMail.php:53
         Method      __construct @ Illuminate/Mail/SendQueuedMailable.php:62
         Method      __construct @ Illuminate/Mail/SentMessage.php:27
         Method      __construct @ Illuminate/Mail/TextMessage.php:25
         Method      __construct @ Illuminate/Mail/Transport/ArrayTransport.php:23
+        Method      __construct @ Illuminate/Mail/Transport/CloudflareTransport.php:27
         Method      __construct @ Illuminate/Mail/Transport/LogTransport.php:26
         Method      __construct @ Illuminate/Mail/Transport/ResendTransport.php:43
         Method      __construct @ Illuminate/Mail/Transport/SesTransport.php:36
@@ -1989,7 +2000,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Process/FakeInvokedProcess.php:63
         Method      __construct @ Illuminate/Process/FakeProcessResult.php:46
         Method      __construct @ Illuminate/Process/FakeProcessSequence.php:35
-        Method      __construct @ Illuminate/Process/InvokedProcess.php:23
+        Method      __construct @ Illuminate/Process/InvokedProcess.php:26
         Method      __construct @ Illuminate/Process/InvokedProcessPool.php:21
         Method      __construct @ Illuminate/Process/PendingProcess.php:101
         Method      __construct @ Illuminate/Process/Pipe.php:40
@@ -1997,17 +2008,17 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Process/ProcessPoolResults.php:21
         Method      __construct @ Illuminate/Process/ProcessResult.php:22
         Method      __construct @ Illuminate/Queue/Attributes/Backoff.php:21
-        Method      __construct @ Illuminate/Queue/Attributes/Connection.php:15
-        Method      __construct @ Illuminate/Queue/Attributes/DebounceFor.php:12
+        Method      __construct @ Illuminate/Queue/Attributes/Connection.php:17
+        Method      __construct @ Illuminate/Queue/Attributes/DebounceFor.php:15
         Method      __construct @ Illuminate/Queue/Attributes/Delay.php:14
         Method      __construct @ Illuminate/Queue/Attributes/MaxExceptions.php:14
-        Method      __construct @ Illuminate/Queue/Attributes/Queue.php:15
+        Method      __construct @ Illuminate/Queue/Attributes/Queue.php:17
         Method      __construct @ Illuminate/Queue/Attributes/Timeout.php:14
         Method      __construct @ Illuminate/Queue/Attributes/Tries.php:14
         Method      __construct @ Illuminate/Queue/Attributes/UniqueFor.php:14
         Method      __construct @ Illuminate/Queue/BeanstalkdQueue.php:52
         Method      __construct @ Illuminate/Queue/CallQueuedClosure.php:50
-        Method      __construct @ Illuminate/Queue/CallQueuedHandler.php:46
+        Method      __construct @ Illuminate/Queue/CallQueuedHandler.php:53
         Method      __construct @ Illuminate/Queue/Capsule/Manager.php:29
         Method      __construct @ Illuminate/Queue/Connectors/DatabaseConnector.php:21
         Method      __construct @ Illuminate/Queue/Connectors/FailoverConnector.php:13
@@ -2015,7 +2026,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Queue/Console/ListenCommand.php:50
         Method      __construct @ Illuminate/Queue/Console/MonitorCommand.php:52
         Method      __construct @ Illuminate/Queue/Console/RestartCommand.php:40
-        Method      __construct @ Illuminate/Queue/Console/WorkCommand.php:92
+        Method      __construct @ Illuminate/Queue/Console/WorkCommand.php:93
         Method      __construct @ Illuminate/Queue/DatabaseQueue.php:63
         Method      __construct @ Illuminate/Queue/Events/JobAttempted.php:13
         Method      __construct @ Illuminate/Queue/Events/JobDebounced.php:13
@@ -2030,11 +2041,15 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Queue/Events/JobReleasedAfterException.php:13
         Method      __construct @ Illuminate/Queue/Events/JobRetryRequested.php:18
         Method      __construct @ Illuminate/Queue/Events/JobTimedOut.php:12
-        Method      __construct @ Illuminate/Queue/Events/Looping.php:12
+        Method      __construct @ Illuminate/Queue/Events/Looping.php:13
         Method      __construct @ Illuminate/Queue/Events/QueueBusy.php:13
         Method      __construct @ Illuminate/Queue/Events/QueueFailedOver.php:15
         Method      __construct @ Illuminate/Queue/Events/QueuePaused.php:13
         Method      __construct @ Illuminate/Queue/Events/QueueResumed.php:12
+        Method      __construct @ Illuminate/Queue/Events/WorkerIdle.php:15
+        Method      __construct @ Illuminate/Queue/Events/WorkerInterrupted.php:16
+        Method      __construct @ Illuminate/Queue/Events/WorkerPausing.php:15
+        Method      __construct @ Illuminate/Queue/Events/WorkerResuming.php:15
         Method      __construct @ Illuminate/Queue/Events/WorkerStarting.php:13
         Method      __construct @ Illuminate/Queue/Events/WorkerStopping.php:13
         Method      __construct @ Illuminate/Queue/Failed/DatabaseFailedJobProvider.php:38
@@ -2046,9 +2061,9 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Queue/Jobs/BeanstalkdJob.php:34
         Method      __construct @ Illuminate/Queue/Jobs/DatabaseJob.php:33
         Method      __construct @ Illuminate/Queue/Jobs/DatabaseJobRecord.php:22
-        Method      __construct @ Illuminate/Queue/Jobs/InspectedJob.php:16
+        Method      __construct @ Illuminate/Queue/Jobs/InspectedJob.php:18
         Method      __construct @ Illuminate/Queue/Jobs/RedisJob.php:48
-        Method      __construct @ Illuminate/Queue/Jobs/SqsJob.php:33
+        Method      __construct @ Illuminate/Queue/Jobs/SqsJob.php:49
         Method      __construct @ Illuminate/Queue/Jobs/SyncJob.php:31
         Method      __construct @ Illuminate/Queue/Listener.php:52
         Method      __construct @ Illuminate/Queue/ListenerOptions.php:26
@@ -2056,14 +2071,14 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Queue/Middleware/RateLimited.php:46
         Method      __construct @ Illuminate/Queue/Middleware/RateLimitedWithRedis.php:32
         Method      __construct @ Illuminate/Queue/Middleware/Skip.php:11
-        Method      __construct @ Illuminate/Queue/Middleware/ThrottlesExceptions.php:93
+        Method      __construct @ Illuminate/Queue/Middleware/ThrottlesExceptions.php:94
         Method      __construct @ Illuminate/Queue/Middleware/WithoutOverlapping.php:54
         Method      __construct @ Illuminate/Queue/QueueManager.php:45
         Method      __construct @ Illuminate/Queue/RedisQueue.php:88
-        Method      __construct @ Illuminate/Queue/SqsQueue.php:50
+        Method      __construct @ Illuminate/Queue/SqsQueue.php:73
         Method      __construct @ Illuminate/Queue/SyncQueue.php:25
-        Method      __construct @ Illuminate/Queue/Worker.php:145
-        Method      __construct @ Illuminate/Queue/WorkerOptions.php:98
+        Method      __construct @ Illuminate/Queue/Worker.php:171
+        Method      __construct @ Illuminate/Queue/WorkerOptions.php:106
         Method      __construct @ Illuminate/Redis/Connections/PhpRedisConnection.php:38
         Method      __construct @ Illuminate/Redis/Connections/PredisConnection.php:26
         Method      __construct @ Illuminate/Redis/Events/CommandExecuted.php:49
@@ -2098,7 +2113,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Routing/Route.php:177
         Method      __construct @ Illuminate/Routing/RouteFileRegistrar.php:18
         Method      __construct @ Illuminate/Routing/RouteParameterBinder.php:20
-        Method      __construct @ Illuminate/Routing/RouteRegistrar.php:102
+        Method      __construct @ Illuminate/Routing/RouteRegistrar.php:104
         Method      __construct @ Illuminate/Routing/RouteUri.php:26
         Method      __construct @ Illuminate/Routing/RouteUrlGenerator.php:61
         Method      __construct @ Illuminate/Routing/Router.php:143
@@ -2127,6 +2142,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Support/Manager.php:47
         Method      __construct @ Illuminate/Support/MessageBag.php:32
         Method      __construct @ Illuminate/Support/MultipleInstanceManager.php:53
+        Method      __construct @ Illuminate/Support/NodePackageManager.php:13
         Method      __construct @ Illuminate/Support/Once.php:27
         Method      __construct @ Illuminate/Support/Onceable.php:17
         Method      __construct @ Illuminate/Support/Optional.php:26
@@ -2142,7 +2158,7 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/Support/Testing/Fakes/PendingBatchFake.php:26
         Method      __construct @ Illuminate/Support/Testing/Fakes/PendingChainFake.php:24
         Method      __construct @ Illuminate/Support/Testing/Fakes/PendingMailFake.php:14
-        Method      __construct @ Illuminate/Support/Testing/Fakes/QueueFake.php:82
+        Method      __construct @ Illuminate/Support/Testing/Fakes/QueueFake.php:84
         Method      __construct @ Illuminate/Support/Uri.php:36
         Method      __construct @ Illuminate/Support/UriQueryString.php:16
         Method      __construct @ Illuminate/Support/ValidatedInput.php:26
@@ -2212,19 +2228,20 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __construct @ Illuminate/View/View.php:70
         Method      __destruct @ Illuminate/Broadcasting/FakePendingBroadcast.php:40
         Method      __destruct @ Illuminate/Broadcasting/PendingBroadcast.php:70
-        Method      __destruct @ Illuminate/Foundation/Bus/PendingDispatch.php:274
-        Method      __destruct @ Illuminate/Routing/PendingResourceRegistration.php:314
-        Method      __destruct @ Illuminate/Routing/PendingSingletonResourceRegistration.php:286
+        Method      __destruct @ Illuminate/Foundation/Bus/PendingDispatch.php:282
+        Method      __destruct @ Illuminate/Routing/PendingResourceRegistration.php:330
+        Method      __destruct @ Illuminate/Routing/PendingSingletonResourceRegistration.php:302
         Method      __destruct @ Illuminate/Support/Sleep.php:296
         Method      __destruct @ Illuminate/Testing/PendingCommand.php:668
         Method      __toString @ Illuminate/Auth/Access/Response.php:210
         Method      __toString @ Illuminate/Broadcasting/Channel.php:31
-        Method      __toString @ Illuminate/Collections/Enumerable.php:1327
-        Method      __toString @ Illuminate/Collections/Traits/EnumeratesValues.php:1035
-        Method      __toString @ Illuminate/Database/Eloquent/Model.php:2826
-        Method      __toString @ Illuminate/Http/Client/Response.php:583
-        Method      __toString @ Illuminate/JsonSchema/Types/Type.php:131
+        Method      __toString @ Illuminate/Collections/Enumerable.php:1333
+        Method      __toString @ Illuminate/Collections/Traits/EnumeratesValues.php:1039
+        Method      __toString @ Illuminate/Database/Eloquent/Model.php:2832
+        Method      __toString @ Illuminate/Http/Client/Response.php:591
+        Method      __toString @ Illuminate/JsonSchema/Types/Type.php:127
         Method      __toString @ Illuminate/Mail/Transport/ArrayTransport.php:61
+        Method      __toString @ Illuminate/Mail/Transport/CloudflareTransport.php:181
         Method      __toString @ Illuminate/Mail/Transport/LogTransport.php:93
         Method      __toString @ Illuminate/Mail/Transport/ResendTransport.php:142
         Method      __toString @ Illuminate/Mail/Transport/SesTransport.php:148
@@ -2233,8 +2250,8 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __toString @ Illuminate/Pagination/AbstractPaginator.php:810
         Method      __toString @ Illuminate/Support/HtmlString.php:61
         Method      __toString @ Illuminate/Support/Js.php:160
-        Method      __toString @ Illuminate/Support/MessageBag.php:450
-        Method      __toString @ Illuminate/Support/Stringable.php:1619
+        Method      __toString @ Illuminate/Support/MessageBag.php:449
+        Method      __toString @ Illuminate/Support/Stringable.php:1621
         Method      __toString @ Illuminate/Support/Uri.php:469
         Method      __toString @ Illuminate/Support/UriQueryString.php:91
         Method      __toString @ Illuminate/Support/ViewErrorBag.php:126
@@ -2265,20 +2282,20 @@ async fn laravel_workspace_symbols_str_class() {
         Method      __toString @ Illuminate/View/InvokableComponentVariable.php:91
         Method      __toString @ Illuminate/View/View.php:502
         Method      addConstraints @ Illuminate/Database/Eloquent/Relations/BelongsTo.php:91
-        Method      addConstraints @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:208
+        Method      addConstraints @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:209
         Method      addConstraints @ Illuminate/Database/Eloquent/Relations/HasOneOrMany.php:90
         Method      addConstraints @ Illuminate/Database/Eloquent/Relations/HasOneOrManyThrough.php:97
         Method      addConstraints @ Illuminate/Database/Eloquent/Relations/MorphOneOrMany.php:54
         Method      addConstraints @ Illuminate/Database/Eloquent/Relations/Relation.php:129
         Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/BelongsTo.php:104
-        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:255
+        Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:256
         Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/HasOneOrMany.php:102
         Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/HasOneOrManyThrough.php:164
         Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/MorphOneOrMany.php:64
         Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/MorphTo.php:95
         Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/MorphToMany.php:93
         Method      addEagerConstraints @ Illuminate/Database/Eloquent/Relations/Relation.php:137
-        Method      addGroupNamespaceToStringUses @ Illuminate/Routing/Route.php:953
+        Method      addGroupNamespaceToStringUses @ Illuminate/Routing/Route.php:959
         Method      addOneOfManyJoinSubQueryConstraints @ Illuminate/Database/Eloquent/Relations/Concerns/CanBeOneOfMany.php:57
         Method      addOneOfManyJoinSubQueryConstraints @ Illuminate/Database/Eloquent/Relations/HasOne.php:88
         Method      addOneOfManyJoinSubQueryConstraints @ Illuminate/Database/Eloquent/Relations/HasOneThrough.php:96
@@ -2291,22 +2308,22 @@ async fn laravel_workspace_symbols_str_class() {
         Method      addQueryString @ Illuminate/Routing/RouteUrlGenerator.php:378
         Method      addResourceDestroy @ Illuminate/Routing/ResourceRegistrar.php:413
         Method      addSingletonDestroy @ Illuminate/Routing/ResourceRegistrar.php:527
-        Method      addWhereConstraints @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:245
+        Method      addWhereConstraints @ Illuminate/Database/Eloquent/Relations/BelongsToMany.php:246
         Method      addWhereConstraints @ Illuminate/Database/Eloquent/Relations/MorphToMany.php:83
         Method      afterBootstrapping @ Illuminate/Foundation/Application.php:379
-        Method      allowStrayRequests @ Illuminate/Http/Client/Factory.php:347
-        Method      allowStrayRequests @ Illuminate/Http/Client/PendingRequest.php:1673
-        Method      allowsTrashedBindings @ Illuminate/Routing/Route.php:618
+        Method      allowStrayRequests @ Illuminate/Http/Client/Factory.php:428
+        Method      allowStrayRequests @ Illuminate/Http/Client/PendingRequest.php:1911
+        Method      allowsTrashedBindings @ Illuminate/Routing/Route.php:624
         Method      askForPageViaCustomStrategy @ Illuminate/Foundation/Console/DocsCommand.php:213
-        Method      assertExactJsonStructure @ Illuminate/Testing/TestResponse.php:1006
-        Method      assertJsonStructure @ Illuminate/Testing/TestResponse.php:992
+        Method      assertExactJsonStructure @ Illuminate/Testing/TestResponse.php:1050
+        Method      assertJsonStructure @ Illuminate/Testing/TestResponse.php:1036
         Method      assertNotStreamed @ Illuminate/Testing/TestResponse.php:662
         Method      assertStreamed @ Illuminate/Testing/TestResponse.php:647
         Method      assertStreamedContent @ Illuminate/Testing/TestResponse.php:678
-        Method      assertStreamedJsonContent @ Illuminate/Testing/TestResponse.php:691
+        Method      assertStreamedJsonContent @ Illuminate/Testing/TestResponse.php:693
         Method      assertStructure @ Illuminate/Testing/AssertableJsonString.php:270
         Method      attributesToString @ Illuminate/View/Compilers/ComponentTagCompiler.php:789
-        Method      beforeApplicationDestroyed @ Illuminate/Foundation/Testing/Concerns/InteractsWithTestCaseLifecycle.php:308
+        Method      beforeApplicationDestroyed @ Illuminate/Foundation/Testing/Concerns/InteractsWithTestCaseLifecycle.php:310
         Method      beforeBootstrapping @ Illuminate/Foundation/Application.php:367
         Method      bootstrap @ Illuminate/Console/Application.php:129
         Method      bootstrap @ Illuminate/Contracts/Console/Kernel.php:11
@@ -2325,8 +2342,8 @@ async fn laravel_workspace_symbols_str_class() {
         Method      bootstrapWith @ Illuminate/Contracts/Foundation/Application.php:184
         Method      bootstrapWith @ Illuminate/Foundation/Application.php:334
         Method      bootstrapWithoutBootingProviders @ Illuminate/Foundation/Console/Kernel.php:532
-        Method      bootstrapperBootstrapped @ Illuminate/Foundation/Cloud.php:25
-        Method      bootstrapperBootstrapping @ Illuminate/Foundation/Cloud.php:17
+        Method      bootstrapperBootstrapped @ Illuminate/Foundation/Cloud.php:33
+        Method      bootstrapperBootstrapping @ Illuminate/Foundation/Cloud.php:20
         Method      bootstrappers @ Illuminate/Foundation/Console/Kernel.php:627
         Method      bootstrappers @ Illuminate/Foundation/Http/Kernel.php:548
         Method      broadcastRestored @ Illuminate/Database/Eloquent/BroadcastsEvents.php:83
@@ -2334,42 +2351,43 @@ async fn laravel_workspace_symbols_str_class() {
         Method      buildConnectString @ Illuminate/Database/Connectors/SqlServerConnector.php:201
         Method      buildFormRequestReplacements @ Illuminate/Routing/Console/ControllerMakeCommand.php:223
         Method      buildHostString @ Illuminate/Database/Connectors/SqlServerConnector.php:215
-        Method      callBeforeApplicationDestroyedCallbacks @ Illuminate/Foundation/Testing/Concerns/InteractsWithTestCaseLifecycle.php:318
+        Method      buildString @ Illuminate/JsonSchema/Deserializer.php:237
+        Method      callBeforeApplicationDestroyedCallbacks @ Illuminate/Foundation/Testing/Concerns/InteractsWithTestCaseLifecycle.php:320
         Method      castAttributeAsEncryptedString @ Illuminate/Database/Eloquent/Concerns/HasAttributes.php:1457
         Method      castAttributeAsHashedString @ Illuminate/Database/Eloquent/Concerns/HasAttributes.php:1492
-        Method      combineConstraints @ Illuminate/Database/Eloquent/Builder.php:1871
+        Method      combineConstraints @ Illuminate/Database/Eloquent/Builder.php:1872
         Method      compileDisableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/MySqlGrammar.php:716
-        Method      compileDisableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/PostgresGrammar.php:709
+        Method      compileDisableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/PostgresGrammar.php:713
         Method      compileDisableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/SQLiteGrammar.php:681
         Method      compileDisableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:524
         Method      compileDropDefaultConstraint @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:393
         Method      compileEnableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/MySqlGrammar.php:706
-        Method      compileEnableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/PostgresGrammar.php:699
+        Method      compileEnableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/PostgresGrammar.php:703
         Method      compileEnableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/SQLiteGrammar.php:671
         Method      compileEnableForeignKeyConstraints @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:514
-        Method      compileString @ Illuminate/View/Compilers/BladeCompiler.php:274
+        Method      compileString @ Illuminate/View/Compilers/BladeCompiler.php:282
         Method      componentString @ Illuminate/View/Compilers/ComponentTagCompiler.php:232
-        Method      configureForeignKeyConstraints @ Illuminate/Database/Connectors/SQLiteConnector.php:90
-        Method      connectionString @ Illuminate/Database/Schema/MySqlSchemaState.php:109
+        Method      configureForeignKeyConstraints @ Illuminate/Database/Connectors/SQLiteConnector.php:91
+        Method      connectionString @ Illuminate/Database/Schema/MySqlSchemaState.php:110
         Method      constrain @ Illuminate/Database/Eloquent/Relations/MorphTo.php:351
         Method      constrained @ Illuminate/Database/Schema/ForeignIdColumnDefinition.php:36
-        Method      containsStrict @ Illuminate/Collections/Collection.php:213
-        Method      containsStrict @ Illuminate/Collections/Enumerable.php:135
+        Method      containsStrict @ Illuminate/Collections/Collection.php:214
+        Method      containsStrict @ Illuminate/Collections/Enumerable.php:137
         Method      containsStrict @ Illuminate/Collections/LazyCollection.php:274
         Method      convertEmptyStringsToNull @ Illuminate/Foundation/Configuration/Middleware.php:648
         Method      createBladeViewFromString @ Illuminate/View/Component.php:195
         Method      createRandomStringsNormally @ Illuminate/Support/Str.php:1176
         Method      createRandomStringsUsing @ Illuminate/Support/Str.php:1132
         Method      createRandomStringsUsingSequence @ Illuminate/Support/Str.php:1144
-        Method      createSelectWithConstraint @ Illuminate/Database/Eloquent/Builder.php:1903
-        Method      createSesTransport @ Illuminate/Mail/MailManager.php:255
+        Method      createSelectWithConstraint @ Illuminate/Database/Eloquent/Builder.php:1904
+        Method      createSesTransport @ Illuminate/Mail/MailManager.php:256
         Method      createStringPayload @ Illuminate/Queue/Queue.php:305
         Method      createTestRequest @ Illuminate/Foundation/Testing/Concerns/MakesHttpRequests.php:743
         Method      createTestResponse @ Illuminate/Foundation/Testing/Concerns/MakesHttpRequests.php:755
         Method      decryptString @ Illuminate/Contracts/Encryption/StringEncrypter.php:24
         Method      decryptString @ Illuminate/Encryption/Encrypter.php:214
         Method      defaultStringLength @ Illuminate/Database/Schema/Builder.php:74
-        Method      destroy @ Illuminate/Database/Eloquent/Model.php:1670
+        Method      destroy @ Illuminate/Database/Eloquent/Model.php:1672
         Method      destroy @ Illuminate/Session/ArraySessionHandler.php:97
         Method      destroy @ Illuminate/Session/CacheBasedSessionHandler.php:80
         Method      destroy @ Illuminate/Session/CookieSessionHandler.php:112
@@ -2377,37 +2395,38 @@ async fn laravel_workspace_symbols_str_class() {
         Method      destroy @ Illuminate/Session/FileSessionHandler.php:98
         Method      destroy @ Illuminate/Session/NullSessionHandler.php:53
         Method      destroyable @ Illuminate/Routing/PendingSingletonResourceRegistration.php:105
-        Method      disableForeignKeyConstraints @ Illuminate/Database/Schema/Builder.php:621
-        Method      doesntContainStrict @ Illuminate/Collections/Collection.php:247
+        Method      disableForeignKeyConstraints @ Illuminate/Database/Schema/Builder.php:639
+        Method      doesntContainStrict @ Illuminate/Collections/Collection.php:248
         Method      doesntContainStrict @ Illuminate/Collections/LazyCollection.php:314
-        Method      dropConstrainedForeignId @ Illuminate/Database/Schema/Blueprint.php:511
-        Method      dropConstrainedForeignIdFor @ Illuminate/Database/Schema/Blueprint.php:541
-        Method      duplicatesStrict @ Illuminate/Collections/Collection.php:375
-        Method      duplicatesStrict @ Illuminate/Collections/Enumerable.php:258
+        Method      dropConstrainedForeignId @ Illuminate/Database/Schema/Blueprint.php:512
+        Method      dropConstrainedForeignIdFor @ Illuminate/Database/Schema/Blueprint.php:542
+        Method      duplicatesStrict @ Illuminate/Collections/Collection.php:376
+        Method      duplicatesStrict @ Illuminate/Collections/Enumerable.php:260
         Method      duplicatesStrict @ Illuminate/Collections/LazyCollection.php:421
-        Method      enableForeignKeyConstraints @ Illuminate/Database/Schema/Builder.php:609
+        Method      enableForeignKeyConstraints @ Illuminate/Database/Schema/Builder.php:627
         Method      encryptString @ Illuminate/Contracts/Encryption/StringEncrypter.php:14
         Method      encryptString @ Illuminate/Encryption/Encrypter.php:140
         Method      ensureCastsAreStringValues @ Illuminate/Database/Eloquent/Concerns/HasAttributes.php:811
-        Method      escapeString @ Illuminate/Database/Connection.php:1180
-        Method      escapeWhenCastingToString @ Illuminate/Collections/Enumerable.php:1335
-        Method      escapeWhenCastingToString @ Illuminate/Collections/Traits/EnumeratesValues.php:1048
+        Method      ensureUnionConstraintsAreSupported @ Illuminate/JsonSchema/Deserializer.php:444
+        Method      escapeString @ Illuminate/Database/Connection.php:1198
+        Method      escapeWhenCastingToString @ Illuminate/Collections/Enumerable.php:1341
+        Method      escapeWhenCastingToString @ Illuminate/Collections/Traits/EnumeratesValues.php:1052
         Method      escapeWhenCastingToString @ Illuminate/Contracts/Support/CanBeEscapedWhenCastToString.php:12
-        Method      escapeWhenCastingToString @ Illuminate/Database/Eloquent/Model.php:2839
+        Method      escapeWhenCastingToString @ Illuminate/Database/Eloquent/Model.php:2845
         Method      escapeWhenCastingToString @ Illuminate/Pagination/AbstractPaginator.php:823
         Method      eventStream @ Illuminate/Contracts/Routing/ResponseFactory.php:70
         Method      eventStream @ Illuminate/Routing/ResponseFactory.php:130
         Method      extractBladeViewFromString @ Illuminate/View/Component.php:173
         Method      extractConstructorParameters @ Illuminate/View/Component.php:121
         Method      extractFromString @ Illuminate/Translation/MessageSelector.php:58
-        Method      extractQueryString @ Illuminate/Routing/UrlGenerator.php:618
-        Method      forceDestroy @ Illuminate/Database/Eloquent/Model.php:1789
+        Method      extractQueryString @ Illuminate/Routing/UrlGenerator.php:628
+        Method      forceDestroy @ Illuminate/Database/Eloquent/Model.php:1791
         Method      forceDestroy @ Illuminate/Database/Eloquent/SoftDeletes.php:83
         Method      forgetBootstrappers @ Illuminate/Console/Application.php:141
         Method      formatCommandString @ Illuminate/Console/Application.php:108
         Method      freshTimestampString @ Illuminate/Database/Eloquent/Concerns/HasTimestamps.php:146
         Method      fromAssertableJsonString @ Illuminate/Testing/Fluent/AssertableJson.php:163
-        Method      fromClassMethodString @ Illuminate/Routing/RouteSignatureParameters.php:41
+        Method      fromClassMethodString @ Illuminate/Routing/RouteSignatureParameters.php:49
         Method      fromEncryptedString @ Illuminate/Database/Eloquent/Concerns/HasAttributes.php:1445
         Method      fromJsonString @ Illuminate/Http/JsonResponse.php:38
         Method      getAttributesFromAttributeString @ Illuminate/View/Compilers/ComponentTagCompiler.php:596
@@ -2419,47 +2438,49 @@ async fn laravel_workspace_symbols_str_class() {
         Method      hasBeenBootstrapped @ Illuminate/Contracts/Foundation/Application.php:215
         Method      hasBeenBootstrapped @ Illuminate/Foundation/Application.php:389
         Method      htmlString @ Illuminate/Mail/Mailables/Content.php:132
-        Method      ignoreFieldsAndIncludesInQueryString @ Illuminate/Http/Resources/JsonApi/Concerns/ResolvesJsonApiElements.php:422
+        Method      ignoreFieldsAndIncludesInQueryString @ Illuminate/Http/Resources/JsonApi/Concerns/ResolvesJsonApiElements.php:421
         Method      initializeHasUniqueStringIds @ Illuminate/Database/Eloquent/Concerns/HasUniqueStringIds.php:28
-        Method      isEmptyString @ Illuminate/Support/Traits/InteractsWithData.php:220
-        Method      isParameterBackedEnumWithStringBackingType @ Illuminate/Reflection/Reflector.php:191
-        Method      isUniqueConstraintError @ Illuminate/Database/Connection.php:865
+        Method      isEmptyString @ Illuminate/Support/Traits/InteractsWithData.php:259
+        Method      isParameterBackedEnumWithStringBackingType @ Illuminate/Reflection/Reflector.php:193
+        Method      isUniqueConstraintError @ Illuminate/Database/Connection.php:881
         Method      isUniqueConstraintError @ Illuminate/Database/MySqlConnection.php:79
-        Method      isUniqueConstraintError @ Illuminate/Database/PostgresConnection.php:52
+        Method      isUniqueConstraintError @ Illuminate/Database/PostgresConnection.php:77
         Method      isUniqueConstraintError @ Illuminate/Database/SQLiteConnection.php:59
-        Method      isUniqueConstraintError @ Illuminate/Database/SqlServerConnection.php:83
+        Method      isUniqueConstraintError @ Illuminate/Database/SqlServerConnection.php:85
         Method      jsonSearchStrings @ Illuminate/Testing/AssertableJsonString.php:370
-        Method      latestReadWriteTypeUsed @ Illuminate/Database/Connection.php:1709
+        Method      latestReadWriteTypeUsed @ Illuminate/Database/Connection.php:1801
         Method      matchAgainstRoutes @ Illuminate/Routing/AbstractRouteCollection.php:78
         Method      mergeConstraintsFrom @ Illuminate/Database/Eloquent/Concerns/QueriesRelationships.php:1053
         Method      noConstraints @ Illuminate/Database/Eloquent/Relations/Relation.php:108
+        Method      normalizeScalarString @ Illuminate/Http/Client/Factory.php:249
+        Method      normalizeScalarString @ Illuminate/Http/Client/PendingRequest.php:1578
         Method      openViaBuiltInStrategy @ Illuminate/Foundation/Console/DocsCommand.php:375
         Method      openViaCustomStrategy @ Illuminate/Foundation/Console/DocsCommand.php:350
-        Method      parseNameAndAttributeSelectionConstraint @ Illuminate/Database/Eloquent/Builder.php:1888
+        Method      parseNameAndAttributeSelectionConstraint @ Illuminate/Database/Eloquent/Builder.php:1889
         Method      parsePipeString @ Illuminate/Pipeline/Pipeline.php:235
         Method      parseStringRule @ Illuminate/Validation/ValidationRuleParser.php:273
         Method      parseStringsToNativeTypes @ Illuminate/Support/ConfigurationUrlParser.php:150
-        Method      parseUniqueConstraintViolation @ Illuminate/Database/Connection.php:876
+        Method      parseUniqueConstraintViolation @ Illuminate/Database/Connection.php:892
         Method      parseUniqueConstraintViolation @ Illuminate/Database/MySqlConnection.php:90
-        Method      parseUniqueConstraintViolation @ Illuminate/Database/PostgresConnection.php:63
+        Method      parseUniqueConstraintViolation @ Illuminate/Database/PostgresConnection.php:88
         Method      parseUniqueConstraintViolation @ Illuminate/Database/SQLiteConnection.php:70
-        Method      parseUniqueConstraintViolation @ Illuminate/Database/SqlServerConnection.php:94
+        Method      parseUniqueConstraintViolation @ Illuminate/Database/SqlServerConnection.php:96
         Method      pendingPotentiallyTranslatedString @ Illuminate/Translation/CreatesPotentiallyTranslatedStrings.php:13
-        Method      prepareStringsForCompilationUsing @ Illuminate/View/Compilers/BladeCompiler.php:1007
+        Method      prepareStringsForCompilationUsing @ Illuminate/View/Compilers/BladeCompiler.php:1015
         Method      preventStrayProcesses @ Illuminate/Process/Factory.php:159
-        Method      preventStrayRequests @ Illuminate/Http/Client/Factory.php:324
-        Method      preventStrayRequests @ Illuminate/Http/Client/PendingRequest.php:1660
+        Method      preventStrayRequests @ Illuminate/Http/Client/Factory.php:405
+        Method      preventStrayRequests @ Illuminate/Http/Client/PendingRequest.php:1898
         Method      preventStrayRequests @ Illuminate/Support/Facades/Http.php:153
         Method      preventingStrayProcesses @ Illuminate/Process/Factory.php:171
-        Method      preventingStrayRequests @ Illuminate/Http/Client/Factory.php:336
-        Method      prohibitDestructiveCommands @ Illuminate/Support/Facades/DB.php:131
+        Method      preventingStrayRequests @ Illuminate/Http/Client/Factory.php:417
+        Method      prohibitDestructiveCommands @ Illuminate/Support/Facades/DB.php:137
         Method      properString @ Illuminate/Auth/Recaller.php:68
         Method      queryStringResolver @ Illuminate/Pagination/AbstractPaginator.php:563
         Method      quoteString @ Illuminate/Database/Grammar.php:228
         Method      quoteString @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:1036
         Method      readStream @ Illuminate/Contracts/Filesystem/Filesystem.php:50
-        Method      readStream @ Illuminate/Filesystem/FilesystemAdapter.php:693
-        Method      recordRequestResponsePair @ Illuminate/Http/Client/Factory.php:379
+        Method      readStream @ Illuminate/Filesystem/FilesystemAdapter.php:701
+        Method      recordRequestResponsePair @ Illuminate/Http/Client/Factory.php:460
         Method      referencesString @ Illuminate/Mail/Mailables/Headers.php:93
         Method      registerRequestRebindHandler @ Illuminate/Auth/AuthServiceProvider.php:84
         Method      removeAbstractAlias @ Illuminate/Container/Container.php:626
@@ -2467,55 +2488,58 @@ async fn laravel_workspace_symbols_str_class() {
         Method      replacePlaceholderInString @ Illuminate/Validation/Validator.php:411
         Method      requestRebinder @ Illuminate/Routing/RoutingServiceProvider.php:99
         Method      resolveQueryString @ Illuminate/Pagination/AbstractPaginator.php:548
-        Method      respectFieldsAndIncludesInQueryString @ Illuminate/Http/Resources/JsonApi/Concerns/ResolvesJsonApiElements.php:410
+        Method      respectFieldsAndIncludesInQueryString @ Illuminate/Http/Resources/JsonApi/Concerns/ResolvesJsonApiElements.php:409
         Method      restrictOnDelete @ Illuminate/Database/Schema/ForeignKeyDefinition.php:72
         Method      restrictOnUpdate @ Illuminate/Database/Schema/ForeignKeyDefinition.php:32
         Method      sendRequestThroughRouter @ Illuminate/Foundation/Http/Kernel.php:163
         Method      setGlobalToAndRemoveCcAndBcc @ Illuminate/Mail/Mailer.php:452
-        Method      setTouchedRelations @ Illuminate/Database/Eloquent/Concerns/HasRelationships.php:1214
-        Method      setTransactionManagerResolver @ Illuminate/Events/Dispatcher.php:838
+        Method      setTouchedRelations @ Illuminate/Database/Eloquent/Concerns/HasRelationships.php:1216
+        Method      setTransactionManagerResolver @ Illuminate/Events/Dispatcher.php:840
         Method      shouldBeStrict @ Illuminate/Database/Eloquent/Model.php:566
-        Method      str @ Illuminate/Support/Traits/InteractsWithData.php:234
-        Method      straightJoin @ Illuminate/Database/Query/Builder.php:842
-        Method      straightJoinSub @ Illuminate/Database/Query/Builder.php:871
-        Method      straightJoinWhere @ Illuminate/Database/Query/Builder.php:856
+        Method      str @ Illuminate/Support/Traits/InteractsWithData.php:273
+        Method      straightJoin @ Illuminate/Database/Query/Builder.php:845
+        Method      straightJoinSub @ Illuminate/Database/Query/Builder.php:874
+        Method      straightJoinWhere @ Illuminate/Database/Query/Builder.php:859
         Method      stream @ Illuminate/Contracts/Routing/ResponseFactory.php:80
         Method      stream @ Illuminate/Routing/ResponseFactory.php:197
         Method      streamDownload @ Illuminate/Contracts/Routing/ResponseFactory.php:102
         Method      streamDownload @ Illuminate/Routing/ResponseFactory.php:243
         Method      streamJson @ Illuminate/Contracts/Routing/ResponseFactory.php:91
         Method      streamJson @ Illuminate/Routing/ResponseFactory.php:227
-        Method      streamedContent @ Illuminate/Testing/TestResponse.php:1884
+        Method      streamedContent @ Illuminate/Testing/TestResponse.php:1954
         Method      strict @ Illuminate/Validation/Rules/Email.php:120
-        Method      string @ Illuminate/Cache/Repository.php:235
-        Method      string @ Illuminate/Collections/Arr.php:1168
+        Method      string @ Illuminate/Cache/Repository.php:242
+        Method      string @ Illuminate/Collections/Arr.php:1171
         Method      string @ Illuminate/Config/Repository.php:89
         Method      string @ Illuminate/Contracts/JsonSchema/JsonSchema.php:28
-        Method      string @ Illuminate/Database/Schema/Blueprint.php:844
+        Method      string @ Illuminate/Database/Schema/Blueprint.php:849
         Method      string @ Illuminate/JsonSchema/JsonSchemaTypeFactory.php:34
-        Method      string @ Illuminate/Support/Traits/InteractsWithData.php:246
+        Method      string @ Illuminate/Support/Traits/InteractsWithData.php:285
+        Method      string @ Illuminate/Translation/Translator.php:196
         Method      string @ Illuminate/Validation/Rule.php:289
-        Method      stringable @ Illuminate/Translation/Translator.php:585
+        Method      stringable @ Illuminate/Translation/Translator.php:623
         Method      stringable @ Illuminate/View/Compilers/Concerns/CompilesEchos.php:23
+        Method      stringifyAddresses @ Illuminate/Mail/Transport/CloudflareTransport.php:173
         Method      stringifyClosure @ Illuminate/Foundation/Console/EventListCommand.php:192
         Method      stripConditions @ Illuminate/Translation/MessageSelector.php:91
-        Method      stripParentheses @ Illuminate/View/Compilers/BladeCompiler.php:692
+        Method      stripParentheses @ Illuminate/View/Compilers/BladeCompiler.php:700
         Method      stripQuotes @ Illuminate/View/Compilers/ComponentTagCompiler.php:806
-        Method      stripTableForPluck @ Illuminate/Database/Query/Builder.php:3849
+        Method      stripTableForPluck @ Illuminate/Database/Query/Builder.php:3860
         Method      stripTags @ Illuminate/Support/Stringable.php:858
-        Method      substr @ Illuminate/Support/Str.php:1748
-        Method      substr @ Illuminate/Support/Stringable.php:1010
-        Method      substrCount @ Illuminate/Support/Str.php:1762
-        Method      substrCount @ Illuminate/Support/Stringable.php:1023
-        Method      substrReplace @ Illuminate/Support/Str.php:1780
-        Method      substrReplace @ Illuminate/Support/Stringable.php:1036
+        Method      substr @ Illuminate/Support/Str.php:1758
+        Method      substr @ Illuminate/Support/Stringable.php:1012
+        Method      substrCount @ Illuminate/Support/Str.php:1772
+        Method      substrCount @ Illuminate/Support/Stringable.php:1025
+        Method      substrReplace @ Illuminate/Support/Str.php:1790
+        Method      substrReplace @ Illuminate/Support/Stringable.php:1038
         Method      supportsStraightJoins @ Illuminate/Database/Query/Grammars/Grammar.php:228
         Method      supportsStraightJoins @ Illuminate/Database/Query/Grammars/MySqlGrammar.php:451
         Method      syncMiddlewareToRouter @ Illuminate/Foundation/Http/Kernel.php:520
         Method      throwFirstReported @ Illuminate/Support/Testing/Fakes/ExceptionHandlerFake.php:245
-        Method      toHtmlString @ Illuminate/Support/Stringable.php:1396
-        Method      toString @ Illuminate/JsonSchema/Types/Type.php:123
-        Method      toString @ Illuminate/Support/Stringable.php:1483
+        Method      toHtmlString @ Illuminate/Support/Stringable.php:1398
+        Method      toPasswordRulesString @ Illuminate/Validation/Rules/Password.php:440
+        Method      toString @ Illuminate/JsonSchema/Types/Type.php:119
+        Method      toString @ Illuminate/Support/Stringable.php:1485
         Method      toString @ Illuminate/Support/Uri.php:406
         Method      toString @ Illuminate/Testing/Constraints/ArraySubset.php:92
         Method      toString @ Illuminate/Testing/Constraints/CountInDatabase.php:77
@@ -2529,31 +2553,31 @@ async fn laravel_workspace_symbols_str_class() {
         Method      toStringable @ Illuminate/Support/Uri.php:357
         Method      trimStrings @ Illuminate/Foundation/Configuration/Middleware.php:661
         Method      typeString @ Illuminate/Database/Schema/Grammars/MySqlGrammar.php:767
-        Method      typeString @ Illuminate/Database/Schema/Grammars/PostgresGrammar.php:782
+        Method      typeString @ Illuminate/Database/Schema/Grammars/PostgresGrammar.php:786
         Method      typeString @ Illuminate/Database/Schema/Grammars/SQLiteGrammar.php:718
         Method      typeString @ Illuminate/Database/Schema/Grammars/SqlServerGrammar.php:576
-        Method      uniqueStrict @ Illuminate/Collections/Enumerable.php:1221
-        Method      uniqueStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:955
+        Method      uniqueStrict @ Illuminate/Collections/Enumerable.php:1227
+        Method      uniqueStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:959
         Method      useBootstrap @ Illuminate/Pagination/AbstractPaginator.php:627
         Method      useBootstrapFive @ Illuminate/Pagination/AbstractPaginator.php:659
         Method      useBootstrapFour @ Illuminate/Pagination/AbstractPaginator.php:648
         Method      useBootstrapPath @ Illuminate/Foundation/Application.php:501
         Method      useBootstrapThree @ Illuminate/Pagination/AbstractPaginator.php:637
-        Method      usePrefetchStrategy @ Illuminate/Foundation/Vite.php:349
-        Method      validateString @ Illuminate/Validation/Concerns/ValidatesAttributes.php:2699
-        Method      whereInStrict @ Illuminate/Collections/Enumerable.php:422
-        Method      whereInStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:711
-        Method      whereNotInStrict @ Illuminate/Collections/Enumerable.php:459
-        Method      whereNotInStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:764
-        Method      whereStrict @ Illuminate/Collections/Enumerable.php:403
-        Method      whereStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:684
+        Method      usePrefetchStrategy @ Illuminate/Foundation/Vite.php:363
+        Method      validateString @ Illuminate/Validation/Concerns/ValidatesAttributes.php:2721
+        Method      whereInStrict @ Illuminate/Collections/Enumerable.php:424
+        Method      whereInStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:715
+        Method      whereNotInStrict @ Illuminate/Collections/Enumerable.php:461
+        Method      whereNotInStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:768
+        Method      whereStrict @ Illuminate/Collections/Enumerable.php:405
+        Method      whereStrict @ Illuminate/Collections/Traits/EnumeratesValues.php:688
         Method      withQueryString @ Illuminate/Contracts/Pagination/CursorPaginator.php:43
         Method      withQueryString @ Illuminate/Contracts/Pagination/Paginator.php:43
         Method      withQueryString @ Illuminate/Pagination/AbstractCursorPaginator.php:329
         Method      withQueryString @ Illuminate/Pagination/AbstractPaginator.php:259
-        Method      withoutForeignKeyConstraints @ Illuminate/Database/Schema/Builder.php:636
+        Method      withoutForeignKeyConstraints @ Illuminate/Database/Schema/Builder.php:654
         Method      writeStream @ Illuminate/Contracts/Filesystem/Filesystem.php:91
-        Method      writeStream @ Illuminate/Filesystem/FilesystemAdapter.php:707"#]].assert_eq(&out);
+        Method      writeStream @ Illuminate/Filesystem/FilesystemAdapter.php:715"#]].assert_eq(&out);
 }
 
 // ── Code Actions ──────────────────────────────────────────────────────────────
@@ -2848,7 +2872,7 @@ async fn laravel_find_implementations_interface_name() {
         Illuminate/Cache/CacheManager.php:23:0-23:0
         Illuminate/Contracts/Cookie/QueueingFactory.php:4:0-4:0
         Illuminate/Filesystem/FilesystemManager.php:32:0-32:0
-        Illuminate/Mail/MailManager.php:36:0-36:0
+        Illuminate/Mail/MailManager.php:37:0-37:0
         Illuminate/Notifications/ChannelManager.php:13:0-13:0
         Illuminate/Queue/QueueManager.php:15:0-15:0
         Illuminate/Redis/RedisManager.php:21:0-21:0
