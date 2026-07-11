@@ -785,3 +785,100 @@ function _wrap(): void {
     )
     .await;
 }
+
+// ── match exhaustiveness & backed enum diagnostics ────────────────────────────
+
+/// A `match` covering every case of a pure enum, with no `default`, is
+/// exhaustive and must not be flagged.
+#[tokio::test]
+async fn match_on_enum_covering_all_cases_has_no_diagnostic() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+enum Suit {
+    case Hearts;
+    case Spades;
+}
+function label(Suit $s): string {
+    return match ($s) {
+        Suit::Hearts => 'hearts',
+        Suit::Spades => 'spades',
+    };
+}
+"#,
+    )
+    .await;
+}
+
+/// A non-exhaustive `match` on an enum with no `default` can throw
+/// `UnhandledMatchError` at runtime for the missing case — must be flagged.
+#[tokio::test]
+async fn match_on_enum_missing_case_is_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+enum Suit {
+    case Hearts;
+    case Spades;
+}
+function label(Suit $s): string {
+    return match ($s) {
+//         ^ warning: Unhandled match condition
+        Suit::Hearts => 'hearts',
+    };
+}
+"#,
+    )
+    .await;
+}
+
+/// Contrast: a non-exhaustive `match` with a `default` arm covers every
+/// remaining case at runtime and must not be flagged.
+#[tokio::test]
+async fn match_on_enum_missing_case_with_default_has_no_diagnostic() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+enum Suit {
+    case Hearts;
+    case Spades;
+}
+function label(Suit $s): string {
+    return match ($s) {
+        Suit::Hearts => 'hearts',
+        default => 'other',
+    };
+}
+"#,
+    )
+    .await;
+}
+
+/// KNOWN GAP, not fixable from php-lsp alone: mir's definition-collector
+/// (`collect_file_definitions`, mir-analyzer `collector/enum.rs`) correctly
+/// detects a backed enum case whose literal value doesn't match the backing
+/// type — confirmed directly against `mir-cli analyze`, which reports
+/// `BackedEnumCaseTypeMismatch` for this exact snippet. But php-lsp's
+/// `DocumentStore::get_semantic_issues_salsa` only merges two issue sources
+/// (`FileAnalyzer::analyze`'s body-analysis pass and `AnalysisSession::
+/// class_issues` for inheritance/override checks) — it never reads
+/// `collect_file_definitions(..).issues`, the collector-phase issues query,
+/// so this diagnostic (and any other collector-time check) never reaches the
+/// editor. Fixing this needs a new public accessor on mir's `AnalysisSession`
+/// (`class_issues` only covers `ClassAnalyzer`, not the collector) — a mir
+/// API change requiring a release, not a php-lsp-only fix.
+#[tokio::test]
+#[ignore = "collector-phase issues (e.g. BackedEnumCaseTypeMismatch) aren't wired into get_semantic_issues_salsa yet — needs a new mir AnalysisSession API + release"]
+async fn backed_enum_case_value_type_mismatch_is_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+enum Suit: string {
+    case Hearts = 1;
+//  ^^^^^^^^^^^^^^^ error: Backed enum case Suit::Hearts has value of type int, but backing type is string
+    case Spades = 'spades';
+}
+"#,
+    )
+    .await;
+}
