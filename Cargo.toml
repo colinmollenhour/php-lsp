@@ -95,6 +95,10 @@ harness = false
 name = "start_time"
 harness = false
 
+[[bench]]
+name = "cross_file_freshness"
+harness = false
+
 # Faster local iteration: line-tables-only debuginfo keeps backtraces (file +
 # line) while cutting the debuginfo codegen + link time that dominates the
 # php-lsp test build.

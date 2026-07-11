@@ -54,7 +54,9 @@ per-attempt request round-trips. Writes `target/perf/start_time.{json,md}`.
 Related guards: `edit_latency` (keystroke→diagnostics/hover/completion during
 an editing session), `republish_scaling` (per-edit republish flat as the
 ingested-file count grows), `references_degradation` (references flat across
-a simulated session).
+a simulated session), `cross_file_freshness` (base-class edit → *dependent*
+open file's publishDiagnostics through the real server, flat 100→5000
+ingested files, ceiling-gated).
 
 ---
 
