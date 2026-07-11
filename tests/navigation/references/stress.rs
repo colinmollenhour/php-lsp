@@ -117,6 +117,45 @@ async fn references_protected_method_narrowed_to_hierarchy_stays_complete() {
 }
 
 #[tokio::test]
+async fn edits_and_reads_never_lock_the_reference_index() {
+    // The session opts out of mir's legacy RefIndex maintenance
+    // (`without_reference_index`): references answer from the memoized
+    // `analyze_file` path and diagnostics republish via the open-file set.
+    // The lock counter must stay flat across the full edit → republish →
+    // references cycle — any drift means index work crept back onto a hot path.
+    let mut s = TestServer::with_fixture("references_stress").await;
+    s.wait_for_index_ready().await;
+
+    let text = target_text();
+    s.open("src/Target.php", &text).await;
+    let (line, col) = pos_of(&text, "process");
+
+    let before = s.debug_stats_ref_index_locks().await;
+
+    // Edit path: a change triggers analysis + the dependent republish sweep.
+    s.change("src/Target.php", 2, &format!("{text}\n// edited\n"))
+        .await;
+    let _ = s
+        .client()
+        .drain_publish_diagnostics_uris(tokio::time::Duration::from_millis(300))
+        .await;
+    // Read path: references over the full candidate set.
+    let resp = s.references("src/Target.php", line, col, true).await;
+    assert!(
+        !location_uris(&resp).is_empty(),
+        "references must still answer while the index is unmaintained"
+    );
+
+    let after = s.debug_stats_ref_index_locks().await;
+    assert_eq!(
+        after - before,
+        0,
+        "RefIndex was locked {} time(s) on the edit/read path",
+        after - before
+    );
+}
+
+#[tokio::test]
 async fn references_private_method_does_not_parse_candidate_files() {
     // `Target::compute` is private — narrowed to its declaring file. The
     // narrowing happens on the URL list *before* any parse, so neither the 30

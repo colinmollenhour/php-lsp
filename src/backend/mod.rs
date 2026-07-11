@@ -21,6 +21,9 @@ use tower_lsp::lsp_types::*;
 pub struct DebugStats {
     /// Cumulative count of real `ParsedDoc` parses (cache misses).
     pub parses: u64,
+    /// Times mir's legacy `RefIndex` was locked. The session opts out of
+    /// index maintenance, so this must stay flat across edits and reads.
+    pub ref_index_locks: u64,
 }
 
 use crate::document::ast::ParsedDoc;
@@ -68,12 +71,13 @@ impl Backend {
         }
     }
 
-    /// `$/php-lsp/debugStats` — internal observability counters. Currently just
-    /// the cumulative real-parse count, used by the references stress tests to
-    /// assert the read path doesn't parse the whole workspace.
+    /// `$/php-lsp/debugStats` — internal observability counters, used by the
+    /// stress tests to assert the read path doesn't parse the whole workspace
+    /// and that no edit/read ever touches mir's legacy reference index.
     pub async fn debug_stats(&self) -> tower_lsp::jsonrpc::Result<DebugStats> {
         Ok(DebugStats {
             parses: self.docs.parse_count(),
+            ref_index_locks: self.docs.ref_index_lock_count(),
         })
     }
 
@@ -364,20 +368,28 @@ async fn compute_dependent_publishes_owned(
     diag_cfg: crate::lang::config::DiagnosticsConfig,
 ) -> Vec<(Url, Vec<Diagnostic>)> {
     tokio::task::spawn_blocking(move || {
-        // Ask mir which files actually depend on `changed_uri` and let it
-        // re-run Pass 2 for them in parallel. mir 0.25's dependency graph
-        // covers every reference kind that can produce a cross-file
-        // diagnostic (imports, class hierarchy, type hints, instanceof,
-        // catch, ::class, ::CONST, `new`, static and instance calls) and
-        // tracks symbols-deleted-from-a-file so renames / deletions still
-        // surface the orphaned dependents.
+        // rust-analyzer model: we only ever publish for files the editor has
+        // open, so re-analyze exactly that set and let salsa memoization make
+        // the unaffected ones ~free. No dependent set is computed at all —
+        // the old path rebuilt mir's dependency_graph() on every keystroke,
+        // an O(all-ingested-files) walk whose cost grew with session age.
+        let open_set: Vec<std::sync::Arc<str>> = open_files
+            .urls()
+            .into_iter()
+            .filter(|u| u != &changed_uri)
+            .map(|u| std::sync::Arc::from(u.as_str()))
+            .collect();
+        if open_set.is_empty() {
+            return Vec::new();
+        }
+
         let php_version = docs.workspace_php_version();
         let session = docs.analysis_session(php_version);
         // Cancel any older in-flight sweep and take a fresh token: when the
         // next edit starts its own sweep, this one stops at its next file
-        // boundary instead of blocking typing behind a full dependent walk.
+        // boundary instead of blocking typing behind the previous sweep.
         let cancel = docs.begin_reanalyze();
-        let analyses = session.reanalyze_dependents_cancellable(changed_uri.as_str(), &cancel);
+        let analyses = session.reanalyze_files_cancellable(&open_set, &cancel);
         // A newer edit that flipped `cancel` mid-sweep is now authoritative and
         // will republish; drop this sweep's partial results so they can't land
         // out of order and leave stale diagnostics as the final state.
@@ -385,18 +397,11 @@ async fn compute_dependent_publishes_owned(
             return Vec::new();
         }
 
-        // We only publish for files the editor has open. Filter the
-        // session-wide dependent set down to open URLs.
-        let open_urls: std::collections::HashSet<Url> = open_files
-            .urls()
-            .into_iter()
-            .filter(|u| u != &changed_uri)
-            .collect();
         let dependents: Vec<(Url, mir_analyzer::FileAnalysis)> = analyses
             .into_iter()
             .filter_map(|(file, analysis)| {
                 let url = Url::parse(file.as_ref()).ok()?;
-                open_urls.contains(&url).then_some((url, analysis))
+                Some((url, analysis))
             })
             .collect();
         if dependents.is_empty() {

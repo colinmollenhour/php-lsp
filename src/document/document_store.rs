@@ -171,8 +171,13 @@ impl DocumentStore {
         // lazy-resolve `UndefinedClass` candidates without us having to mirror
         // every vendor file upfront.
         let resolver: Arc<dyn mir_analyzer::ClassResolver> = self.psr4.load_full();
-        let mut builder =
-            mir_analyzer::AnalysisSession::new(php_version).with_class_resolver(resolver);
+        // References are read exclusively through the memoized
+        // `references_to_in_files` path, so mir's legacy imperative RefIndex
+        // is dead weight here: opting out removes its lock from every edit
+        // and read (asserted flat via `$/php-lsp/debugStats`).
+        let mut builder = mir_analyzer::AnalysisSession::new(php_version)
+            .with_class_resolver(resolver)
+            .without_reference_index();
         if let Some(dir) = self.session_cache_dir.get() {
             builder = builder.with_cache_dir(dir);
         }
@@ -797,6 +802,15 @@ impl DocumentStore {
     /// read path doesn't parse the whole workspace.
     pub fn parse_count(&self) -> u64 {
         self.caches.parse_count()
+    }
+
+    /// Times mir's legacy `RefIndex` was locked on the current session.
+    /// The session opts out of index maintenance
+    /// (`without_reference_index`), so edits and reads must keep this flat.
+    /// Surfaced via `$/php-lsp/debugStats` for the stress-test guard.
+    pub fn ref_index_lock_count(&self) -> u64 {
+        self.analysis_session(self.workspace_php_version())
+            .ref_index_lock_count()
     }
 
     /// Return the raw source text for `uri` if it has been mirrored into the

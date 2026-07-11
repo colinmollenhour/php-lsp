@@ -584,6 +584,14 @@ impl TestServer {
             .unwrap_or_else(|| panic!("debugStats lacked numeric `parses`: {resp}"))
     }
 
+    /// Cumulative mir `RefIndex` lock count from `$/php-lsp/debugStats`.
+    pub async fn debug_stats_ref_index_locks(&mut self) -> u64 {
+        let resp = self.client.request_no_params("$/php-lsp/debugStats").await;
+        resp["result"]["ref_index_locks"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("debugStats lacked numeric `ref_index_locks`: {resp}"))
+    }
+
     pub async fn references(
         &mut self,
         path: &str,
