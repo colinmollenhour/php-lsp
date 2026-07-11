@@ -910,3 +910,73 @@ echo $bound();
     )
     .await;
 }
+
+// ── property visibility is not enforced on `->` access ──────────────────────
+
+/// KNOWN GAP, not fixable from php-lsp alone: mir enforces visibility for
+/// class constant access (`InaccessibleClassConstant`, checked in
+/// mir-analyzer `expr/objects.rs`) and effectively for method calls (a
+/// private/protected method looked up from outside the class isn't found at
+/// all, surfacing as `UndefinedMethod` — see the positive controls below).
+/// But there is no equivalent check for `->` property access: no
+/// `InaccessibleProperty`-shaped variant exists in mir-issues, and the
+/// property-fetch path never inspects the property's declared visibility.
+/// Reading a `private`/`protected` property from outside its class silently
+/// type-checks with no diagnostic at all. This pins today's (missing)
+/// behavior; once mir grows the check, replace this with a `check_diagnostics`
+/// assertion that the access IS flagged.
+#[tokio::test]
+async fn private_property_access_from_outside_class_is_not_yet_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+class Vault {
+    private int $secret = 0;
+}
+function test(Vault $v): int {
+    return $v->secret;
+}
+"#,
+    )
+    .await;
+}
+
+/// Same gap as above, for `protected` instead of `private`.
+#[tokio::test]
+async fn protected_property_access_from_outside_class_is_not_yet_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+class Vault {
+    protected int $balance = 0;
+}
+function test(Vault $v): int {
+    return $v->balance;
+}
+"#,
+    )
+    .await;
+}
+
+/// Positive control for the two gaps above: private/protected *method*
+/// calls from outside the class ARE rejected today — just mislabeled, since
+/// an inaccessible method fails lookup and reports as `UndefinedMethod`
+/// rather than a dedicated inaccessibility diagnostic. Confirms the property
+/// gap is a real hole in the visibility model, not evidence that php-lsp
+/// never checks visibility at all.
+#[tokio::test]
+async fn private_method_access_from_outside_class_is_flagged_as_undefined() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+class Vault {
+    private function secret(): string { return 's'; }
+}
+function test(Vault $v): string {
+    return $v->secret();
+//         ^^^^^^^^^^^^ error: secret
+}
+"#,
+    )
+    .await;
+}
