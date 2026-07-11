@@ -9,8 +9,23 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 use php_lsp::backend::Backend;
 use tower_lsp::{LspService, Server};
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Cap the blocking pool well below tokio's 512 default. mimalloc keeps a
+    // heap per thread, and memory freed cross-thread is only recycled when
+    // the owning thread allocates again — a burst-grown pool leaves hundreds
+    // of idle heaps stranding freed pages, and session RSS climbs ~5 MB per
+    // edit (measured by benches/rss_session.rs; the cap cuts it ~6x). All
+    // blocking tasks here are bounded (no blocking task waits unboundedly on
+    // another), so a small pool only queues work, never deadlocks.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .max_blocking_threads(16)
+        .build()
+        .expect("tokio runtime")
+        .block_on(main_async());
+}
+
+async fn main_async() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 

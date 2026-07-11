@@ -335,7 +335,13 @@ fn main() {
         let root = PathBuf::from(
             args[args.iter().position(|a| a == "--root").unwrap() + 1].clone(),
         );
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        // Mirror the production runtime config (src/main.rs) — the blocking
+        // pool cap shapes both scan throughput and RSS.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .max_blocking_threads(16)
+            .build()
+            .unwrap();
         let result = rt.block_on(run_scenario(&scenario, &root));
         println!("RESULT {result}");
         return;
