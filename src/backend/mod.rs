@@ -450,9 +450,26 @@ async fn compute_dependent_publishes_owned(
     .unwrap_or_default()
 }
 
+/// Content hash of a diagnostics set, for skipping republishes the client
+/// already displays. In-process only — never persisted.
+pub(super) fn diagnostics_content_hash(diagnostics: &[Diagnostic]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    serde_json::to_string(diagnostics)
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Compute and publish diagnostics for `uri`, then republish any open files
 /// that depend on it. Requires `open_files.set_parse_diagnostics` to be up to
 /// date for `uri` before this is called.
+///
+/// The edited file always publishes (editors rely on one publish per change).
+/// Dependents publish only when their content differs from the last publish —
+/// the sweep re-analyzes every open file on every edit, and unchanged results
+/// would otherwise flood the client with no-op notifications.
 pub(super) async fn publish_with_dependents(
     client: Client,
     docs: Arc<DocumentStore>,
@@ -469,11 +486,18 @@ pub(super) async fn publish_with_dependents(
     })
     .await
     .unwrap_or_default();
+    open_files.note_published(&uri, diagnostics_content_hash(&all_diags));
     client
         .publish_diagnostics(uri.clone(), all_diags, None)
         .await;
-    let dependents = compute_dependent_publishes_owned(docs, open_files, uri, diag_cfg).await;
+    let dependents =
+        compute_dependent_publishes_owned(docs, open_files.clone(), uri, diag_cfg).await;
     for (dep_uri, dep_diags) in dependents {
+        let hash = diagnostics_content_hash(&dep_diags);
+        if open_files.published_hash(&dep_uri) == Some(hash) {
+            continue;
+        }
+        open_files.note_published(&dep_uri, hash);
         client.publish_diagnostics(dep_uri, dep_diags, None).await;
     }
 }

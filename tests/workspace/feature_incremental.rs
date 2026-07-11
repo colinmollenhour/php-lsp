@@ -380,29 +380,34 @@ async fn cross_file_republish_skips_closed_files() {
 
 #[tokio::test]
 async fn cross_file_republish_uses_empty_array_for_clean_dependent() {
-    // `clean_b` is a genuine dependent of `clean_a` (references `aa()`).
-    // Renaming an unrelated symbol in `clean_a` must still send a publish
-    // for `clean_b`, and the diagnostics field must be an empty array
-    // (LSP requires the field even when there are no issues).
+    // `clean_b` references `aa()`, which `clean_a` does not define yet — so
+    // `clean_b` opens dirty. Defining `aa()` in `clean_a` must republish
+    // `clean_b`, and the diagnostics field must be an *empty array*, not an
+    // omitted field (LSP requires the field even when there are no issues).
+    // A dependent whose diagnostics are unchanged is deliberately NOT
+    // republished — the sweep dedups no-op publishes.
     let mut server = TestServer::new().await;
     server
-        .open(
-            "clean_a.php",
-            "<?php\nfunction aa(): void {}\nfunction extra(): void {}\n",
-        )
+        .open("clean_a.php", "<?php\nfunction extra(): void {}\n")
         .await;
-    server.open("clean_b.php", "<?php\naa();\n").await;
+    let notif = server.open("clean_b.php", "<?php\naa();\n").await;
+    expect!["1:0-1:4 [1] UndefinedFunction: Function aa() is not defined"]
+        .assert_eq(&render_diagnostics_notification(&notif));
 
     server
         .change(
             "clean_a.php",
             2,
-            "<?php\nfunction aa(): void {}\nfunction renamed(): void {}\n",
+            "<?php\nfunction aa(): void {}\nfunction extra(): void {}\n",
         )
         .await;
 
     let b_uri = server.uri("clean_b.php");
     let notif = server.client().wait_for_diagnostics(&b_uri).await;
+    assert!(
+        notif["params"]["diagnostics"].is_array(),
+        "diagnostics field must be present as an array"
+    );
     expect!["<empty>"].assert_eq(&render_diagnostics_notification(&notif));
 }
 

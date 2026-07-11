@@ -234,21 +234,39 @@ async fn cancel_request_returns_request_cancelled_and_server_stays_alive() {
         )
         .await;
 
+    // $/cancelRequest is best-effort: when the request completes before the
+    // cancel frame is processed, a normal result is a legitimate outcome and
+    // the race simply wasn't observed. Retry until a cancellation lands —
+    // what must NEVER happen is an error other than RequestCancelled.
     let uri = server.uri("cancel_main.php");
-    let resp = server
-        .request_then_cancel(
-            "textDocument/references",
-            serde_json::json!({
-                "textDocument": { "uri": uri },
-                "position": { "line": 2, "character": 5 },
-                "context": { "includeDeclaration": true },
-            }),
-        )
-        .await;
-    assert_eq!(
-        resp["error"]["code"],
-        serde_json::json!(-32800),
-        "expected RequestCancelled (-32800), got: {resp}"
+    let mut cancelled = false;
+    for _ in 0..10 {
+        let resp = server
+            .request_then_cancel(
+                "textDocument/references",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": { "line": 2, "character": 5 },
+                    "context": { "includeDeclaration": true },
+                }),
+            )
+            .await;
+        match resp.get("error") {
+            None => continue, // completed before the cancel was seen — retry
+            Some(err) => {
+                assert_eq!(
+                    err["code"],
+                    serde_json::json!(-32800),
+                    "expected RequestCancelled (-32800), got: {resp}"
+                );
+                cancelled = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        cancelled,
+        "no attempt out of 10 produced a RequestCancelled response"
     );
 
     // A cancelled request must not wedge the server: a follow-up request on

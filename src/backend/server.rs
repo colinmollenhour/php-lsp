@@ -363,6 +363,8 @@ impl LanguageServer for Backend {
             // showed after the last did_change.
             let diag_cfg = self.config.load().diagnostics.clone();
             let all = compute_open_file_diagnostics(&self.docs, &self.open_files, &uri, &diag_cfg);
+            self.open_files
+                .note_published(&uri, super::diagnostics_content_hash(&all));
             self.client
                 .publish_diagnostics(uri.clone(), all, None)
                 .await;

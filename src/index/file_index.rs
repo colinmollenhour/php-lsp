@@ -35,6 +35,14 @@ pub struct FileIndex {
     pub use_imports: Vec<(Box<str>, Box<str>)>,
 }
 
+impl FileIndex {
+    /// True when the file declares nothing another file could reference —
+    /// namespace and imports don't count, only functions/classes/constants.
+    pub fn declares_nothing(&self) -> bool {
+        self.functions.is_empty() && self.classes.is_empty() && self.constants.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FunctionDef {
     pub name: Box<str>,

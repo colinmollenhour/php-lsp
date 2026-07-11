@@ -1098,7 +1098,10 @@ impl DocumentStore {
             .map(|e| Arc::clone(&*e));
         let decl_changed = match (&old_fp, &new_index) {
             (Some(old), Some(new)) => **old != **new,
-            (None, Some(_)) => true,
+            // First analysis: only a file that actually declares something can
+            // affect other files. Opening a plain script must not invalidate
+            // every open file's analysis cache and mir's warm-up marks.
+            (None, Some(new)) => !new.declares_nothing(),
             _ => false,
         };
         if decl_changed {
@@ -1112,7 +1115,12 @@ impl DocumentStore {
             // set so reference queries re-run their prepare pass once.
             session.bump_prepare_generation();
         }
-        let ver = self.caches.decl_version();
+        // Tag with the version observed before the analysis ran, plus this
+        // file's own bump. Reading `decl_version()` here instead would absorb
+        // a concurrent bump from another file's mid-compute declaration change
+        // into the tag, marking a possibly-stale result as fresh. The
+        // conservative tag errs toward one extra recompute, never staleness.
+        let ver = cur_ver + u64::from(decl_changed);
         self.caches.shed_stale(
             &self.caches.analysis_cache,
             crate::document::cache_registry::ANALYSIS_CACHE_CAP,

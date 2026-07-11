@@ -23,6 +23,11 @@ pub(crate) struct OpenFile {
     pub(crate) version: u64,
     /// Parse-level diagnostics most recently cached for publication.
     pub(crate) parse_diagnostics: Vec<Diagnostic>,
+    /// Content hash of the last `publishDiagnostics` sent for this file.
+    /// Lets the dependent-republish sweep skip publishes whose content the
+    /// client already displays. `None` until the first publish; the entry
+    /// (and hash) drops on close, so a reopen always publishes.
+    pub(crate) published_hash: Option<u64>,
 }
 
 /// Shared handle to open-file state. Cheaply cloneable — wraps an `Arc<DashMap>`
@@ -64,6 +69,19 @@ impl OpenFiles {
 
     pub(crate) fn parse_diagnostics(&self, uri: &Url) -> Option<Vec<Diagnostic>> {
         self.0.get(uri).map(|e| e.parse_diagnostics.clone())
+    }
+
+    /// Record the content hash of a `publishDiagnostics` just sent for `uri`.
+    /// No-op when the file closed mid-flight (entry gone).
+    pub(crate) fn note_published(&self, uri: &Url, hash: u64) {
+        if let Some(mut entry) = self.0.get_mut(uri) {
+            entry.published_hash = Some(hash);
+        }
+    }
+
+    /// Hash of the last publish sent for `uri`, if it is still open.
+    pub(crate) fn published_hash(&self, uri: &Url) -> Option<u64> {
+        self.0.get(uri).and_then(|e| e.published_hash)
     }
 
     pub(crate) fn all_with_diagnostics(&self) -> Vec<(Url, Vec<Diagnostic>, Option<i64>)> {

@@ -656,6 +656,8 @@ impl Backend {
         for file in &params.files {
             if let Ok(uri) = Url::parse(&file.uri) {
                 self.docs.remove(&uri);
+                self.open_files
+                    .note_published(&uri, crate::backend::diagnostics_content_hash(&[]));
                 self.client.publish_diagnostics(uri, vec![], None).await;
             }
         }
