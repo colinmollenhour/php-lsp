@@ -460,10 +460,18 @@ const PHP_BUILTINS: &[&str] = &[
 ];
 
 pub fn builtin_completions() -> Vec<CompletionItem> {
+    builtin_completions_matching(&|_| true)
+}
+
+/// Like [`builtin_completions`] but only materializes items whose label
+/// passes `keep` — completion builds these per request, and constructing
+/// hundreds of builtin items just for a prefix retain to drop them dominated
+/// the request's allocations.
+pub fn builtin_completions_matching(keep: &dyn Fn(&str) -> bool) -> Vec<CompletionItem> {
     let mut seen = std::collections::HashSet::new();
     PHP_BUILTINS
         .iter()
-        .filter(|&&f| seen.insert(f))
+        .filter(|&&f| keep(f) && seen.insert(f))
         .map(|f| callable_item(f, CompletionItemKind::FUNCTION, true))
         .collect()
 }
@@ -481,8 +489,13 @@ const PHP_SUPERGLOBALS: &[&str] = &[
 ];
 
 pub fn superglobal_completions() -> Vec<CompletionItem> {
+    superglobal_completions_matching(&|_| true)
+}
+
+pub fn superglobal_completions_matching(keep: &dyn Fn(&str) -> bool) -> Vec<CompletionItem> {
     PHP_SUPERGLOBALS
         .iter()
+        .filter(|name| keep(name))
         .map(|&name| CompletionItem {
             label: name.to_string(),
             kind: Some(CompletionItemKind::VARIABLE),

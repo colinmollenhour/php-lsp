@@ -5,7 +5,10 @@ mod include_path;
 use include_path::{include_path_completions, include_path_prefix};
 
 mod keyword;
-pub use keyword::{keyword_completions, magic_constant_completions};
+pub use keyword::{
+    keyword_completions, keyword_completions_matching, magic_constant_completions,
+    magic_constant_completions_matching,
+};
 
 mod match_arm;
 use match_arm::match_arm_completions;
@@ -24,7 +27,8 @@ use namespace::{
 
 mod symbols;
 pub use symbols::{
-    builtin_completions, superglobal_completions, symbol_completions, symbol_completions_before,
+    builtin_completions, builtin_completions_matching, superglobal_completions,
+    superglobal_completions_matching, symbol_completions, symbol_completions_before,
 };
 
 use std::sync::Arc;
@@ -736,10 +740,21 @@ pub fn filtered_completions_at(
                 magic_items.extend(magic_method_completions());
             }
 
-            let mut items = keyword_completions();
-            items.extend(magic_constant_completions());
-            items.extend(builtin_completions());
-            items.extend(superglobal_completions());
+            // Extract the typed prefix early: it bounds the workspace-wide
+            // class search below, and — for a plain identifier prefix — the
+            // static item sources apply the same camel-match the final retain
+            // would, so hundreds of keyword/builtin items aren't materialized
+            // per keystroke just to be dropped.
+            let prefix = typed_prefix(source, position).unwrap_or_default();
+            let ident_query = (!prefix.is_empty() && !prefix.contains('\\'))
+                .then(|| crate::text::FuzzyQuery::new(&prefix));
+            let keep_static =
+                |label: &str| ident_query.as_ref().is_none_or(|fq| fq.camel_match(label));
+
+            let mut items = keyword_completions_matching(&keep_static);
+            items.extend(magic_constant_completions_matching(&keep_static));
+            items.extend(builtin_completions_matching(&keep_static));
+            items.extend(superglobal_completions_matching(&keep_static));
             // Feature 2: scope variable completions to before cursor line
             let sym_items = if let (Some(_src), Some(pos)) = (source, position) {
                 symbol_completions_before(doc, pos.line)
@@ -750,9 +765,6 @@ pub fn filtered_completions_at(
             items.extend(magic_items);
 
             let cur_ns = current_file_namespace(&doc.program().stmts);
-            // Extract the typed prefix early: also used to bound the
-            // workspace-wide class search below.
-            let prefix = typed_prefix(source, position).unwrap_or_default();
 
             // Same for every class candidate in this request (depends only on
             // `source`) — computed once instead of per candidate, since a single

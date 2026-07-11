@@ -87,8 +87,13 @@ const PHP_KEYWORDS: &[&str] = &[
 ];
 
 pub fn keyword_completions() -> Vec<CompletionItem> {
+    keyword_completions_matching(&|_| true)
+}
+
+pub fn keyword_completions_matching(keep: &dyn Fn(&str) -> bool) -> Vec<CompletionItem> {
     PHP_KEYWORDS
         .iter()
+        .filter(|kw| keep(kw))
         .map(|kw| CompletionItem {
             label: kw.to_string(),
             kind: Some(CompletionItemKind::KEYWORD),
@@ -109,8 +114,13 @@ const PHP_MAGIC_CONSTANTS: &[(&str, &str)] = &[
 ];
 
 pub fn magic_constant_completions() -> Vec<CompletionItem> {
+    magic_constant_completions_matching(&|_| true)
+}
+
+pub fn magic_constant_completions_matching(keep: &dyn Fn(&str) -> bool) -> Vec<CompletionItem> {
     PHP_MAGIC_CONSTANTS
         .iter()
+        .filter(|(name, _)| keep(name))
         .map(|(name, doc)| CompletionItem {
             label: name.to_string(),
             kind: Some(CompletionItemKind::CONSTANT),
