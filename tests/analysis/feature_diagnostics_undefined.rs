@@ -66,8 +66,6 @@ function _wrap(): void {
         .await;
 }
 
-// ── named argument diagnostics ────────────────────────────────────────────────
-
 #[tokio::test]
 async fn new_expr_with_explicit_use_alias_not_flagged_as_undefined_class() {
     let tmp = tempfile::tempdir().unwrap();

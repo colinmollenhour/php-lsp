@@ -19,12 +19,6 @@ function _wrap(): void {
     .await;
 }
 
-/// Reproducer: a project polyfill that conditionally redefines a built-in.
-/// If `ingest_stub_slice` is last-write-wins and the project file's parsed
-/// `function restore_error_handler` overrides mir's stub, the call site may
-/// still resolve — but the polyfill body is what ends up authoritative. This
-/// test asserts that the call is *not* flagged undefined when a user-land
-/// polyfill exists in the workspace.
 #[tokio::test]
 async fn clean_file_has_no_diagnostics() {
     let mut s = TestServer::new().await;
@@ -140,8 +134,9 @@ async fn regression_error_handling() {
     );
 }
 
-/// REGRESSION: result_id must be stable across consecutive requests.
-/// Same file with same diagnostics should return same result_id.
+/// REGRESSION: workspace/diagnostic must accept the `previousResultIds`
+/// field in its params without erroring, even before the server uses it to
+/// return an `Unchanged` variant.
 #[tokio::test]
 async fn regression_params_structure_accepted() {
     let mut server = TestServer::new().await;
@@ -163,9 +158,9 @@ async fn regression_params_structure_accepted() {
     );
 }
 
-/// CRITICAL: result_id must change when diagnostic properties change.
-/// Even if position and message are identical, severity changes must produce different result_id.
-/// This was missing from initial hash implementation.
+/// REGRESSION: Files with parse errors must appear in workspace/diagnostic.
+/// Previously: there was potential for parse-error-only files to be filtered out.
+/// This test verifies parse errors are correctly included.
 #[tokio::test]
 async fn regression_parse_error_files_included() {
     let mut server = TestServer::new().await;
@@ -182,9 +177,10 @@ async fn regression_parse_error_files_included() {
     .assert_eq(&render_workspace_diagnostic(&resp, &server.uri("")));
 }
 
-/// REGRESSION: result_id must be unique per file for caching.
-/// Previously: result_id was always None for all files.
-/// Fixed: Each file now gets a deterministic result_id based on content hash.
+/// REGRESSION: result_id must change when diagnostics change.
+/// Previously: result_id was always None.
+/// Fixed: result_id is now based on diagnostic content, so it changes when
+/// errors appear/disappear, and reverts when the fix is undone.
 #[tokio::test]
 async fn regression_result_id_changes_with_diagnostics() {
     let mut server = TestServer::new().await;
@@ -233,9 +229,9 @@ async fn regression_result_id_changes_with_diagnostics() {
     );
 }
 
-/// REGRESSION: document/diagnostic and workspace/diagnostic must both use result_id.
-/// Previously: Both handlers set result_id to None.
-/// Fixed: Both now generate consistent, deterministic result_ids.
+/// REGRESSION: resultId must be present and a non-null string on every
+/// workspace/diagnostic item — clients need it to implement caching via
+/// `previousResultIds`.
 #[tokio::test]
 async fn regression_result_id_is_present() {
     let mut server = TestServer::new().await;
@@ -262,9 +258,8 @@ async fn regression_result_id_is_present() {
     );
 }
 
-/// REGRESSION: Files with parse errors must appear in workspace/diagnostic.
-/// Previously: There was potential for parse-error-only files to be filtered out.
-/// This test verifies parse errors are correctly included.
+/// REGRESSION: result_id must be stable across consecutive requests.
+/// Same file with same diagnostics should return the same result_id.
 #[tokio::test]
 async fn regression_result_id_is_stable() {
     let mut server = TestServer::new().await;
@@ -287,8 +282,9 @@ async fn regression_result_id_is_stable() {
     );
 }
 
-/// REGRESSION: result_id must account for all diagnostic types.
-/// File with both parse errors and semantic errors should have result_id that reflects both.
+/// REGRESSION: result_id must account for all diagnostic properties, not
+/// just error count. Two files each with exactly one error, but of a
+/// different diagnostic code, must hash to different result_ids.
 #[tokio::test]
 async fn regression_result_id_reflects_all_diagnostic_properties() {
     let mut server = TestServer::new().await;
@@ -339,13 +335,9 @@ async fn regression_result_id_reflects_all_diagnostic_properties() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// EDGE CASE TESTS - Stress scenarios and boundary conditions
-// ─────────────────────────────────────────────────────────────────────────
-
-/// EDGE CASE: Very large workspace with many files.
-/// workspace_diagnostic iterates all open files and runs semantic analysis on each.
-/// Should verify it doesn't have quadratic behavior or memory issues.
+/// REGRESSION: result_id must be unique per file for caching.
+/// Previously: result_id was always None for all files.
+/// Fixed: Each file now gets a deterministic result_id based on content hash.
 #[tokio::test]
 async fn regression_result_id_unique_per_file() {
     let mut server = TestServer::new().await;
@@ -465,6 +457,12 @@ async fn same_namespace_truly_missing_class_is_flagged() {
     .assert_eq(&out);
 }
 
+/// Reproducer: a project polyfill that conditionally redefines a built-in.
+/// If `ingest_stub_slice` is last-write-wins and the project file's parsed
+/// `function restore_error_handler` overrides mir's stub, the call site may
+/// still resolve — but the polyfill body is what ends up authoritative. This
+/// test asserts that the call is *not* flagged undefined when a user-land
+/// polyfill exists in the workspace.
 #[tokio::test]
 async fn user_polyfill_does_not_break_builtin_restore_error_handler() {
     let mut s = TestServer::new().await;

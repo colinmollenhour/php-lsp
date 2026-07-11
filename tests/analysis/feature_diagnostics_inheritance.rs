@@ -32,8 +32,6 @@ class A extends A {}
     .await;
 }
 
-// --- workspace/diagnostic Unchanged variant tests (BUG #1 + BUG #3) ---
-
 #[tokio::test]
 async fn circular_inheritance_three_class_cycle() {
     let mut s = TestServer::new().await;
@@ -48,8 +46,6 @@ async fn circular_inheritance_three_class_cycle() {
     .await;
 }
 
-/// Baseline: the bare PHP built-in `restore_error_handler()` resolves via mir's
-/// bundled stubs and should produce no `UndefinedFunction` diagnostic.
 #[tokio::test]
 async fn circular_inheritance_two_class_cycle() {
     let mut s = TestServer::new().await;

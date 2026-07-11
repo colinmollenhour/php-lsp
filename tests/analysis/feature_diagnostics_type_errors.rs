@@ -148,8 +148,6 @@ greet(name: 'Alice', times: 3);
     .await;
 }
 
-// ── circular inheritance diagnostics ─────────────────────────────────────────
-
 #[tokio::test]
 async fn workspace_diagnostic_named_arguments() {
     let mut server = TestServer::new().await;

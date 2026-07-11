@@ -43,6 +43,9 @@ async fn pull_diagnostics_returns_report() {
     expect!["<empty>"].assert_eq(&render_pull_diagnostics(&resp));
 }
 
+/// REGRESSION: document/diagnostic and workspace/diagnostic must both use result_id.
+/// Previously: Both handlers set result_id to None.
+/// Fixed: Both now generate consistent, deterministic result_ids.
 #[tokio::test]
 async fn regression_document_and_workspace_diagnostic_consistency() {
     let mut server = TestServer::new().await;
@@ -149,10 +152,6 @@ async fn workspace_diagnostic_empty_prev_ids_all_full() {
     }
 }
 
-// ── use-import edge cases ──────────────────────────────────────────────────────
-
-/// Grouped `use` import (`use A\{B, C};`) must not produce UndefinedClass for
-/// any name in the group when the classes are PSR-4-resolvable on disk.
 #[tokio::test]
 async fn workspace_diagnostic_empty_workspace() {
     let mut server = TestServer::new().await;
