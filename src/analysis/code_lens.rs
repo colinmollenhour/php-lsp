@@ -462,26 +462,6 @@ fn find_method_name_range(
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `should_cancel = || true` must return an empty Vec immediately without
-    /// panicking, regardless of the document contents.
-    #[test]
-    fn code_lenses_cancelled_returns_empty() {
-        use crate::document::ast::ParsedDoc;
-
-        let source = "<?php\nclass Foo { public function bar(): void {} }\n";
-        let doc = std::sync::Arc::new(ParsedDoc::parse(source));
-        let uri = tower_lsp::lsp_types::Url::parse("file:///test.php").unwrap();
-        let all_docs: Vec<(tower_lsp::lsp_types::Url, std::sync::Arc<ParsedDoc>)> = vec![];
-
-        let lenses = code_lenses(&uri, &doc, &all_docs, || true);
-        assert!(lenses.is_empty(), "cancelled sweep must return empty");
-    }
-}
-
 /// A method is a test if its name starts with `test` (PHPUnit convention),
 /// if its leading docblock contains `@test`, or if it carries a `#[Test]`
 /// or `#[PHPUnit\Framework\Attributes\Test]` PHP attribute.
@@ -506,4 +486,24 @@ fn is_test_method(source: &str, m: &php_ast::MethodDecl<'_, '_>) -> bool {
     m.doc_comment
         .as_ref()
         .is_some_and(|c| c.text.contains("@test"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `should_cancel = || true` must return an empty Vec immediately without
+    /// panicking, regardless of the document contents.
+    #[test]
+    fn code_lenses_cancelled_returns_empty() {
+        use crate::document::ast::ParsedDoc;
+
+        let source = "<?php\nclass Foo { public function bar(): void {} }\n";
+        let doc = std::sync::Arc::new(ParsedDoc::parse(source));
+        let uri = tower_lsp::lsp_types::Url::parse("file:///test.php").unwrap();
+        let all_docs: Vec<(tower_lsp::lsp_types::Url, std::sync::Arc<ParsedDoc>)> = vec![];
+
+        let lenses = code_lenses(&uri, &doc, &all_docs, || true);
+        assert!(lenses.is_empty(), "cancelled sweep must return empty");
+    }
 }
