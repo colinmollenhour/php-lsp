@@ -1,6 +1,6 @@
 # Benchmarks
 
-Four complementary tools for measuring and comparing LSP performance.
+Complementary tools for measuring and comparing LSP performance.
 
 ---
 
@@ -32,6 +32,29 @@ The `index/workspace_scan/laravel_framework` group exercises indexing the full
 Laravel codebase. Note: the store's default 1,000-file LRU cap means ~1,500
 files are evicted during this bench — realistic for what users experience, but
 not a clean "time to index N files" measurement.
+
+---
+
+## 1b. start_time — cold/warm start wall time (Laravel fixture)
+
+Best for: the numbers a user feels when opening a workspace.
+
+```bash
+cargo bench --bench start_time
+```
+
+Drives the real server over in-memory pipes and measures, from `initialize`:
+time to the first **correct** cross-file goto-definition and completion
+(polled every 25 ms — correctness-checked, not just non-empty), time to
+`$/php-lsp/indexReady`, and RSS. Two scenarios, each in its own process:
+`cold` starts with an empty disk cache (`XDG_CACHE_HOME`-isolated), `warm`
+reuses the cache the cold run populated. `START_TIME_TRACE=1` prints
+per-attempt request round-trips. Writes `target/perf/start_time.{json,md}`.
+
+Related guards: `edit_latency` (keystroke→diagnostics/hover/completion during
+an editing session), `republish_scaling` (per-edit republish flat as the
+ingested-file count grows), `references_degradation` (references flat across
+a simulated session).
 
 ---
 
