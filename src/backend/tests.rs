@@ -384,6 +384,22 @@ fn undefined_class_name_extracted_from_message() {
     assert_eq!(name, "MyService");
 }
 
+// mir reports the namespace-resolved attempt (e.g. `App\Widget` for a bare
+// `Widget` reference inside `namespace App;`), not the token the developer
+// wrote — the handler must take the last `\`-segment before doing an index
+// lookup by short name, or the quick-fix never fires in namespaced files.
+#[test]
+fn undefined_class_name_strips_namespace_resolved_prefix() {
+    let msg = "Class App\\Service\\Widget does not exist";
+    let resolved = msg
+        .strip_prefix("Class ")
+        .and_then(|s| s.strip_suffix(" does not exist"))
+        .unwrap_or("")
+        .trim();
+    let short = resolved.rsplit('\\').next().unwrap_or(resolved);
+    assert_eq!(short, "Widget");
+}
+
 #[test]
 fn undefined_function_message_not_matched_by_extraction() {
     // UndefinedFunction message format must NOT match the UndefinedClass extraction,

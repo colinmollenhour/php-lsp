@@ -988,3 +988,95 @@ async fn code_action_quickfix_undefined_function_cross_file() {
         2:0-2:0 → "use function App\\Helpers\\tap;\n""#]]
     .assert_eq(&out);
 }
+
+// --- Quick-fix: UndefinedClass → use FQN; ---
+
+/// REGRESSION: the "Add use" quick-fix must find classes anywhere in the
+/// workspace index, not just among currently-open editor buffers. Widget.php
+/// is written to disk and indexed via the workspace scan but never opened —
+/// this reproduces the common case of importing a class whose file isn't
+/// already open in the editor.
+#[tokio::test]
+async fn code_action_quickfix_undefined_class_not_open_in_editor() {
+    let mut server = TestServer::with_fixture("psr4-mini").await;
+    server.wait_for_index_ready().await;
+
+    server.write_file(
+        "src/Service/Widget.php",
+        "<?php\nnamespace App\\Service;\n\nclass Widget {}\n",
+    );
+    let uri = server.uri("src/Service/Widget.php");
+    server.did_change_watched_files(vec![(uri, 1)]).await;
+    server
+        .wait_until_symbol_present("Widget", std::time::Duration::from_secs(3))
+        .await;
+
+    server
+        .open("src/main.php", "<?php\nnamespace App;\nnew Widget();\n")
+        .await;
+
+    let resp = server.code_action("src/main.php", 2, 4, 2, 10).await;
+    let actions = resp["result"].as_array().cloned().unwrap_or_default();
+    let action = actions
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.starts_with("Add use"))
+                .unwrap_or(false)
+        })
+        .cloned();
+
+    assert!(
+        action.is_some(),
+        "expected 'Add use' quick-fix for a class indexed but not open in the editor, got: {resp:#}"
+    );
+    let a = action.unwrap();
+    let out = canonicalize_workspace_edit(&a["edit"], &server.uri(""));
+    expect![[r#"
+        // src/main.php
+        2:0-2:0 → "use App\\Service\\Widget;\n""#]]
+    .assert_eq(&out);
+}
+
+/// REGRESSION: mir reports `UndefinedClass` with the namespace-resolved
+/// attempt (e.g. `App\Widget` for a bare `Widget` reference inside
+/// `namespace App;`), not the bare token the developer wrote. The quick-fix
+/// must strip that prefix before looking the short name up in the workspace
+/// index, or it silently never fires for any namespaced consumer file.
+#[tokio::test]
+async fn code_action_quickfix_undefined_class_in_namespaced_file() {
+    let mut server = TestServer::new().await;
+    server
+        .open(
+            "Service/Widget.php",
+            "<?php\nnamespace App\\Service;\n\nclass Widget {}\n",
+        )
+        .await;
+    server
+        .open("main.php", "<?php\nnamespace App;\nnew Widget();\n")
+        .await;
+
+    let resp = server.code_action("main.php", 2, 4, 2, 10).await;
+    let actions = resp["result"].as_array().cloned().unwrap_or_default();
+    let action = actions
+        .iter()
+        .find(|a| {
+            a["title"]
+                .as_str()
+                .map(|t| t.starts_with("Add use"))
+                .unwrap_or(false)
+        })
+        .cloned();
+
+    assert!(
+        action.is_some(),
+        "expected 'Add use' quick-fix in a namespaced consumer file, got: {resp:#}"
+    );
+    let a = action.unwrap();
+    let out = canonicalize_workspace_edit(&a["edit"], &server.uri(""));
+    expect![[r#"
+        // main.php
+        2:0-2:0 → "use App\\Service\\Widget;\n""#]]
+    .assert_eq(&out);
+}

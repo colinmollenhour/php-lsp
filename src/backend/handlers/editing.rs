@@ -36,8 +36,6 @@ impl Backend {
             Some(d) => d,
             None => return Ok(None),
         };
-        let other_docs = self.docs.other_docs(uri, &self.open_urls());
-
         let diag_cfg = self.config.load().diagnostics.clone();
         let docs_sem = Arc::clone(&self.docs);
         let uri_sem = uri.clone();
@@ -57,6 +55,8 @@ impl Backend {
         .await
         .unwrap_or_default();
 
+        let all_indexes = self.docs.all_indexes();
+
         let mut actions: Vec<CodeActionOrCommand> = Vec::new();
         for diag in &sem_diags {
             if diag.code != Some(NumberOrString::String("UndefinedClass".to_string())) {
@@ -67,33 +67,34 @@ impl Backend {
             {
                 continue;
             }
-            let class_name = diag
+            let resolved_name = diag
                 .message
                 .strip_prefix("Class ")
                 .and_then(|s| s.strip_suffix(" does not exist"))
                 .unwrap_or("")
                 .trim();
-            if class_name.is_empty() {
+            if resolved_name.is_empty() {
                 continue;
             }
-            for (_other_uri, other_doc) in &other_docs {
-                if let Some(fqn) = find_fqn_for_class(other_doc, class_name) {
-                    let edit = build_use_import_edit(&source, uri, &fqn);
-                    let action = CodeAction {
-                        title: format!("Add use {fqn}"),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        edit: Some(edit),
-                        diagnostics: Some(vec![diag.clone()]),
-                        ..Default::default()
-                    };
-                    actions.push(CodeActionOrCommand::CodeAction(action));
-                    break;
-                }
+            // `resolved_name` is mir's namespace-resolved attempt (e.g. `App\Widget`
+            // for a bare `Widget` reference inside `namespace App;`), not the token
+            // the developer wrote — take the last segment to recover the short name
+            // the workspace index stores classes under.
+            let class_name = resolved_name.rsplit('\\').next().unwrap_or(resolved_name);
+            if let Some(fqn) = find_fqn_for_class(class_name, &all_indexes) {
+                let edit = build_use_import_edit(&source, uri, &fqn);
+                let action = CodeAction {
+                    title: format!("Add use {fqn}"),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    edit: Some(edit),
+                    diagnostics: Some(vec![diag.clone()]),
+                    ..Default::default()
+                };
+                actions.push(CodeActionOrCommand::CodeAction(action));
             }
         }
 
         // UndefinedFunction → use function FQN;
-        let all_indexes = self.docs.all_indexes();
         for diag in &sem_diags {
             if diag.code != Some(NumberOrString::String("UndefinedFunction".to_string())) {
                 continue;

@@ -2,36 +2,23 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
-use crate::document::ast::ParsedDoc;
 use crate::index::file_index::FileIndex;
 
-/// Find the fully-qualified name for a class with the given short `name` by
-/// walking the ParsedDoc AST. Returns `Namespace\ClassName` when inside a namespace.
-pub(crate) fn find_fqn_for_class(doc: &ParsedDoc, name: &str) -> Option<String> {
-    use php_ast::{NamespaceBody, StmtKind};
-    for stmt in doc.program().stmts.iter() {
-        match &stmt.kind {
-            StmtKind::Class(c)
-                if c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string()) =>
-            {
-                return Some(name.to_string());
+/// Find a class FQN matching `name` in the workspace indexes. Unlike
+/// `find_fqn_for_function`, a match is returned even when the class lives in
+/// the global namespace (`fqn` has no `\`): referencing a global-namespace
+/// class from inside a namespaced file still requires an explicit `use`,
+/// since (unlike functions/constants) unqualified class names never fall
+/// back to the global namespace.
+pub(crate) fn find_fqn_for_class(
+    name: &str,
+    indexes: &[(Url, std::sync::Arc<FileIndex>)],
+) -> Option<String> {
+    for (_uri, idx) in indexes {
+        for class in &idx.classes {
+            if class.name.as_ref() == name {
+                return Some(class.fqn.to_string());
             }
-            StmtKind::Namespace(ns) => {
-                let ns_name = ns.name.as_ref().map(|n| n.to_string_repr().to_string());
-                if let NamespaceBody::Braced(inner) = &ns.body {
-                    for inner_stmt in inner.stmts.iter() {
-                        if let StmtKind::Class(c) = &inner_stmt.kind
-                            && c.name.as_ref().map(|n| n.to_string()) == Some(name.to_string())
-                        {
-                            return Some(match ns_name {
-                                Some(ref ns) => format!("{ns}\\{name}"),
-                                None => name.to_string(),
-                            });
-                        }
-                    }
-                }
-            }
-            _ => {}
         }
     }
     None
