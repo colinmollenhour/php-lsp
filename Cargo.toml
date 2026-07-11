@@ -91,6 +91,10 @@ harness = false
 name = "republish_scaling"
 harness = false
 
+[[bench]]
+name = "start_time"
+harness = false
+
 # Faster local iteration: line-tables-only debuginfo keeps backtraces (file +
 # line) while cutting the debuginfo codegen + link time that dominates the
 # php-lsp test build.
