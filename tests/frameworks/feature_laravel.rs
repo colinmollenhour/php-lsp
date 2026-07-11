@@ -1146,11 +1146,10 @@ async fn laravel_diagnostics_update_on_did_change() {
 
 /// Opening `Eloquent/Model.php` produces no unexpected error diagnostics.
 ///
-/// **Gap**: Produces false-positive `UndefinedFunction` errors for `tap()` and
-/// `class_uses_recursive()` — these are autoload-file helpers declared in
-/// `composer.json`'s `autoload.files` section. The workspace scanner now
-/// discovers and pre-ingests these files into the mir session so they no
-/// longer produce false UndefinedFunction diagnostics.
+/// Regression guard: `tap()` and `class_uses_recursive()` are autoload-file
+/// helpers declared in composer.json's `autoload.files` section; the
+/// workspace scanner discovers and pre-ingests those files into the mir
+/// session so they don't produce false `UndefinedFunction` diagnostics.
 #[serial_test::serial]
 #[tokio::test]
 async fn laravel_diagnostics_no_noise_model() {
@@ -1183,7 +1182,7 @@ async fn laravel_diagnostics_no_noise_model() {
         .collect();
     assert!(
         undef_noise.is_empty(),
-        "expected no undefined-function/class noise in Eloquent/Model.php (autoload.files gap), got: {undef_noise:#?}"
+        "expected no undefined-function/class noise in Eloquent/Model.php, got: {undef_noise:#?}"
     );
 }
 
