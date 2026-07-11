@@ -114,6 +114,13 @@ class C {
     .await;
 }
 
+/// Two diagnostics fire on the same token here: the parser's own "positional
+/// after named" syntax error, plus mir's arg-count pass independently
+/// flagging the same positional argument as an unmatched named one — its
+/// message leaks the internal placeholder name `#2` (mir-analyzer
+/// `call/args/counts.rs`) rather than suppressing itself once the parse
+/// error already covers this argument. Upstream mir issue, not fixable from
+/// php-lsp's diagnostic wiring; this test pins current (imperfect) behavior.
 #[tokio::test]
 async fn positional_after_named_arg() {
     let mut s = TestServer::new().await;
