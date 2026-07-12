@@ -14,6 +14,7 @@ impl Backend {
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult> {
         let uri = &params.text_document.uri;
+        let previous_result_id = params.previous_result_id.clone();
         let parse_diags = self.get_parse_diagnostics(uri).unwrap_or_default();
         let _doc = match self.get_doc(uri) {
             Some(d) => d,
@@ -26,6 +27,17 @@ impl Backend {
                     .and_then(|(_, _, v)| *v)
                     .unwrap_or(1);
                 let result_id = compute_diagnostic_result_id(&parse_diags, uri.as_str());
+                if previous_result_id.as_deref() == Some(result_id.as_str()) {
+                    return Ok(DocumentDiagnosticReportResult::Report(
+                        DocumentDiagnosticReport::Unchanged(
+                            RelatedUnchangedDocumentDiagnosticReport {
+                                related_documents: None,
+                                unchanged_document_diagnostic_report:
+                                    UnchangedDocumentDiagnosticReport { result_id },
+                            },
+                        ),
+                    ));
+                }
                 return Ok(DocumentDiagnosticReportResult::Report(
                     DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
                         related_documents: None,
@@ -77,6 +89,17 @@ impl Backend {
             .and_then(|(_, _, v)| *v)
             .unwrap_or(1);
         let result_id = compute_diagnostic_result_id(&items, uri.as_str());
+
+        if previous_result_id.as_deref() == Some(result_id.as_str()) {
+            return Ok(DocumentDiagnosticReportResult::Report(
+                DocumentDiagnosticReport::Unchanged(RelatedUnchangedDocumentDiagnosticReport {
+                    related_documents: None,
+                    unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
+                        result_id,
+                    },
+                }),
+            ));
+        }
 
         Ok(DocumentDiagnosticReportResult::Report(
             DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {

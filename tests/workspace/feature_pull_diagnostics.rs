@@ -129,3 +129,89 @@ $x = 1;
     // Same content should produce same result_id for caching
     assert_eq!(id1, id2, "result_id should be stable for same content");
 }
+
+/// When the client's `previousResultId` matches the current content, the
+/// spec allows (and clients rely on) an `unchanged` report instead of
+/// resending the same diagnostics. `handle_workspace_diagnostic` already did
+/// this; `handle_diagnostic` (single-document pull) did not.
+#[tokio::test]
+async fn pull_diagnostics_unchanged_when_previous_result_id_matches() {
+    let mut s = TestServer::new().await;
+    let uri = s.uri("test.php");
+
+    s.open(
+        "test.php",
+        r#"<?php
+function foo() {
+    echo undefined_function();
+}
+"#,
+    )
+    .await;
+
+    let resp1 = s
+        .client()
+        .request(
+            "textDocument/diagnostic",
+            json!({
+                "textDocument": {"uri": uri.to_string()}
+            }),
+        )
+        .await;
+    assert_eq!(resp1["result"]["kind"], "full");
+    let result_id = resp1["result"]["resultId"].as_str().unwrap().to_owned();
+
+    let resp2 = s
+        .client()
+        .request(
+            "textDocument/diagnostic",
+            json!({
+                "textDocument": {"uri": uri.to_string()},
+                "previousResultId": result_id,
+            }),
+        )
+        .await;
+    assert_eq!(
+        resp2["result"]["kind"], "unchanged",
+        "expected an unchanged report when previousResultId matches: {resp2:?}"
+    );
+    assert_eq!(resp2["result"]["resultId"], result_id);
+    assert!(
+        resp2["result"]["items"].is_null(),
+        "an unchanged report must not carry an items array: {resp2:?}"
+    );
+}
+
+/// Contrast: a stale `previousResultId` (content changed since) must still
+/// get a full report, not an `unchanged` one.
+#[tokio::test]
+async fn pull_diagnostics_full_when_previous_result_id_stale() {
+    let mut s = TestServer::new().await;
+    let uri = s.uri("test.php");
+
+    s.open("test.php", "<?php\n$x = 1;\n").await;
+
+    s.client()
+        .notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": {"uri": uri.to_string(), "version": 2},
+                "contentChanges": [{"text": "<?php\nundefined_function();\n"}]
+            }),
+        )
+        .await;
+
+    let resp = s
+        .client()
+        .request(
+            "textDocument/diagnostic",
+            json!({
+                "textDocument": {"uri": uri.to_string()},
+                "previousResultId": "stale-id-from-before-the-edit",
+            }),
+        )
+        .await;
+    assert_eq!(resp["result"]["kind"], "full");
+    expect!["1:0-1:20 [1] UndefinedFunction: Function undefined_function() is not defined"]
+        .assert_eq(&render_pull_diagnostics(&resp));
+}
