@@ -408,24 +408,27 @@ class Svc {
     );
 }
 
+/// A throw in an unrelated sibling class's method must not leak into the
+/// cursor method's own @throws suggestion. PHP has no nested classes, so
+/// "boundary crossing" here means class-to-class, not method nesting.
 #[tokio::test]
-async fn add_throws_does_not_cross_nested_method_boundary() {
+async fn add_throws_does_not_leak_from_sibling_class() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
         .check_code_actions(
             r#"<?php
-class Outer {
+class Quiet {
     /** @return void */
-    public function $0outer$0(): void
+    public function $0method$0(): void
     {
-        // no throws at the outer level
+        // no throws here
     }
 }
-class Inner {
-    public function inner(): void
+class Noisy {
+    public function method(): void
     {
-        throw new RuntimeException("inner");
+        throw new RuntimeException("noisy");
     }
 }
 "#,

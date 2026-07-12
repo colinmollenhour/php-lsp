@@ -182,8 +182,12 @@ class E$0mpty$0 {
     expect!["<action not found: Generate constructor>"].assert_eq(&out);
 }
 
+/// Generated constructor params currently drop each property's own default
+/// value — `collect_constructor`'s `Prop` only tracks name/type, not the
+/// initializer. Pinning today's (defaults-dropping) behavior; if default
+/// propagation is ever added, this snapshot should gain `= 'John'`/`= 0`.
 #[tokio::test]
-async fn generate_constructor_with_property_defaults() {
+async fn generate_constructor_does_not_propagate_property_defaults() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
@@ -197,7 +201,6 @@ class U$0ser$0 {
             "Generate constructor",
         )
         .await;
-    // Constructor should include default values from property initialization
     expect![[r#"
         <?php
         class User {

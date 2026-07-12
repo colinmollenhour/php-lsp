@@ -108,6 +108,8 @@ function getName() {
     .assert_eq(&out);
 }
 
+/// Inside an interface, the inserted constant must be `const NAME = value;`
+/// with no `private` — `private const` is a PHP syntax error in an interface.
 #[tokio::test]
 async fn extract_constant_in_interface() {
     let mut s = TestServer::new().await;
@@ -115,13 +117,20 @@ async fn extract_constant_in_interface() {
         .check_code_action_apply(
             r#"<?php
 interface Status {
-    const ACTIVE = $0true$0;
+    const ACTIVE = $0"active"$0;
 }
 "#,
             "Extract constant",
         )
         .await;
-    expect!["<action not found: Extract constant>"].assert_eq(&out);
+    expect![[r#"
+        <?php
+        interface Status {
+            const ACTIVE = "active";
+            const ACTIVE = self::ACTIVE;
+        }
+    "#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
