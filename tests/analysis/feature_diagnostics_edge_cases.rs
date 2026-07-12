@@ -121,17 +121,10 @@ async fn regression_error_handling() {
 
     let resp = server.workspace_diagnostic().await;
 
-    // This should always succeed (no parse/semantic errors in clean file)
-    assert!(
-        resp["error"].is_null(),
-        "workspace_diagnostic request should not error for valid files"
-    );
-
-    // Check that response structure is valid
-    assert!(
-        resp["result"]["items"].is_array(),
-        "Response should contain items array"
-    );
+    expect![[r#"
+        test.php
+          <clean>"#]]
+    .assert_eq(&render_workspace_diagnostic(&resp, &server.uri("")));
 }
 
 /// REGRESSION: workspace/diagnostic must accept the `previousResultIds`
@@ -145,17 +138,10 @@ async fn regression_params_structure_accepted() {
     // Request workspace/diagnostic (which accepts WorkspaceDiagnosticParams)
     let resp = server.workspace_diagnostic().await;
 
-    // Should not error even though params include previousResultIds capability
-    assert!(
-        resp["error"].is_null(),
-        "workspace_diagnostic must accept params without error"
-    );
-
-    // Should return valid response structure
-    assert!(
-        resp["result"]["items"].is_array(),
-        "Should return items array"
-    );
+    expect![[r#"
+        param_test.php
+          <clean>"#]]
+    .assert_eq(&render_workspace_diagnostic(&resp, &server.uri("")));
 }
 
 /// REGRESSION: Files with parse errors must appear in workspace/diagnostic.
