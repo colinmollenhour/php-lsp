@@ -593,6 +593,11 @@ mod type_hierarchy {
     /// `BlogController extends AbstractController` — supertypes of BlogController
     /// must include AbstractController (a vendor class), verifying that the
     /// PSR-4 pre-load pass makes vendor parents visible in the workspace index.
+    /// The fixture has two distinct `BlogController` classes (`App\Controller`
+    /// and `App\Controller\Admin`), both extending `AbstractController`;
+    /// `classes_by_name` is keyed by short name only, so a lookup on the bare
+    /// name walks both classes' parent chains and must dedup the resulting
+    /// `AbstractController` entry rather than emit it twice.
     #[serial_test::serial]
     #[tokio::test]
     async fn supertypes_of_blog_controller_include_abstract_controller() {
@@ -616,8 +621,9 @@ mod type_hierarchy {
             .as_array()
             .map(|a| a.iter().filter_map(|i| i["name"].as_str()).collect())
             .unwrap_or_default();
-        // Supertypes must include AbstractController (vendor class via PSR-4 pre-load)
-        expect!["AbstractController, AbstractController"].assert_eq(&names.join(", "));
+        // Supertypes must include AbstractController (vendor class via PSR-4 pre-load),
+        // deduped despite two BlogController classes in the fixture sharing the short name.
+        expect!["AbstractController"].assert_eq(&names.join(", "));
     }
 
     /// `BlogController extends AbstractController` — subtypes of AbstractController

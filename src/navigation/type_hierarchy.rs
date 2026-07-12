@@ -70,6 +70,12 @@ pub fn supertypes_of_from_workspace(
     }
 
     let mut result = Vec::new();
+    // `wi.classes_by_name` is keyed by short name only, so distinct classes
+    // sharing a name (e.g. two `BlogController`s in different namespaces)
+    // each contribute their own `super_pairs` entries above; when both extend
+    // the same parent, that parent would otherwise be pushed twice. Dedup on
+    // FQN to collapse those repeats without narrowing which parents count.
+    let mut seen_fqns: HashSet<Box<str>> = HashSet::new();
     for (name, file_idx) in super_pairs {
         // Direct lookup: class is named exactly as written.
         let canonical = if wi.classes_by_name.contains_key(name.as_ref()) {
@@ -88,6 +94,7 @@ pub fn supertypes_of_from_workspace(
         };
         if let Some(refs) = wi.classes_by_name.get(&canonical_name)
             && let Some((uri, cls)) = refs.first().and_then(|r| wi.at(*r))
+            && seen_fqns.insert(cls.fqn.clone())
         {
             let kind = match cls.kind {
                 ClassKind::Class | ClassKind::Trait => SymbolKind::CLASS,
