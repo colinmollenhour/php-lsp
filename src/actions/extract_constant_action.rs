@@ -34,6 +34,16 @@ pub fn extract_constant_actions(source: &str, range: Range, uri: &Url) -> Vec<Co
     let lines: Vec<&str> = source.lines().collect();
     let sel_line = range.start.line as usize;
 
+    // Selecting the RHS of an existing `const NAME = <literal>;` would insert a
+    // second declaration of that name above it — a PHP fatal error ("Cannot
+    // redefine class constant"). Bail out rather than offer a broken action.
+    if lines
+        .get(sel_line)
+        .is_some_and(|line| is_const_declaration(line))
+    {
+        return vec![];
+    }
+
     match find_class_scope(&lines, sel_line) {
         Some((insert_line, kind)) => {
             let insert_pos = Position {
@@ -59,6 +69,15 @@ pub fn extract_constant_actions(source: &str, range: Range, uri: &Url) -> Vec<Co
             build_action("Extract constant", decl, insert_pos, const_name, range, uri)
         }
     }
+}
+
+fn is_const_declaration(line: &str) -> bool {
+    line.trim()
+        .trim_start_matches("public ")
+        .trim_start_matches("private ")
+        .trim_start_matches("protected ")
+        .trim_start_matches("final ")
+        .starts_with("const ")
 }
 
 fn is_literal(s: &str) -> bool {
