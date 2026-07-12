@@ -498,17 +498,11 @@ async fn declaration_change_in_one_file_does_not_break_sibling_hover() {
         .await;
 
     let hover_before = server.hover("sib_b.php", 1, 10).await;
-    assert!(
-        hover_before["error"].is_null(),
-        "hover on sib_b must succeed before sibling edit: {hover_before:?}"
-    );
-    assert!(
-        hover_before["result"]["contents"]["value"]
-            .as_str()
-            .unwrap_or("")
-            .contains("computeValue"),
-        "hover must show the function before sibling edit: {hover_before:?}"
-    );
+    expect![[r#"
+        ```php
+        function computeValue(int $x): int
+        ```"#]]
+    .assert_eq(&render_hover(&hover_before));
 
     // Edit sib_a.php — this is a declaration change that bumps decl_version
     // and would previously force a fresh to_owned_program() for sib_b.
@@ -517,15 +511,9 @@ async fn declaration_change_in_one_file_does_not_break_sibling_hover() {
         .await;
 
     let hover_after = server.hover("sib_b.php", 1, 10).await;
-    assert!(
-        hover_after["error"].is_null(),
-        "hover on sib_b must succeed after sibling declaration edit: {hover_after:?}"
-    );
-    assert!(
-        hover_after["result"]["contents"]["value"]
-            .as_str()
-            .unwrap_or("")
-            .contains("computeValue"),
-        "hover must still show the correct function after sibling edit: {hover_after:?}"
-    );
+    expect![[r#"
+        ```php
+        function computeValue(int $x): int
+        ```"#]]
+    .assert_eq(&render_hover(&hover_after));
 }
