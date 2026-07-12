@@ -17,8 +17,10 @@ async fn returns_lookup_with_full_payload_for_each_variable() {
     .assert_eq(&out);
 }
 
+/// Not actually an empty *range* — the fixture's default full-file range is
+/// used, and there simply are no variables in scope to report.
 #[tokio::test]
-async fn empty_range_yields_no_values() {
+async fn function_with_no_variables_yields_no_values() {
     let mut s = TestServer::new().await;
     let out = s
         .check_inline_value("<?php\nfunction f(): void {\n    // no vars\n}\n")
@@ -133,6 +135,31 @@ async fn range_end_character_excludes_later_columns() {
     let mut s = TestServer::new().await;
     let out = s
         .check_inline_value_at("<?php\n$x = 1; $y = 2;\n", (1, 0), (1, 6))
+        .await;
+    expect!["1:0-1:2 $x (case-sensitive)"].assert_eq(&out);
+}
+
+/// The range's start column (9) falls strictly inside `$y` (columns 8-10,
+/// between the `$` and the `y`). Straddling variables are dropped wholesale,
+/// not clipped to the portion inside the range — `$y`'s own start column
+/// still precedes the range's start.
+#[tokio::test]
+async fn variable_straddling_range_start_is_dropped_not_clipped() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inline_value_at("<?php\n$x = 1; $y = 2;\n", (1, 9), (1, 99))
+        .await;
+    expect!["<no inline values>"].assert_eq(&out);
+}
+
+/// The range's end column (9) falls strictly inside `$y` (columns 8-10).
+/// `$y`'s own end column still exceeds the range's end, so it's dropped
+/// wholesale rather than clipped.
+#[tokio::test]
+async fn variable_straddling_range_end_is_dropped_not_clipped() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_inline_value_at("<?php\n$x = 1; $y = 2;\n", (1, 0), (1, 9))
         .await;
     expect!["1:0-1:2 $x (case-sensitive)"].assert_eq(&out);
 }
