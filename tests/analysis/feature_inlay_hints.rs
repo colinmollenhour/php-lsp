@@ -1087,5 +1087,10 @@ async fn inlay_hints_empty_file_returns_array_not_null() {
     let mut s = TestServer::new().await;
     s.open("empty.php", "<?php\n$x = 1;\n").await;
     let resp = s.inlay_hints("empty.php", 0, 0, 3, 0).await;
+    assert!(
+        resp["result"].is_array(),
+        "expected [] not null, got: {}",
+        resp["result"]
+    );
     expect!["<no hints>"].assert_eq(&render_inlay_hints(&resp));
 }
