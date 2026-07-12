@@ -66,6 +66,15 @@ async fn completion_resolve_idempotent_when_resolved() {
     let out1 = render_resolved_completion_item(&resolved1);
     let out2 = render_resolved_completion_item(&resolved2);
     assert_eq!(out1, out2, "resolve should be idempotent");
+    expect![[r#"
+        strlen (Function)
+        detail: <no detail>
+        docs: ```php
+        function strlen()
+        ```
+
+        [php.net documentation](https://www.php.net/function.strlen)"#]]
+    .assert_eq(&out1);
 }
 
 /// Regression test for a confirmed bug: two unrelated classes declaring a
@@ -273,13 +282,19 @@ class Service {
         .map(|a| a.to_vec())
         .unwrap_or_default();
 
+    let mut results = Vec::new();
     for lens in lenses {
         let range_before = lens["range"].clone();
         let resolved = s.code_lens_resolve(lens.clone()).await;
         let range_after = resolved["result"]["range"].clone();
 
         assert_eq!(range_before, range_after, "resolve should not modify range");
+        results.push(render_resolved_code_lens(&resolved));
     }
+    expect![[r#"
+        L1:6 0 references [editor.action.showReferences]
+        L2:20 0 references [editor.action.showReferences]"#]]
+    .assert_eq(&results.join("\n"));
 }
 
 // ============================================================================
@@ -392,7 +407,8 @@ $0process("Alice", 30);$0
 async fn inlay_hint_resolve_idempotent() {
     let mut s = TestServer::new().await;
     let src = r#"<?php
-function $0getName(string $first, string $last): string {}
+function getName(string $first, string $last): string { return $first; }
+$0getName("Ada", "Lovelace");$0
 "#;
     let opened = s.open_fixture(src).await;
     let path = opened.fixture.files[0].path.clone();
@@ -414,6 +430,7 @@ function $0getName(string $first, string $last): string {}
         .map(|a| a.to_vec())
         .unwrap_or_default();
 
+    let mut snapshots = Vec::new();
     for hint in hints {
         let resolved1 = s.inlay_hint_resolve(hint.clone()).await;
         let resolved2 = s.inlay_hint_resolve(resolved1["result"].clone()).await;
@@ -422,7 +439,19 @@ function $0getName(string $first, string $last): string {}
         let out1 = render_resolved_inlay_hint(&resolved1);
         let out2 = render_resolved_inlay_hint(&resolved2);
         assert_eq!(out1, out2, "resolve should be idempotent");
+        snapshots.push(out1);
     }
+    expect![[r#"
+        2:8 first:
+        tooltip: ```php
+        function getName(string $first, string $last): string
+        ```
+        ---
+        2:15 last:
+        tooltip: ```php
+        function getName(string $first, string $last): string
+        ```"#]]
+    .assert_eq(&snapshots.join("\n---\n"));
 }
 
 // ============================================================================
@@ -479,12 +508,9 @@ function tested() {}
 
     assert!(!symbols.is_empty(), "should find symbols matching 'test'");
 
+    let mut results = Vec::new();
     for symbol in symbols.iter().take(5) {
         let resolved = s.workspace_symbol_resolve(symbol.clone()).await;
-        assert!(
-            resolved["error"].is_null(),
-            "all symbols should resolve: {symbol:?}"
-        );
         assert_eq!(
             symbol["name"], resolved["result"]["name"],
             "resolve should preserve name"
@@ -493,7 +519,13 @@ function tested() {}
             symbol["kind"], resolved["result"]["kind"],
             "resolve should preserve kind"
         );
+        results.push(render_resolved_workspace_symbol(&resolved, &s.uri("")));
     }
+    expect![[r#"
+        test (Function) @ main.php:1:0-1:0
+        testing (Function) @ main.php:2:0-2:0
+        tested (Function) @ main.php:3:0-3:0"#]]
+    .assert_eq(&results.join("\n"));
 }
 
 // ============================================================================
@@ -509,9 +541,5 @@ async fn resolve_handles_empty_items_gracefully() {
     let resolved = s.completion_resolve(empty_item).await;
     let out = render_resolved_completion_item(&resolved);
 
-    // Should either error or return unresolved, not panic
-    assert!(
-        out.contains("error:") || out.contains("?") || out.contains("<unresolved>"),
-        "should handle empty items gracefully"
-    );
+    expect![[r#"error: {"code":-32602,"message":"missing field `label`"}"#]].assert_eq(&out);
 }
