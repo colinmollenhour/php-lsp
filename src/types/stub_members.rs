@@ -21,9 +21,11 @@ pub fn stub_class_members(session: &AnalysisSession, fqcn: &str) -> Option<Class
             ..Default::default()
         };
         for (name, method) in class_like.own_methods() {
-            members
-                .methods
-                .push((name.to_string(), method.is_static, !method.params.is_empty()));
+            members.methods.push((
+                name.to_string(),
+                method.is_static,
+                !method.params.is_empty(),
+            ));
         }
         if let Some(props) = class_like.own_properties() {
             for (name, prop) in props {

@@ -86,8 +86,7 @@ async fn completion_resolve_scopes_to_owning_class_on_name_collision() {
         "<?php\nnamespace App\\Other;\nclass Target {\n    /** Not this one. */\n    public static function save(int $x): void {}\n}\n",
     )
     .unwrap();
-    let caller =
-        "<?php\nuse App\\Wanted\\Target;\n\nfunction f() {\n    Target::save();\n}\n";
+    let caller = "<?php\nuse App\\Wanted\\Target;\n\nfunction f() {\n    Target::save();\n}\n";
     std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
 
     let mut s = TestServer::with_root(tmp.path()).await;

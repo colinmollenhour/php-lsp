@@ -587,11 +587,8 @@ impl LanguageServer for Backend {
                 item.detail = Some(sig);
             }
             if item.documentation.is_none()
-                && let Some(md) = docs_for_symbol_from_index_scoped(
-                    name,
-                    &all_indexes,
-                    class_hint.as_deref(),
-                )
+                && let Some(md) =
+                    docs_for_symbol_from_index_scoped(name, &all_indexes, class_hint.as_deref())
             {
                 item.documentation = Some(Documentation::MarkupContent(MarkupContent {
                     kind: MarkupKind::Markdown,

@@ -250,7 +250,8 @@ pub(crate) fn format_prop_prefix(
 fn class_matches_hint(cls: &crate::index::file_index::ClassDef, class_hint: Option<&str>) -> bool {
     let Some(hint) = class_hint else { return true };
     let hint = hint.trim_start_matches('\\');
-    cls.fqn.trim_start_matches('\\').eq_ignore_ascii_case(hint) || cls.name.eq_ignore_ascii_case(hint)
+    cls.fqn.trim_start_matches('\\').eq_ignore_ascii_case(hint)
+        || cls.name.eq_ignore_ascii_case(hint)
 }
 
 pub fn signature_for_symbol_from_index(

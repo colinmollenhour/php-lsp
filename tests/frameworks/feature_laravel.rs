@@ -2673,17 +2673,7 @@ async fn laravel_inlay_hints_content() {
 
     let resp = s.inlay_hints("__test_inlay_hints.php", 0, 0, 3, 0).await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    // If hints are supported for parameter names, at least one label should appear.
-    // This test documents whether the feature produces content or is always silent.
-    let hints = resp["result"].as_array().unwrap_or(&vec![]).to_vec();
-    // Not asserting non-empty: parameter name hints may not be implemented yet.
-    // The test guards that the request completes and returns a valid (possibly empty) array.
-    assert!(
-        !resp["result"].is_null(),
-        "inlay hints should return an array (possibly empty), not null"
-    );
-    // Log hint count for observability.
-    let _ = hints.len();
+    expect!["2:11 value:"].assert_eq(&render_inlay_hints(&resp));
 }
 
 // ── Rename ────────────────────────────────────────────────────────────────────

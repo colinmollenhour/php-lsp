@@ -260,7 +260,8 @@ mod navigation {
         server.open(path, &text).await;
 
         let resp = server.definition(path, line, ch).await;
-        assert!(resp["error"].is_null());
+        let out = render_locations(&resp, &server.uri(""));
+        expect!["vendor/symfony/routing/Attribute/Route.php:18:6-18:11"].assert_eq(&out);
     }
 }
 
@@ -280,8 +281,9 @@ mod hover {
         server.open(path, &text).await;
 
         let resp = server.hover(path, line, ch).await;
-        assert!(resp["error"].is_null());
-        assert!(!resp["result"].is_null());
+        let out = render_hover(&resp);
+        expect![[r#"`use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;`"#]]
+            .assert_eq(&out);
     }
 
     #[tokio::test]
@@ -468,6 +470,8 @@ mod smoke {
         server.open(path, &text).await;
 
         let resp = server.definition(path, line, ch).await;
-        assert!(resp["error"].is_null());
+        let out = render_locations(&resp, &server.uri(""));
+        expect!["vendor/symfony/framework-bundle/Controller/AbstractController.php:56:15-56:33"]
+            .assert_eq(&out);
     }
 }
