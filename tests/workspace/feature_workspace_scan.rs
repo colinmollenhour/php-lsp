@@ -408,10 +408,11 @@ async fn max_indexed_files_cap_is_enforced() {
         }
     }
 
-    // Should not exceed maxIndexedFiles limit
-    assert!(
-        indexed_count <= 5,
-        "Indexed {} files but maxIndexedFiles=5, must index at most 5 files",
+    // Must index exactly the cap: not fewer (cap broken/too aggressive) and
+    // not more (cap not enforced).
+    assert_eq!(
+        indexed_count, 5,
+        "expected exactly 5 indexed files with maxIndexedFiles=5, got {}",
         indexed_count
     );
 }
@@ -453,10 +454,12 @@ async fn custom_max_indexed_files_via_init_options() {
         }
     }
 
-    // Should respect the custom limit
-    assert!(
-        indexed.len() <= 3,
-        "Expected at most 3 indexed files but got {} (files: {:?})",
+    // Must index exactly the custom cap: not fewer (cap too aggressive) and
+    // not more (cap not enforced).
+    assert_eq!(
+        indexed.len(),
+        3,
+        "expected exactly 3 indexed files with maxIndexedFiles=3, got {} (files: {:?})",
         indexed.len(),
         indexed
     );
@@ -784,13 +787,17 @@ async fn all_scanned_files_appear_in_workspace_index_after_index_ready() {
 
     server.wait_for_index_ready().await;
 
+    let mut results = Vec::new();
     for (_, name) in &classes {
-        let out = server.snapshot_workspace_symbols(name).await;
-        assert!(
-            out != "<no symbols>",
-            "class {name} should appear in workspace index after indexReady"
-        );
+        results.push(server.snapshot_workspace_symbols(name).await);
     }
+    expect![[r#"
+        Class       Alpha @ src/Alpha.php:3
+        Class       Beta @ src/Beta.php:3
+        Class       Gamma @ src/Gamma.php:3
+        Class       Delta @ src/Sub/Delta.php:3
+        Class       Epsilon @ src/Sub/Epsilon.php:3"#]]
+    .assert_eq(&results.join("\n"));
 }
 
 // ── workspace/symbol substring matching ──────────────────────────────────────
