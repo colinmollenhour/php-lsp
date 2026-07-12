@@ -376,9 +376,9 @@ async fn workspace_diagnostic_with_parse_error() {
 
     expect![[r#"
         ws_parse_error.php
-          1:12 expected variable, found '{' [<unset>] (error)
-          1:12 unclosed '')'' opened at Span { start: 16, end: 17 } [<unset>] (error)
-          2:0 unclosed ''}'' opened at Span { start: 18, end: 19 } [<unset>] (error)"#]]
+          1:12 expected variable, found '{' [SyntaxError] (error)
+          1:12 unclosed '')'' opened at 1:10 [SyntaxError] (error)
+          2:0 unclosed ''}'' opened at 1:12 [SyntaxError] (error)"#]]
     .assert_eq(&out);
 }
 

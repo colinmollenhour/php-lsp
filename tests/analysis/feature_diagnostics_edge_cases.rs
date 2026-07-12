@@ -108,9 +108,9 @@ async fn parse_error_emits_diagnostic() {
     let mut s = TestServer::new().await;
     let notif = s.open("bad.php", "<?php\nfunction f( {\n").await;
     expect![[r#"
-        1:12-1:13 [1] ?: expected variable, found '{'
-        1:12-1:13 [1] ?: unclosed '')'' opened at Span { start: 16, end: 17 }
-        2:0-2:1 [1] ?: unclosed ''}'' opened at Span { start: 18, end: 19 }"#]]
+        1:12-1:13 [1] SyntaxError: expected variable, found '{'
+        1:12-1:13 [1] SyntaxError: unclosed '')'' opened at 1:10
+        2:0-2:1 [1] SyntaxError: unclosed ''}'' opened at 1:12"#]]
     .assert_eq(&render_diagnostics_notification(&notif));
 }
 
@@ -157,9 +157,9 @@ async fn regression_parse_error_files_included() {
     let resp = server.workspace_diagnostic().await;
     expect![[r#"
         parse_only.php
-          1:17 expected variable, found '{' [<unset>] (error)
-          1:17 unclosed '')'' opened at Span { start: 21, end: 22 } [<unset>] (error)
-          2:0 unclosed ''}'' opened at Span { start: 23, end: 24 } [<unset>] (error)"#]]
+          1:17 expected variable, found '{' [SyntaxError] (error)
+          1:17 unclosed '')'' opened at 1:15 [SyntaxError] (error)
+          2:0 unclosed ''}'' opened at 1:17 [SyntaxError] (error)"#]]
     .assert_eq(&render_workspace_diagnostic(&resp, &server.uri("")));
 }
 
@@ -404,8 +404,8 @@ async fn requests_on_parse_error_file_do_not_error() {
         .open("broken.php", "<?php\nfunction f( $x { // missing ): body\n")
         .await;
     expect![[r#"
-        1:15-1:16 [1] ?: unclosed '')'' opened at Span { start: 16, end: 17 }
-        2:0-2:1 [1] ?: unclosed ''}'' opened at Span { start: 21, end: 22 }"#]]
+        1:15-1:16 [1] SyntaxError: unclosed '')'' opened at 1:10
+        2:0-2:1 [1] SyntaxError: unclosed ''}'' opened at 1:15"#]]
     .assert_eq(&render_diagnostics_notification(&notif));
 
     let resp = server.hover("broken.php", 1, 10).await;
@@ -671,8 +671,8 @@ async fn syntax_error_produces_error_diagnostic() {
     s.validate_syntax(false);
     let notif = s.open("syntax_err.php", "<?php\nclass {\n").await;
     expect![[r#"
-        1:6-1:7 [1] ?: expected class name, found '{'
-        2:0-2:1 [1] ?: expected '}', found end of file"#]]
+        1:6-1:7 [1] SyntaxError: expected class name, found '{'
+        2:0-2:1 [1] SyntaxError: expected '}', found end of file"#]]
     .assert_eq(&render_diagnostics_notification(&notif));
 }
 

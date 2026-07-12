@@ -27,8 +27,8 @@ class {
 
     let out = render_pull_diagnostics(&resp);
     expect![[r#"
-        1:6-1:7 [1] ?: expected class name, found '{'
-        2:0-2:1 [1] ?: expected '}', found end of file"#]]
+        1:6-1:7 [1] SyntaxError: expected class name, found '{'
+        2:0-2:1 [1] SyntaxError: expected '}', found end of file"#]]
     .assert_eq(&out);
 }
 

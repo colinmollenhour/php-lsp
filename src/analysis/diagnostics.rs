@@ -1,10 +1,32 @@
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use php_rs_parser::diagnostics::ParseError;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
-use crate::document::ast::ParsedDoc;
+use crate::document::ast::{ParsedDoc, SourceView};
 
 pub const PHP_LSP_SOURCE: &str = "php-lsp";
+
+/// Code for parse-error diagnostics; not "ParseError" since `mir_issues::IssueKind::ParseError` already claims that string.
+const PARSE_ERROR_CODE: &str = "SyntaxError";
+
+/// Renders embedded `Span`s as `line:col` instead of raw `Debug` byte offsets.
+fn parse_error_message(e: &ParseError, sv: SourceView<'_>) -> String {
+    match e {
+        ParseError::UnclosedDelimiter {
+            delimiter,
+            opened_at,
+            ..
+        } => {
+            let pos = sv.position_of(opened_at.start);
+            format!(
+                "unclosed {delimiter} opened at {}:{}",
+                pos.line, pos.character
+            )
+        }
+        _ => e.to_string(),
+    }
+}
 
 /// Parse `source` without converting parse errors into LSP `Diagnostic`s.
 ///
@@ -46,7 +68,8 @@ pub fn diagnostics_from_doc(doc: &ParsedDoc) -> Vec<Diagnostic> {
                 range: Range { start, end },
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some(PHP_LSP_SOURCE.to_string()),
-                message: e.to_string(),
+                code: Some(NumberOrString::String(PARSE_ERROR_CODE.to_string())),
+                message: parse_error_message(e, sv),
                 ..Default::default()
             }
         })
