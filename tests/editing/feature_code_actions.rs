@@ -70,8 +70,7 @@ class $0My$0 implements Writable {}
 "#,
         )
         .await;
-    expect!["quickfix         Implement missing method"]
-    .assert_eq(&out);
+    expect!["quickfix         Implement missing method"].assert_eq(&out);
 }
 
 // --- codeAction/resolve roundtrip tests ---

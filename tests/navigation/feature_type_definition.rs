@@ -233,8 +233,7 @@ $u$0->getName();
         .await;
 
     // Should resolve to User class from index (indexed version returns class keyword location)
-    expect!["src/Model/User.php:4:6-4:10"]
-    .assert_eq(&out);
+    expect!["src/Model/User.php:4:6-4:10"].assert_eq(&out);
 }
 
 /// Aliased type hints in `use X as Y` are resolved via `collect_file_imports`.
@@ -255,8 +254,7 @@ function create(UserModel $u$0): void {}
         .await;
 
     // Alias is resolved to the real FQN App\Model\User → finds the class in index
-    expect!["src/Model/User.php:4:6-4:10"]
-    .assert_eq(&out);
+    expect!["src/Model/User.php:4:6-4:10"].assert_eq(&out);
 }
 
 /// Unqualified type names in non-global namespaces are resolved with namespace context.
@@ -596,8 +594,7 @@ $u$0->greet();
         .await;
     // No explicit `use` — namespace App\Model qualifies User to App\Model\User,
     // which the index finds directly via FQN match.
-    expect!["src/Model/User.php:4:6-4:10"]
-    .assert_eq(&out);
+    expect!["src/Model/User.php:4:6-4:10"].assert_eq(&out);
 }
 
 /// Type definition for a `use`-aliased type resolves from a background-indexed file.
@@ -616,8 +613,7 @@ function greet(UserModel $u$0): void {}
         )
         .await;
     // Alias UserModel resolved to App\Model\User via imports; index finds it
-    expect!["src/Model/User.php:4:6-4:10"]
-    .assert_eq(&out);
+    expect!["src/Model/User.php:4:6-4:10"].assert_eq(&out);
 }
 
 /// Unqualified type hints resolve within the same namespace.
@@ -1091,8 +1087,7 @@ function test(\App\Model\User $u$0): void {}
         )
         .await;
     // Should resolve to App\Model\User from the index, not Other\User.
-    expect!["src/Model/User.php:4:6-4:10"]
-    .assert_eq(&out);
+    expect!["src/Model/User.php:4:6-4:10"].assert_eq(&out);
 }
 
 // ── Factory Method & Method Chaining ────────────────────────────────────

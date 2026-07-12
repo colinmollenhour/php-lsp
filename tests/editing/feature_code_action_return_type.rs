@@ -53,8 +53,7 @@ function $0getId$0(): int { return 42; }
 "#,
         )
         .await;
-    expect!["refactor         Generate PHPDoc"]
-    .assert_eq(&out);
+    expect!["refactor         Generate PHPDoc"].assert_eq(&out);
 }
 
 #[tokio::test]

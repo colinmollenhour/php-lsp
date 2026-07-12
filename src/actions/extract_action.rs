@@ -115,10 +115,7 @@ fn smallest_expr_span_containing(doc: &ParsedDoc, target: Span) -> Option<Span> 
         }
     }
 
-    let mut finder = Finder {
-        target,
-        best: None,
-    };
+    let mut finder = Finder { target, best: None };
     for stmt in doc.program().stmts.iter() {
         let _ = finder.visit_stmt(stmt);
     }

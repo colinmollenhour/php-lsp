@@ -11,7 +11,6 @@
 ///
 ///   # Full pipeline with heap profile:
 ///   cargo run --release --features dhat-heap --bin mem_index -- --full benches/fixtures/laravel/src
-
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
