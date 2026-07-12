@@ -111,14 +111,8 @@ async fn document_link_require_target_is_file_uri() {
         .open("req.php", "<?php\nrequire 'helpers/utils.php';\n")
         .await;
     let resp = server.document_link("req.php").await;
-    assert!(resp["error"].is_null(), "error: {resp:?}");
-    let links = resp["result"].as_array().expect("array");
-    assert_eq!(links.len(), 1);
-    let target = links[0]["target"].as_str().unwrap_or("");
-    assert!(
-        target.starts_with("file://") && target.contains("helpers/utils.php"),
-        "expected file:// URI with path, got: {target:?}"
-    );
+    expect!["1:9-26 target=file:///helpers/utils.php"]
+        .assert_eq(&render_document_links(&resp["result"]));
 }
 
 #[tokio::test]
@@ -326,16 +320,6 @@ async fn document_link_position_correct_after_multibyte_char() {
         )
         .await;
     let resp = server.document_link("mb.php").await;
-    assert!(resp["error"].is_null(), "error: {resp:?}");
-    let links = resp["result"].as_array().expect("expected link array");
-    assert_eq!(links.len(), 1, "expected exactly one link");
-    let range = &links[0]["range"];
-    let url = "https://example.com";
-    let start_col = range["start"]["character"].as_u64().unwrap();
-    let end_col = range["end"]["character"].as_u64().unwrap();
-    assert_eq!(
-        end_col - start_col,
-        url.len() as u64,
-        "link width must match URL length in UTF-16 units (ASCII URL, so same as char count)"
-    );
+    expect!["1:12-31 target=https://example.com/"]
+        .assert_eq(&render_document_links(&resp["result"]));
 }
