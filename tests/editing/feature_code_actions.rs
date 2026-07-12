@@ -21,8 +21,7 @@ class U$0ser$0 {
         .await;
     expect![[r#"
         refactor         Generate 2 getters/setters
-        refactor         Generate constructor
-        refactor.extract Extract variable [edit]"#]]
+        refactor         Generate constructor"#]]
     .assert_eq(&out);
 }
 
@@ -55,8 +54,7 @@ function $0noReturn$0() { return 42; }
         .await;
     expect![[r#"
         refactor         Add return type `: mixed`
-        refactor         Generate PHPDoc
-        refactor.extract Extract variable [edit]"#]]
+        refactor         Generate PHPDoc"#]]
     .assert_eq(&out);
 }
 
@@ -72,9 +70,7 @@ class $0My$0 implements Writable {}
 "#,
         )
         .await;
-    expect![[r#"
-        quickfix         Implement missing method
-        refactor.extract Extract variable [edit]"#]]
+    expect!["quickfix         Implement missing method"]
     .assert_eq(&out);
 }
 
@@ -561,8 +557,7 @@ $0class User {
     expect![[r#"
         refactor         Generate 2 getters/setters
         refactor         Generate PHPDoc
-        refactor         Promote 2 constructor parameters
-        refactor.extract Extract variable [edit]"#]]
+        refactor         Promote 2 constructor parameters"#]]
     .assert_eq(&out);
 }
 
@@ -661,8 +656,7 @@ $0class Foo {
     expect![[r#"
         refactor         Generate PHPDoc
         refactor         Generate getter/setter
-        refactor         Promote constructor parameter
-        refactor.extract Extract variable [edit]"#]]
+        refactor         Promote constructor parameter"#]]
     .assert_eq(&out);
 }
 

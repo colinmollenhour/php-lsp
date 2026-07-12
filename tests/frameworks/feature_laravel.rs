@@ -2593,8 +2593,7 @@ async fn laravel_code_actions_class_declaration() {
     expect![[r#"
         refactor         Generate 4 getters/setters
         refactor         Promote constructor parameter
-        refactor.extract Extract interface 'AuthManagerInterface' [edit]
-        refactor.extract Extract variable [edit]"#]]
+        refactor.extract Extract interface 'AuthManagerInterface' [edit]"#]]
     .assert_eq(&render_code_actions(&resp));
 }
 

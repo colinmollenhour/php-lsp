@@ -135,7 +135,7 @@ impl Backend {
             ));
         }
 
-        actions.extend(extract_variable_actions(&source, params.range, uri));
+        actions.extend(extract_variable_actions(&source, &doc, params.range, uri));
         actions.extend(extract_method_actions(&source, &doc, params.range, uri));
         actions.extend(extract_constant_actions(&source, params.range, uri));
         actions.extend(inline_variable_actions(&source, params.range, uri));

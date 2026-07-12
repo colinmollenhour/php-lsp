@@ -53,9 +53,7 @@ function $0getId$0(): int { return 42; }
 "#,
         )
         .await;
-    expect![[r#"
-        refactor         Generate PHPDoc
-        refactor.extract Extract variable [edit]"#]]
+    expect!["refactor         Generate PHPDoc"]
     .assert_eq(&out);
 }
 
@@ -136,8 +134,7 @@ class Foo {
     expect![[r#"
         refactor         Generate PHPDoc
         refactor         Make private [edit]
-        refactor         Make protected [edit]
-        refactor.extract Extract variable [edit]"#]]
+        refactor         Make protected [edit]"#]]
     .assert_eq(&out);
 }
 

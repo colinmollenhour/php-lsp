@@ -1,17 +1,25 @@
 /// Code action: "Extract variable" — wraps the selected expression in a `$extracted` variable.
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 
+use php_ast::{
+    Expr, Span,
+    visitor::{Visitor, walk_expr},
+};
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
+use crate::document::ast::ParsedDoc;
 use crate::text::selected_text_range;
 
-/// When the selection is non-empty and appears to be an expression, offer to
-/// extract it into a local variable.  The generated variable name is `$extracted`
-/// (a safe, unambiguous placeholder that the user can then rename with the LSP
-/// rename action).
-pub fn extract_variable_actions(source: &str, range: Range, uri: &Url) -> Vec<CodeActionOrCommand> {
+/// Offers to extract the selection into `$extracted` only when it is a real `Expr` node in `doc`'s AST — a bare class/function name or a whole class body isn't one, and wrapping it in a variable would produce invalid PHP.
+pub fn extract_variable_actions(
+    source: &str,
+    doc: &ParsedDoc,
+    range: Range,
+    uri: &Url,
+) -> Vec<CodeActionOrCommand> {
     if range.start == range.end {
         return vec![];
     }
@@ -26,6 +34,17 @@ pub fn extract_variable_actions(source: &str, range: Range, uri: &Url) -> Vec<Co
             .skip(1)
             .all(|c| c.is_alphanumeric() || c == '_')
     {
+        return vec![];
+    }
+
+    let sv = doc.view();
+    let leading_ws = (selected.len() - selected.trim_start().len()) as u32;
+    let trailing_ws = (selected.len() - selected.trim_end().len()) as u32;
+    let target = Span::new(
+        sv.byte_of_position(range.start) + leading_ws,
+        sv.byte_of_position(range.end) - trailing_ws,
+    );
+    if smallest_expr_span_containing(doc, target).is_none() {
         return vec![];
     }
 
@@ -74,4 +93,34 @@ fn line_indent(source: &str, line: u32) -> String {
         .nth(line as usize)
         .map(|l| l.chars().take_while(|c| c.is_whitespace()).collect())
         .unwrap_or_default()
+}
+
+/// Span of the smallest `Expr` node in `doc` that contains (or equals) `target`, or `None` if none does.
+fn smallest_expr_span_containing(doc: &ParsedDoc, target: Span) -> Option<Span> {
+    struct Finder {
+        target: Span,
+        best: Option<Span>,
+    }
+
+    impl<'arena, 'src> Visitor<'arena, 'src> for Finder {
+        fn visit_expr(&mut self, expr: &Expr<'arena, 'src>) -> ControlFlow<()> {
+            let span = expr.span;
+            if span.start <= self.target.start
+                && self.target.end <= span.end
+                && self.best.is_none_or(|best| span.len() < best.len())
+            {
+                self.best = Some(span);
+            }
+            walk_expr(self, expr)
+        }
+    }
+
+    let mut finder = Finder {
+        target,
+        best: None,
+    };
+    for stmt in doc.program().stmts.iter() {
+        let _ = finder.visit_stmt(stmt);
+    }
+    finder.best
 }
