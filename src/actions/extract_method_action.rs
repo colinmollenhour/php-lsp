@@ -30,10 +30,11 @@ pub fn extract_method_actions(
 
     let sv = doc.view();
     let stmts = &doc.program().stmts;
-    let (class_end_offset, method_is_static) = match find_enclosing_class(stmts, sv, range) {
-        Some(info) => info,
-        None => return vec![],
-    };
+    let (class_end_offset, method_is_static, enclosing_params) =
+        match find_enclosing_class(stmts, sv, range) {
+            Some(info) => info,
+            None => return vec![],
+        };
 
     let selected = selected_text_range(source, range);
     if selected.trim().is_empty() {
@@ -43,7 +44,16 @@ pub fn extract_method_actions(
     let before = text_before(source, range);
     let after = text_after(source, range);
 
-    let vars_before = collect_assigned_vars(&before);
+    // A variable is already bound before the selection either because it was
+    // assigned there, or because it's a parameter of the enclosing method —
+    // `collect_assigned_vars` only sees `$x = ...` text and has no notion of
+    // the method signature, so parameters must be added explicitly.
+    let mut vars_before = collect_assigned_vars(&before);
+    for p in &enclosing_params {
+        if !vars_before.contains(p) {
+            vars_before.push(p.clone());
+        }
+    }
     let vars_in_selection = collect_vars_in_text(&selected);
     let params: Vec<String> = vars_in_selection
         .iter()
@@ -128,13 +138,16 @@ pub fn extract_method_actions(
     })]
 }
 
-/// Returns `(class_span_end_offset, method_is_static)` when `range` is inside a
-/// class method body, walking into namespaced blocks as needed.
+/// Returns `(class_span_end_offset, method_is_static, enclosing_method_params)`
+/// when `range` is inside a class method body, walking into namespaced blocks
+/// as needed. `enclosing_method_params` holds the method's own parameter
+/// names (e.g. `"$name"`) — these are bound before the selection even though
+/// they're never assigned via `$x = ...`.
 fn find_enclosing_class(
     stmts: &[php_ast::Stmt<'_, '_>],
     sv: SourceView<'_>,
     range: Range,
-) -> Option<(u32, bool)> {
+) -> Option<(u32, bool, Vec<String>)> {
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Class(c) => {
@@ -148,7 +161,12 @@ fn find_enclosing_class(
                         let method_start = sv.position_of(member.span.start).line;
                         let method_end = sv.position_of(member.span.end).line;
                         if range.start.line >= method_start && range.end.line <= method_end {
-                            return Some((stmt.span.end, m.is_static));
+                            let params = m
+                                .params
+                                .iter()
+                                .map(|p| format!("${}", p.name))
+                                .collect();
+                            return Some((stmt.span.end, m.is_static, params));
                         }
                     }
                 }

@@ -277,6 +277,45 @@ class Foo {
     expect!["<action not found: Extract method>"].assert_eq(&out);
 }
 
+/// Regression test for a confirmed bug: a variable bound by the enclosing
+/// method's own parameter list (never assigned via `$x = ...` inside the
+/// method body) was invisible to the "vars bound before the selection"
+/// scan, so it was dropped from both the extracted method's signature and
+/// its call site — producing an undefined-variable error at runtime.
+#[tokio::test]
+async fn extract_method_uses_enclosing_method_parameter() {
+    let mut s = TestServer::new().await;
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class Greeter {
+    public function greet($name): void {
+        $0echo "Hello, ";
+        echo $name;$0
+    }
+}
+"#,
+            "Extract method",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        class Greeter {
+            public function greet($name): void {
+                        $this->extractedMethod($name);
+
+            }
+
+            private function extractedMethod(mixed $name): void
+            {
+                echo "Hello, ";
+                echo $name;
+            }
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
 #[tokio::test]
 async fn extract_method_no_action_outside_class() {
     let mut s = TestServer::new().await;
