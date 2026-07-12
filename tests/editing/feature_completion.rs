@@ -1946,20 +1946,8 @@ class Mailer {}
         .iter()
         .find(|i| i["label"].as_str() == Some("Mailer"))
         .expect("Mailer class not in completions");
-    let edits = mailer_item["additionalTextEdits"]
-        .as_array()
-        .expect("Mailer must have additionalTextEdits");
-    assert!(
-        !edits.is_empty(),
-        "must have edits for cross-namespace class"
-    );
-    let edit_text = edits[0]["newText"]
-        .as_str()
-        .expect("edit must have newText");
-    assert!(
-        edit_text.contains("use") && edit_text.contains("Mailer"),
-        "edit must contain use statement"
-    );
+    let out = render_text_edits(&json!({ "result": mailer_item["additionalTextEdits"] }));
+    expect![[r#"2:0-2:0 → "use Lib\\Mailer;\\n""#]].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -5308,20 +5296,8 @@ async fn completion_bare_class_name_from_unopened_file_adds_use_import() {
         http_item["detail"].as_str(),
         Some("Acme\\Support\\Facades\\Http")
     );
-    let edits = http_item["additionalTextEdits"]
-        .as_array()
-        .expect("Http must have additionalTextEdits");
-    assert!(
-        !edits.is_empty(),
-        "must have edits for cross-namespace class"
-    );
-    let edit_text = edits[0]["newText"]
-        .as_str()
-        .expect("edit must have newText");
-    assert!(
-        edit_text.contains("use") && edit_text.contains("Acme\\Support\\Facades\\Http"),
-        "edit must contain use statement for the FQN, got: {edit_text}"
-    );
+    let out = render_text_edits(&json!({ "result": http_item["additionalTextEdits"] }));
+    expect![[r#"1:0-1:0 → "use Acme\\Support\\Facades\\Http;\\n""#]].assert_eq(&out);
 }
 
 /// `vendor/` is excluded from the workspace scan by default (a deliberate
@@ -5397,10 +5373,8 @@ async fn completion_bare_class_name_vendor_dir_with_index_vendor_true() {
         http_item["detail"].as_str(),
         Some("Acme\\Support\\Facades\\Http")
     );
-    let edits = http_item["additionalTextEdits"]
-        .as_array()
-        .expect("must have additionalTextEdits");
-    assert!(!edits.is_empty());
+    let out = render_text_edits(&json!({ "result": http_item["additionalTextEdits"] }));
+    expect![[r#"1:0-1:0 → "use Acme\\Support\\Facades\\Http;\\n""#]].assert_eq(&out);
 }
 
 /// The current document's own class must not be offered as a spurious
