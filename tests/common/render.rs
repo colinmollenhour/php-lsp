@@ -961,14 +961,7 @@ pub fn render_call_hierarchy(resp: &Value, side: &str, root_uri: &str) -> String
 /// Decode LSP `semanticTokens/full` response and render each token.
 /// LSP encodes tokens as 5-integer sequences: `[deltaLine, deltaStart, length, tokenType, tokenModifiers]`.
 /// `legend_types` is the `legend.tokenTypes` array from the initialize response, mapping type indices to names.
-pub fn render_semantic_tokens(resp: &Value, legend_types: &[&str]) -> String {
-    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
-        return format!("error: {err}");
-    }
-    let data = resp["result"]["data"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+fn decode_semantic_token_ints(data: &[Value], legend_types: &[&str]) -> String {
     if data.is_empty() {
         return "<no tokens>".to_owned();
     }
@@ -989,6 +982,47 @@ pub fn render_semantic_tokens(resp: &Value, legend_types: &[&str]) -> String {
         ));
     }
     rows.join("\n")
+}
+
+pub fn render_semantic_tokens(resp: &Value, legend_types: &[&str]) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let data = resp["result"]["data"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    decode_semantic_token_ints(&data, legend_types)
+}
+
+/// Renders a `semanticTokens/full/delta` response: either a full re-send
+/// (`{resultId, data}`) or an incremental `{resultId, edits: [...]}`, where
+/// each edit's `data` is its own self-contained relative-encoded token run.
+pub fn render_semantic_tokens_delta(resp: &Value, legend_types: &[&str]) -> String {
+    if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+        return format!("error: {err}");
+    }
+    let result = &resp["result"];
+    if let Some(data) = result["data"].as_array() {
+        return format!("full:\n{}", decode_semantic_token_ints(data, legend_types));
+    }
+    if let Some(edits) = result["edits"].as_array() {
+        if edits.is_empty() {
+            return "<no edits>".to_owned();
+        }
+        let rows: Vec<String> = edits
+            .iter()
+            .map(|e| {
+                let start = e["start"].as_u64().unwrap_or(0);
+                let delete_count = e["deleteCount"].as_u64().unwrap_or(0);
+                let data = e["data"].as_array().cloned().unwrap_or_default();
+                let decoded = decode_semantic_token_ints(&data, legend_types);
+                format!("edit start={start} deleteCount={delete_count}\n{decoded}")
+            })
+            .collect();
+        return rows.join("\n");
+    }
+    "<no result>".to_owned()
 }
 
 // ---------- annotation-based assertion helpers ----------

@@ -75,7 +75,10 @@ async fn semantic_tokens_range_returns_data() {
 
 #[tokio::test]
 async fn semantic_tokens_full_delta_returns_result() {
-    let mut server = TestServer::new().await;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({})).await;
+    let legend_types = get_legend_types(&init_resp).await;
     server
         .open(
             "st_delta.php",
@@ -84,11 +87,6 @@ async fn semantic_tokens_full_delta_returns_result() {
         .await;
 
     let full = server.semantic_tokens_full("st_delta.php").await;
-    assert!(
-        full["error"].is_null(),
-        "semanticTokens/full error: {:?}",
-        full
-    );
     let result_id = full["result"]["resultId"]
         .as_str()
         .unwrap_or("")
@@ -102,15 +100,7 @@ async fn semantic_tokens_full_delta_returns_result() {
         .semantic_tokens_full_delta("st_delta.php", &result_id)
         .await;
 
-    assert!(resp["error"].is_null(), "delta error: {:?}", resp);
-
-    let result = &resp["result"];
-    let has_edits = result["edits"].is_array();
-    let has_data = result["data"].is_array();
-    assert!(
-        has_edits || has_data,
-        "delta result must have `edits` or `data` array, got: {result}"
-    );
+    expect!["<no edits>"].assert_eq(&render_semantic_tokens_delta(&resp, &legend_types));
 }
 
 /// Delta request with an unknown `previousResultId` must degrade gracefully
@@ -118,7 +108,10 @@ async fn semantic_tokens_full_delta_returns_result() {
 /// the client's baseline is stale / unknown (e.g. after a server restart).
 #[tokio::test]
 async fn semantic_tokens_delta_with_stale_previous_result_id_degrades_to_full() {
-    let mut server = TestServer::new().await;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({})).await;
+    let legend_types = get_legend_types(&init_resp).await;
     server
         .open(
             "st_stale.php",
@@ -130,22 +123,22 @@ async fn semantic_tokens_delta_with_stale_previous_result_id_degrades_to_full() 
         .semantic_tokens_full_delta("st_stale.php", "definitely-not-a-real-id")
         .await;
 
-    assert!(resp["error"].is_null(), "delta error: {resp:?}");
-    let result = &resp["result"];
-    assert!(!result.is_null(), "expected a result payload, got null");
-    let has_data = result["data"]
-        .as_array()
-        .map(|a| !a.is_empty())
-        .unwrap_or(false);
-    assert!(
-        has_data,
-        "stale resultId must degrade to full response with non-empty data, got: {result}"
-    );
+    expect![[r#"
+        full:
+        1:9 len=5 type=function mods=0b1
+        1:15 len=3 type=type mods=0b0
+        1:19 len=2 type=parameter mods=0b1
+        1:24 len=3 type=type mods=0b0
+        1:37 len=2 type=variable mods=0b0"#]]
+    .assert_eq(&render_semantic_tokens_delta(&resp, &legend_types));
 }
 
 #[tokio::test]
 async fn semantic_tokens_delta_without_baseline_degrades_to_full() {
-    let mut server = TestServer::new().await;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({})).await;
+    let legend_types = get_legend_types(&init_resp).await;
     server
         .open(
             "st_noprior.php",
@@ -157,17 +150,12 @@ async fn semantic_tokens_delta_without_baseline_degrades_to_full() {
         .semantic_tokens_full_delta("st_noprior.php", "0")
         .await;
 
-    assert!(resp["error"].is_null(), "delta error: {resp:?}");
-    let result = &resp["result"];
-    assert!(!result.is_null(), "expected a result, got null");
-    let has_data = result["data"]
-        .as_array()
-        .map(|a| !a.is_empty())
-        .unwrap_or(false);
-    assert!(
-        has_data,
-        "missing baseline must degrade to full response with non-empty data, got: {result}"
-    );
+    expect![[r#"
+        full:
+        1:9 len=10 type=function mods=0b1
+        1:23 len=3 type=type mods=0b0
+        1:36 len=1 type=number mods=0b0"#]]
+    .assert_eq(&render_semantic_tokens_delta(&resp, &legend_types));
 }
 
 /// After `didChange`, requesting delta with the pre-edit resultId must reflect
@@ -176,7 +164,10 @@ async fn semantic_tokens_delta_without_baseline_degrades_to_full() {
 /// an entire function.
 #[tokio::test]
 async fn semantic_tokens_delta_after_didchange_reflects_new_content() {
-    let mut server = TestServer::new().await;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({})).await;
+    let legend_types = get_legend_types(&init_resp).await;
     server
         .open("st_edit.php", "<?php\nfunction one(): int { return 1; }\n")
         .await;
@@ -186,10 +177,6 @@ async fn semantic_tokens_delta_after_didchange_reflects_new_content() {
         .as_str()
         .expect("resultId")
         .to_string();
-    let pre_data_len = full["result"]["data"]
-        .as_array()
-        .map(|a| a.len())
-        .unwrap_or(0);
 
     server
         .change(
@@ -202,32 +189,13 @@ async fn semantic_tokens_delta_after_didchange_reflects_new_content() {
     let resp = server
         .semantic_tokens_full_delta("st_edit.php", &pre_id)
         .await;
-    assert!(resp["error"].is_null(), "delta error: {resp:?}");
-    let result = &resp["result"];
 
-    let got_full = result["data"].is_array();
-    let got_edits = result["edits"].is_array();
-    assert!(
-        got_full || got_edits,
-        "post-edit delta must have `edits` or `data` array, got: {result}"
-    );
-
-    if got_full {
-        let post_len = result["data"].as_array().unwrap().len();
-        assert!(
-            post_len > pre_data_len,
-            "post-edit tokens ({post_len}) must exceed pre-edit tokens ({pre_data_len})"
-        );
-    } else {
-        let edits = result["edits"].as_array().unwrap();
-        let has_data = edits
-            .iter()
-            .any(|e| e["data"].as_array().map(|d| !d.is_empty()).unwrap_or(false));
-        assert!(
-            has_data,
-            "delta edits must carry new token data, got: {edits:?}"
-        );
-    }
+    expect![[r#"
+        edit start=15 deleteCount=0
+        1:9 len=3 type=function mods=0b1
+        1:16 len=3 type=type mods=0b0
+        1:29 len=1 type=number mods=0b0"#]]
+    .assert_eq(&render_semantic_tokens_delta(&resp, &legend_types));
 }
 
 /// Verify that semantic tokens can be decoded and contain specific token types.
@@ -1387,7 +1355,10 @@ async fn semantic_tokens_method_return_type() {
 /// Test delta encoding with line insertion: adding a new function creates delta edits.
 #[tokio::test]
 async fn semantic_tokens_delta_with_line_insertion() {
-    let mut server = TestServer::new().await;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({})).await;
+    let legend_types = get_legend_types(&init_resp).await;
     server
         .open(
             "st_insert.php",
@@ -1400,10 +1371,6 @@ async fn semantic_tokens_delta_with_line_insertion() {
         .as_str()
         .expect("resultId")
         .to_string();
-    let pre_count = full["result"]["data"]
-        .as_array()
-        .map(|a| a.len())
-        .unwrap_or(0);
 
     // Insert a new function before the existing one
     server
@@ -1417,36 +1384,21 @@ async fn semantic_tokens_delta_with_line_insertion() {
     let resp = server
         .semantic_tokens_full_delta("st_insert.php", &pre_id)
         .await;
-    assert!(resp["error"].is_null(), "delta error: {resp:?}");
-    let result = &resp["result"];
 
-    // Either edits or full data should be present
-    let has_edits = result["edits"].is_array();
-    let has_data = result["data"].is_array();
-    assert!(
-        has_edits || has_data,
-        "delta response must have edits or data: {result:?}"
-    );
-
-    // Post-edit should have more tokens than pre-edit
-    if let Some(post_data) = result["data"].as_array() {
-        assert!(
-            post_data.len() > pre_count,
-            "insertion should increase token count"
-        );
-    } else if let Some(edits) = result["edits"].as_array() {
-        // If using edits, there must be data to insert
-        let has_insert_data = edits
-            .iter()
-            .any(|e| e["data"].as_array().map(|d| !d.is_empty()).unwrap_or(false));
-        assert!(has_insert_data, "insertion delta must include token data");
-    }
+    expect![[r#"
+        edit start=0 deleteCount=0
+        1:9 len=4 type=function mods=0b1
+        1:17 len=4 type=type mods=0b0"#]]
+    .assert_eq(&render_semantic_tokens_delta(&resp, &legend_types));
 }
 
 /// Test delta encoding with line deletion: removing a function creates delta edits.
 #[tokio::test]
 async fn semantic_tokens_delta_with_line_deletion() {
-    let mut server = TestServer::new().await;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({})).await;
+    let legend_types = get_legend_types(&init_resp).await;
     server
         .open(
             "st_delete.php",
@@ -1459,10 +1411,6 @@ async fn semantic_tokens_delta_with_line_deletion() {
         .as_str()
         .expect("resultId")
         .to_string();
-    let pre_count = full["result"]["data"]
-        .as_array()
-        .map(|a| a.len())
-        .unwrap_or(0);
 
     // Remove the second function
     server
@@ -1476,31 +1424,20 @@ async fn semantic_tokens_delta_with_line_deletion() {
     let resp = server
         .semantic_tokens_full_delta("st_delete.php", &pre_id)
         .await;
-    assert!(resp["error"].is_null(), "delta error: {resp:?}");
-    let result = &resp["result"];
 
-    // Either edits or full data should be present
-    let has_edits = result["edits"].is_array();
-    let has_data = result["data"].is_array();
-    assert!(
-        has_edits || has_data,
-        "delta response must have edits or data"
-    );
-
-    // Post-edit should have fewer tokens
-    if let Some(post_data) = result["data"].as_array() {
-        assert!(
-            post_data.len() < pre_count,
-            "deletion should decrease token count from {pre_count} to {}",
-            post_data.len()
-        );
-    }
+    expect![[r#"
+        edit start=15 deleteCount=15
+        <no tokens>"#]]
+    .assert_eq(&render_semantic_tokens_delta(&resp, &legend_types));
 }
 
 /// Test delta encoding with token modification: changing return type updates delta.
 #[tokio::test]
 async fn semantic_tokens_delta_with_token_modification() {
-    let mut server = TestServer::new().await;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({})).await;
+    let legend_types = get_legend_types(&init_resp).await;
     server
         .open(
             "st_modify.php",
@@ -1526,22 +1463,21 @@ async fn semantic_tokens_delta_with_token_modification() {
     let resp = server
         .semantic_tokens_full_delta("st_modify.php", &pre_id)
         .await;
-    assert!(resp["error"].is_null(), "delta error: {resp:?}");
-    let result = &resp["result"];
 
-    // Should produce delta edits or full response (token count stays same)
-    let has_edits = result["edits"].is_array();
-    let has_data = result["data"].is_array();
-    assert!(
-        has_edits || has_data,
-        "modification should produce delta changes"
-    );
+    expect![[r#"
+        edit start=5 deleteCount=10
+        0:12 len=6 type=type mods=0b0
+        0:28 len=4 type=string mods=0b0"#]]
+    .assert_eq(&render_semantic_tokens_delta(&resp, &legend_types));
 }
 
 /// Test incremental delta application: multiple sequential edits maintain correctness.
 #[tokio::test]
 async fn semantic_tokens_delta_incremental_accumulation() {
-    let mut server = TestServer::new().await;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({})).await;
+    let legend_types = get_legend_types(&init_resp).await;
     server.open("st_incr.php", "<?php\nfunction a() {}\n").await;
 
     let full1 = server.semantic_tokens_full("st_incr.php").await;
@@ -1559,7 +1495,10 @@ async fn semantic_tokens_delta_incremental_accumulation() {
         )
         .await;
     let resp1 = server.semantic_tokens_full_delta("st_incr.php", &id1).await;
-    assert!(resp1["error"].is_null(), "first delta error");
+    expect![[r#"
+        edit start=5 deleteCount=0
+        1:9 len=1 type=function mods=0b1"#]]
+    .assert_eq(&render_semantic_tokens_delta(&resp1, &legend_types));
 
     let full2 = server.semantic_tokens_full("st_incr.php").await;
     let id2 = full2["result"]["resultId"]
@@ -1576,20 +1515,27 @@ async fn semantic_tokens_delta_incremental_accumulation() {
         )
         .await;
     let resp2 = server.semantic_tokens_full_delta("st_incr.php", &id2).await;
-    assert!(resp2["error"].is_null(), "second delta error");
+    expect![[r#"
+        edit start=10 deleteCount=0
+        1:9 len=1 type=function mods=0b1"#]]
+    .assert_eq(&render_semantic_tokens_delta(&resp2, &legend_types));
 
-    // Both deltas should succeed without errors
+    // Both deltas apply on top of a consistent final full snapshot.
     let final_full = server.semantic_tokens_full("st_incr.php").await;
-    assert!(
-        final_full["result"]["data"].is_array(),
-        "final full response should have data"
-    );
+    expect![[r#"
+        1:9 len=1 type=function mods=0b1
+        2:9 len=1 type=function mods=0b1
+        3:9 len=1 type=function mods=0b1"#]]
+    .assert_eq(&render_semantic_tokens(&final_full, &legend_types));
 }
 
 /// Test delta degradation on large file changes: ensure graceful handling of extensive edits.
 #[tokio::test]
 async fn semantic_tokens_delta_large_file_changes() {
-    let mut server = TestServer::new().await;
+    use serde_json::json;
+
+    let (mut server, init_resp) = TestServer::new_with_options(json!({})).await;
+    let legend_types = get_legend_types(&init_resp).await;
 
     // Start with a moderately sized file
     let initial = "<?php\n".to_string()
@@ -1604,10 +1550,6 @@ async fn semantic_tokens_delta_large_file_changes() {
         .as_str()
         .expect("resultId")
         .to_string();
-    let _pre_count = full["result"]["data"]
-        .as_array()
-        .map(|a| a.len())
-        .unwrap_or(0);
 
     // Replace all content with a different set of functions
     let modified = "<?php\n".to_string()
@@ -1620,12 +1562,20 @@ async fn semantic_tokens_delta_large_file_changes() {
     let resp = server
         .semantic_tokens_full_delta("st_large.php", &pre_id)
         .await;
-    assert!(resp["error"].is_null(), "delta error on large file");
-    let result = &resp["result"];
 
-    // Should handle large changes gracefully (might degrade to full)
-    let has_result = result["data"].is_array() || result["edits"].is_array();
-    assert!(has_result, "large file delta should return result");
+    expect![[r#"
+        edit start=0 deleteCount=50
+        1:9 len=4 type=function mods=0b1
+        2:9 len=4 type=function mods=0b1
+        3:9 len=4 type=function mods=0b1
+        4:9 len=4 type=function mods=0b1
+        5:9 len=4 type=function mods=0b1
+        6:9 len=4 type=function mods=0b1
+        7:9 len=4 type=function mods=0b1
+        8:9 len=4 type=function mods=0b1
+        9:9 len=4 type=function mods=0b1
+        10:9 len=4 type=function mods=0b1"#]]
+    .assert_eq(&render_semantic_tokens_delta(&resp, &legend_types));
 }
 
 /// `é` (U+00E9) is 2 UTF-8 bytes but 1 UTF-16 code unit.
