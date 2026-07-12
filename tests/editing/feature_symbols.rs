@@ -304,18 +304,20 @@ async fn symbols_range_start_lte_selection_range_start() {
 async fn symbols_partial_ast_on_parse_error_returns_valid_symbols() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let out = s
-        .check_document_symbols(
-            r#"<?php
+    s.open(
+        "test.php",
+        r#"<?php
 function valid() {}
 class {
 "#,
-        )
-        .await;
+    )
+    .await;
+    let resp = s.document_symbols("test.php").await;
+    assert_document_symbol_containment(&resp);
     expect![[r#"
         Function valid @L1
-        Class <error> @L0"#]]
-    .assert_eq(&out);
+        Class <error> @L2"#]]
+    .assert_eq(&render_document_symbols(&resp));
 }
 
 /// The function symbol's `range.start.line` must be the line where the

@@ -62,11 +62,11 @@ mod symbols {
         // Must include class BlogController and its index method.
         expect![[r#"
             Class BlogController @L39
-              Method index @L47
+              Method index @L51
               Method postShow @L80
               Method commentNew @L107
               Method commentForm @L150
-              Method search @L160"#]]
+              Method search @L161"#]]
         .assert_eq(&out);
     }
 }
@@ -395,7 +395,7 @@ mod call_hierarchy {
         let resp = server.incoming_calls(item).await;
         assert!(resp["error"].is_null());
         let out = render_call_hierarchy(&resp, "from", &server.uri(""));
-        expect!["index @ src/Controller/BlogController.php:47:29 fromRanges=[59:31-59:41]"]
+        expect!["index @ src/Controller/BlogController.php:51:20 fromRanges=[59:31-59:41]"]
             .assert_eq(&out);
     }
 }

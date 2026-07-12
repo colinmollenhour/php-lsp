@@ -264,19 +264,51 @@ impl<'a> SourceView<'a> {
     /// docblock comments / other declarations — a global search would
     /// otherwise point at the first textual occurrence, not the AST node
     /// the caller actually meant.
+    ///
+    /// When `name` cannot be located anywhere (e.g. a synthetic `Ident::ERROR`
+    /// placeholder such as `"<error>"`, which never occurs in real source),
+    /// falls back to an empty range at `span.start` — guaranteed to be
+    /// contained in the caller's `span`, unlike byte offset 0.
     pub fn name_range_in_span(self, name: &str, span: php_ast::Span) -> Range {
         let s = span.start as usize;
         let e = (span.end as usize).min(self.source.len());
-        let start = self
+        let found = self
             .source
             .get(s..e)
             .and_then(|slice| slice.find(name))
             .map(|off| span.start + off as u32)
-            .unwrap_or_else(|| str_offset(self.source, name).unwrap_or(0));
-        Range {
-            start: self.position_of(start),
-            end: self.position_of(start + name.len() as u32),
+            .or_else(|| str_offset(self.source, name));
+        match found {
+            Some(start) => Range {
+                start: self.position_of(start),
+                end: self.position_of(start + name.len() as u32),
+            },
+            None => {
+                let pos = self.position_of(span.start);
+                Range {
+                    start: pos,
+                    end: pos,
+                }
+            }
         }
+    }
+
+    /// Like [`name_range_in_span`], but excludes any leading `#[...]` attribute
+    /// groups from the search span first.
+    ///
+    /// php-rs-parser captures a member's span starting at its first attribute
+    /// token, not at the declaration keyword/name — so searching the raw span
+    /// can match `name` as a substring inside an attribute argument (e.g. a
+    /// method named `index` matching `'blog_index'` in `#[Route(name: 'blog_index')]`)
+    /// instead of the actual identifier.
+    pub fn name_range_after_attrs(
+        self,
+        name: &str,
+        attributes: &[php_ast::Attribute<'_, '_>],
+        span: php_ast::Span,
+    ) -> Range {
+        let start = attributes.last().map(|a| a.span.end).unwrap_or(span.start);
+        self.name_range_in_span(name, php_ast::Span::new(start, span.end))
     }
 }
 
