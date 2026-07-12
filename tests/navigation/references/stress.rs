@@ -13,6 +13,7 @@
 //! the text pre-filter admits every file as a candidate.
 
 use super::*;
+use expect_test::expect;
 
 /// Line/utf-16-col of the first occurrence of `needle` in `text`.
 fn pos_of(text: &str, needle: &str) -> (u32, u32) {
@@ -29,15 +30,6 @@ fn target_text() -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/references_stress/src/Target.php");
     std::fs::read_to_string(path).expect("read Target.php fixture")
-}
-
-fn location_uris(resp: &serde_json::Value) -> Vec<String> {
-    resp["result"]
-        .as_array()
-        .expect("references returns a result array")
-        .iter()
-        .map(|loc| loc["uri"].as_str().unwrap().to_string())
-        .collect()
 }
 
 #[tokio::test]
@@ -57,15 +49,8 @@ async fn references_public_method_does_not_parse_candidate_files() {
     let resp = s.references("src/Target.php", line, col, true).await;
     let after = s.debug_stats_parses().await;
 
-    let uris = location_uris(&resp);
-    assert!(
-        uris.iter().all(|u| u.ends_with("Target.php")),
-        "public method refs must resolve to the declaring class only, got {uris:?}"
-    );
-    assert!(
-        !uris.is_empty(),
-        "expected at least the declaration + the in-class call"
-    );
+    expect!["src/Target.php:11:20-11:27\nsrc/Target.php:13:41-13:48"]
+        .assert_eq(&render_locations(&resp, &s.uri("")));
     assert!(
         after - before <= 2,
         "references parsed {} candidate docs; the method path must not parse \
@@ -90,30 +75,18 @@ async fn references_protected_method_narrowed_to_hierarchy_stays_complete() {
     let (line, col) = pos_of(&text, "boot");
 
     let resp = s.references("src/Base.php", line, col, true).await;
-    let uris = location_uris(&resp);
 
-    assert!(
-        uris.iter().any(|u| u.ends_with("Base.php")),
-        "must keep the declaring-file references, got {uris:?}"
-    );
-    assert!(
-        uris.iter().any(|u| u.ends_with("Child.php")),
-        "subclass call must be found — narrowing must include subtype files, got {uris:?}"
-    );
-    assert!(
-        !uris.iter().any(|u| u.ends_with("Stranger.php")),
-        "an unrelated class's same-named protected method must not be reported, got {uris:?}"
-    );
-    assert!(
-        uris.iter().any(|u| u.ends_with("Grandchild.php")),
-        "subclass extending via FQN (`\\App\\Base`) must still be found — narrowing \
-         must not under-report on qualified extends, got {uris:?}"
-    );
-    assert!(
-        uris.iter().any(|u| u.ends_with("Aliased.php")),
-        "subclass extending via a `use ... as` alias must still be found — narrowing \
-         must not under-report on aliased extends, got {uris:?}"
-    );
+    // Exact 5-location set: declaring file (decl + in-class call) plus each
+    // subtype file's call — via plain extends, FQN extends, and an aliased
+    // extends. A stray `Stranger.php` entry (unrelated same-named method) or
+    // a dropped/duplicated subtype hit would show up as a wrong line here.
+    expect![[r#"
+        src/Aliased.php:10:15-10:19
+        src/Base.php:12:15-12:19
+        src/Base.php:6:23-6:27
+        src/Child.php:8:15-8:19
+        src/Grandchild.php:8:15-8:19"#]]
+    .assert_eq(&render_locations(&resp, &s.uri("")));
 }
 
 #[tokio::test]
@@ -141,10 +114,8 @@ async fn edits_and_reads_never_lock_the_reference_index() {
         .await;
     // Read path: references over the full candidate set.
     let resp = s.references("src/Target.php", line, col, true).await;
-    assert!(
-        !location_uris(&resp).is_empty(),
-        "references must still answer while the index is unmaintained"
-    );
+    expect!["src/Target.php:11:20-11:27\nsrc/Target.php:13:41-13:48"]
+        .assert_eq(&render_locations(&resp, &s.uri("")));
 
     let after = s.debug_stats_ref_index_locks().await;
     assert_eq!(
@@ -171,11 +142,8 @@ async fn references_private_method_does_not_parse_candidate_files() {
     let resp = s.references("src/Target.php", line, col, true).await;
     let after = s.debug_stats_parses().await;
 
-    let uris = location_uris(&resp);
-    assert!(
-        uris.iter().all(|u| u.ends_with("Target.php")),
-        "private method refs must stay in the declaring file, got {uris:?}"
-    );
+    expect!["src/Target.php:13:22-13:29\nsrc/Target.php:6:21-6:28"]
+        .assert_eq(&render_locations(&resp, &s.uri("")));
     assert!(
         after - before <= 2,
         "private references parsed {} candidate docs; narrowing must precede \
