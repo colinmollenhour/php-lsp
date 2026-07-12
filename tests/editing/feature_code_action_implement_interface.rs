@@ -31,6 +31,37 @@ class $0App$0 implements Logger {}
     .assert_eq(&out);
 }
 
+/// "Implement missing method" is the only quickfix for an unimplemented
+/// interface — there's no competing fix a user might prefer instead — so it
+/// should be marked `isPreferred` for editors that auto-apply the preferred
+/// quickfix on a keybinding (e.g. VS Code's Cmd+.).
+#[tokio::test]
+async fn implement_interface_action_is_marked_preferred() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+interface Logger { public function log(string $msg): void; }
+class $0App$0 implements Logger {}
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let resp = s
+        .code_action(&c.path, c.line, c.character, c.line, c.character)
+        .await;
+    let action = resp["result"]
+        .as_array()
+        .and_then(|actions| {
+            actions
+                .iter()
+                .find(|a| a["title"].as_str() == Some("Implement missing method"))
+        })
+        .expect("Implement missing method action not found");
+    assert_eq!(action["isPreferred"], true);
+}
+
 #[tokio::test]
 async fn implement_multiple_interface_methods() {
     let mut s = TestServer::new().await;

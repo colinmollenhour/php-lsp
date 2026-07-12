@@ -139,6 +139,11 @@ fn collect_actions(
                 out.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title,
                     kind: Some(CodeActionKind::QUICKFIX),
+                    // The only way to satisfy an interface's abstract methods
+                    // is to implement them — there's no competing quickfix
+                    // for this diagnostic, so editors can safely offer this
+                    // as the auto-apply default (e.g. VS Code's Cmd+.).
+                    is_preferred: Some(true),
                     edit: Some(WorkspaceEdit {
                         changes: Some(changes),
                         ..Default::default()
