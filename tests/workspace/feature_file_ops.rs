@@ -61,6 +61,47 @@ async fn will_delete_files_outside_psr4_returns_null() {
     );
 }
 
+#[tokio::test]
+async fn will_rename_files_rewrites_use_statements_in_dependents() {
+    let mut server = TestServer::with_fixture("psr4-mini").await;
+    server.wait_for_index_ready().await;
+
+    let old_uri = server.uri("src/Model/User.php");
+    let new_uri = server.uri("src/Model/Account.php");
+    let resp = server.will_rename_files(vec![(old_uri, new_uri)]).await;
+
+    assert!(resp["error"].is_null(), "willRenameFiles error: {resp:?}");
+    let root = server.uri("");
+    let snap = canonicalize_workspace_edit(&resp["result"], &root);
+    expect![[r#"
+        // src/Service/Greeter.php
+        4:4-4:18 → "App\\Model\\Account"
+
+        // src/Service/Registry.php
+        4:4-4:18 → "App\\Model\\Account""#]]
+    .assert_eq(&snap);
+}
+
+#[tokio::test]
+async fn will_delete_files_removes_use_statements_in_dependents() {
+    let mut server = TestServer::with_fixture("psr4-mini").await;
+    server.wait_for_index_ready().await;
+
+    let uri = server.uri("src/Model/User.php");
+    let resp = server.will_delete_files(vec![uri]).await;
+
+    assert!(resp["error"].is_null(), "willDeleteFiles error: {resp:?}");
+    let root = server.uri("");
+    let snap = canonicalize_workspace_edit(&resp["result"], &root);
+    expect![[r#"
+        // src/Service/Greeter.php
+        4:0-5:0 → ""
+
+        // src/Service/Registry.php
+        4:0-5:0 → """#]]
+    .assert_eq(&snap);
+}
+
 // ── PSR-4-aware stub generation (psr4-mini fixture) ─────────────────────────
 
 #[tokio::test]
