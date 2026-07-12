@@ -201,14 +201,8 @@ async fn apply_edit_advertised_in_capabilities() {
     // The capability should be advertised - verify via initialize response
     let (_, init_resp) = TestServer::new_with_options(json!({})).await;
 
-    let capabilities = &init_resp["result"]["capabilities"];
-
-    // workspace/applyEdit is advertised implicitly - it's a standard LSP feature
-    // The server should have workspace capabilities
-    assert!(
-        capabilities.get("workspace").is_some(),
-        "should have workspace capabilities"
-    );
+    let workspace = &init_resp["result"]["capabilities"]["workspace"];
+    expect![[r#"{"fileOperations":{"didCreate":{"filters":[{"pattern":{"glob":"**/*.php","matches":"file"},"scheme":"file"}]},"didDelete":{"filters":[{"pattern":{"glob":"**/*.php","matches":"file"},"scheme":"file"}]},"didRename":{"filters":[{"pattern":{"glob":"**/*.php","matches":"file"},"scheme":"file"}]},"willCreate":{"filters":[{"pattern":{"glob":"**/*.php","matches":"file"},"scheme":"file"}]},"willDelete":{"filters":[{"pattern":{"glob":"**/*.php","matches":"file"},"scheme":"file"}]},"willRename":{"filters":[{"pattern":{"glob":"**/*.php","matches":"file"},"scheme":"file"}]}},"workspaceFolders":{"changeNotifications":true,"supported":true}}"#]].assert_eq(&workspace.to_string());
 }
 
 // ============================================================================
@@ -218,23 +212,9 @@ async fn apply_edit_advertised_in_capabilities() {
 #[tokio::test]
 async fn diagnostic_provider_advertised_in_capabilities() {
     let (_, init_resp) = TestServer::new_with_options(json!({})).await;
-    let capabilities = &init_resp["result"]["capabilities"];
-
-    // Check that diagnostic provider is advertised
-    assert!(
-        capabilities.get("diagnosticProvider").is_some(),
-        "should advertise diagnosticProvider capability"
-    );
-
-    let diag_provider = &capabilities["diagnosticProvider"];
-    assert!(
-        diag_provider.get("interFileDependencies").is_some(),
-        "should advertise interFileDependencies"
-    );
-    assert!(
-        diag_provider.get("workspaceDiagnostics").is_some(),
-        "should advertise workspaceDiagnostics"
-    );
+    let diag_provider = &init_resp["result"]["capabilities"]["diagnosticProvider"];
+    expect![[r#"{"interFileDependencies":true,"workspaceDiagnostics":true}"#]]
+        .assert_eq(&diag_provider.to_string());
 }
 
 #[tokio::test]
@@ -267,20 +247,13 @@ async fn pull_diagnostics_sequential_files() {
         )
         .await;
 
-    // Both should succeed independently
-    assert!(
-        resp1.get("result").is_some(),
-        "first request should succeed"
-    );
-    assert!(
-        resp2.get("result").is_some(),
-        "second request should succeed"
-    );
-
-    // Results should be different
+    // Results should be different (different files, different result IDs)
     let id1 = resp1["result"]["resultId"].clone();
     let id2 = resp2["result"]["resultId"].clone();
     assert_ne!(id1, id2, "different files should have different result IDs");
+
+    expect!["<empty>"].assert_eq(&render_pull_diagnostics(&resp1));
+    expect!["<empty>"].assert_eq(&render_pull_diagnostics(&resp2));
 }
 
 #[tokio::test]
@@ -307,21 +280,8 @@ undefined_function();
         )
         .await;
 
-    let items = resp["result"]["items"].as_array().unwrap();
-
-    // Each diagnostic should have a severity (1=Error, 2=Warning, etc.)
-    for item in items {
-        assert!(
-            item.get("severity").is_some(),
-            "each diagnostic should have severity"
-        );
-        let severity = item["severity"].as_u64().unwrap();
-        assert!(
-            (1..=4).contains(&severity),
-            "severity should be 1-4, got {}",
-            severity
-        );
-    }
+    expect!["2:0-2:20 [1] UndefinedFunction: Function undefined_function() is not defined"]
+        .assert_eq(&render_pull_diagnostics(&resp));
 }
 
 #[tokio::test]
@@ -347,25 +307,8 @@ $undefined_var = $x + 1;
         )
         .await;
 
-    let items = resp["result"]["items"].as_array().unwrap();
-
-    // Each diagnostic should have proper range with start/end
-    for item in items {
-        let range = &item["range"];
-        assert!(range.get("start").is_some(), "should have start position");
-        assert!(range.get("end").is_some(), "should have end position");
-
-        let start = &range["start"];
-        let end = &range["end"];
-
-        assert!(start.get("line").is_some(), "start should have line");
-        assert!(
-            start.get("character").is_some(),
-            "start should have character"
-        );
-        assert!(end.get("line").is_some(), "end should have line");
-        assert!(end.get("character").is_some(), "end should have character");
-    }
+    expect!["1:17-1:19 [1] UndefinedVariable: Variable $x is not defined"]
+        .assert_eq(&render_pull_diagnostics(&resp));
 }
 
 #[tokio::test]
