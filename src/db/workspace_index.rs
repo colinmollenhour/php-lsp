@@ -234,8 +234,11 @@ impl WorkspaceIndexData {
         let candidates = self.classes_by_name.get(short)?;
         if trimmed.contains('\\')
             && let Some(cr) = candidates.iter().find(|cr| {
-                self.at(**cr)
-                    .is_some_and(|(_, cls)| cls.fqn.trim_start_matches('\\').eq_ignore_ascii_case(trimmed))
+                self.at(**cr).is_some_and(|(_, cls)| {
+                    cls.fqn
+                        .trim_start_matches('\\')
+                        .eq_ignore_ascii_case(trimmed)
+                })
             })
         {
             return Some(*cr);

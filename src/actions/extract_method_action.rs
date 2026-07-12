@@ -161,11 +161,7 @@ fn find_enclosing_class(
                         let method_start = sv.position_of(member.span.start).line;
                         let method_end = sv.position_of(member.span.end).line;
                         if range.start.line >= method_start && range.end.line <= method_end {
-                            let params = m
-                                .params
-                                .iter()
-                                .map(|p| format!("${}", p.name))
-                                .collect();
+                            let params = m.params.iter().map(|p| format!("${}", p.name)).collect();
                             return Some((stmt.span.end, m.is_static, params));
                         }
                     }
