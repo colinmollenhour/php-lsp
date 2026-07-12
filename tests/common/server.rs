@@ -39,16 +39,17 @@ fn validate_lsp_spans(resp: &Value, _file_path: &str, fixture: &Fixture) {
             continue;
         };
 
-        // Extract just the filename from the URI
-        let file_path = uri
-            .and_then(|u| u.split('/').next_back())
-            .unwrap_or("unknown");
-
-        // Find the file in the fixture
-        let source = match fixture.files.iter().find(|f| f.path == file_path) {
-            Some(f) => f.text.as_str(),
-            None => continue, // Skip validation for files not in the fixture
+        // Match the URI against a fixture file by path suffix, not bare
+        // filename — fixture paths from a `//- /dir/...` header are full
+        // relative paths (e.g. "src/Greeter.php"), not basenames, so a
+        // basename-only compare silently missed every nested-path fixture.
+        let Some(file) =
+            uri.and_then(|u| fixture.files.iter().find(|f| u.ends_with(f.path.as_str())))
+        else {
+            continue; // Skip validation for files not in the fixture
         };
+        let file_path = file.path.as_str();
+        let source = file.text.as_str();
 
         let start_line = range["start"]["line"].as_u64().unwrap_or(0) as u32;
         let start_char = range["start"]["character"].as_u64().unwrap_or(0) as u32;
