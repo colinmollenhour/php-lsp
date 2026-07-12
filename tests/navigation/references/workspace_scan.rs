@@ -72,14 +72,29 @@ async fn parallel_warm_finds_all_references_across_many_files() {
         .await;
 
     let resp = server.references("def.php", 1, 9, false).await;
-    assert!(resp["error"].is_null(), "references error: {resp:?}");
-    let locs = resp["result"].as_array().expect("expected array");
+    let out = render_locations(&resp, &server.uri(""));
     assert_eq!(
-        locs.len(),
+        out.lines().count(),
         caller_count,
-        "expected {caller_count} references, got {}: {locs:?}",
-        locs.len()
+        "expected {caller_count} references: {out}"
     );
+    expect![[r#"
+        caller_0.php:1:0-1:6
+        caller_1.php:1:0-1:6
+        caller_10.php:1:0-1:6
+        caller_11.php:1:0-1:6
+        caller_12.php:1:0-1:6
+        caller_13.php:1:0-1:6
+        caller_14.php:1:0-1:6
+        caller_2.php:1:0-1:6
+        caller_3.php:1:0-1:6
+        caller_4.php:1:0-1:6
+        caller_5.php:1:0-1:6
+        caller_6.php:1:0-1:6
+        caller_7.php:1:0-1:6
+        caller_8.php:1:0-1:6
+        caller_9.php:1:0-1:6"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
