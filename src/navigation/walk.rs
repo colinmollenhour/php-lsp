@@ -782,8 +782,17 @@ impl<'arena, 'src> Visitor<'arena, 'src> for ConstantRefsVisitor<'_> {
     }
 
     fn visit_enum_member(&mut self, member: &EnumMember<'arena, 'src>) -> ControlFlow<()> {
-        if let EnumMemberKind::ClassConst(c) = &member.kind
-            && c.name == self.const_name
+        // Cases are accessed the same way as class consts (`Enum::Name`), so
+        // their declaration must be findable through the same constant
+        // walker — otherwise `include_declaration` silently drops the case's
+        // own `case Name;` line from a Constant-kind reference search.
+        let decl_name = match &member.kind {
+            EnumMemberKind::ClassConst(c) => Some(c.name),
+            EnumMemberKind::Case(c) => Some(c.name),
+            _ => None,
+        };
+        if let Some(name) = decl_name
+            && name == self.const_name
         {
             let class_ok = self.allowed.is_none_or(|allowed| {
                 self.current_class
@@ -791,7 +800,7 @@ impl<'arena, 'src> Visitor<'arena, 'src> for ConstantRefsVisitor<'_> {
                     .is_none_or(|cls| allowed.contains(cls))
             });
             if class_ok {
-                let name = c.name.to_string();
+                let name = name.to_string();
                 let start = str_offset_in_range(self.source, member.span, &name)
                     .unwrap_or_else(|| str_offset(self.source, &name).unwrap_or(0));
                 self.out.push(Span {

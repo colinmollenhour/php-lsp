@@ -203,13 +203,22 @@ pub(crate) fn cursor_is_on_constant_decl(
         cursor: u32,
     ) -> Option<String> {
         for member in members {
-            if let EnumMemberKind::ClassConst(c) = &member.kind {
-                let name = c.name.to_string();
-                let start = name_offset_in_member(source, member.span, &name).unwrap_or(0);
-                let end = start + name.len() as u32;
-                if cursor >= start && cursor < end {
-                    return Some(name);
-                }
+            // Cases and class consts are both accessed the same way
+            // (`Status::Active`), so both must resolve the same way as a
+            // find-references starting point: as a Constant owned by this
+            // enum, not — for cases — via the uppercase-name heuristic in
+            // `symbol_kind_at`, which misroutes it to the Class walker and
+            // finds no usages at all (case names are conventionally
+            // PascalCase, same as class names).
+            let name = match &member.kind {
+                EnumMemberKind::ClassConst(c) => c.name.to_string(),
+                EnumMemberKind::Case(c) => c.name.to_string(),
+                _ => continue,
+            };
+            let start = name_offset_in_member(source, member.span, &name).unwrap_or(0);
+            let end = start + name.len() as u32;
+            if cursor >= start && cursor < end {
+                return Some(name);
             }
         }
         None

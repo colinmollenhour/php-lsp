@@ -700,7 +700,11 @@ fn collect_declaration_spans(
                                 member.span,
                             ));
                         }
-                        EnumMemberKind::Case(c) if want_type && c.name == word => {
+                        // Cases are accessed via `Enum::Case` just like class
+                        // consts, so they're findable/declared under the
+                        // Constant kind (see cursor_is_on_constant_decl),
+                        // not Class.
+                        EnumMemberKind::Case(c) if want_constant && c.name == word => {
                             out.push(declaration_name_span(
                                 source,
                                 &c.name.to_string(),

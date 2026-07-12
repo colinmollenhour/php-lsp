@@ -85,6 +85,55 @@ echo Status::Active->label();
     .await;
 }
 
+/// Find-references from an enum case's own declaration must find every
+/// `Status::Active`-style access, not just the declaration itself. Case
+/// names are conventionally PascalCase (like class names), and
+/// `Status::Active` is syntactically identical to real class-constant
+/// access, so both the declaration-site classification and the constant
+/// walker's declaration matching need explicit `EnumMemberKind::Case`
+/// handling — without it, this returns only the declaration and misses
+/// every real usage.
+#[tokio::test]
+async fn references_enum_case_from_declaration() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+enum Status {
+    case Act$0ive;
+    //   ^^^^^^ def
+}
+function describe(Status $s): string {
+    return match ($s) {
+        Status::Active => 'active',
+        //      ^^^^^^ ref
+    };
+}
+echo Status::Active;
+//           ^^^^^^ ref
+"#,
+    )
+    .await;
+}
+
+/// Same coverage starting from a usage site instead of the declaration —
+/// pins the already-working direction so a future regression in either
+/// direction is caught.
+#[tokio::test]
+async fn references_enum_case_from_usage() {
+    let mut s = TestServer::new().await;
+    s.check_references_annotated(
+        r#"<?php
+enum Status {
+    case Active;
+    //   ^^^^^^ def
+}
+echo Status::Act$0ive;
+//           ^^^^^^ ref
+"#,
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn references_nullsafe_method_call() {
     // `$obj?->method()` must be found as a reference alongside `$obj->method()`.
