@@ -10,15 +10,11 @@ use serde_json::json;
 async fn edge_case_file_closed_during_workspace_diagnostic() {
     let mut server = TestServer::new().await;
     server.open("temp.php", "<?php\nundefined();\n").await;
+    server.close("temp.php").await;
 
-    // Immediately close and open another file
-    // (This test verifies the handler doesn't panic, not a true race condition)
     let resp = server.workspace_diagnostic().await;
 
-    assert!(
-        resp["error"].is_null(),
-        "workspace_diagnostic should handle file closure gracefully"
-    );
+    expect!["<no items>"].assert_eq(&render_workspace_diagnostic(&resp, &server.uri("")));
 }
 
 #[tokio::test]
