@@ -239,11 +239,11 @@ async fn code_action_resolve_promote_constructor_params() {
     server
         .open(
             "promote.php",
-            "<?php\nclass Service {\n    public function __construct(\n        private string $name,\n        private int $port\n    ) {}\n}\n",
+            "<?php\nclass Service {\n    private string $name;\n    private int $port;\n    public function __construct(string $name, int $port) {\n        $this->name = $name;\n        $this->port = $port;\n    }\n}\n",
         )
         .await;
 
-    let resp = server.code_action("promote.php", 2, 0, 5, 6).await;
+    let resp = server.code_action("promote.php", 2, 0, 7, 6).await;
     let action = resp["result"]
         .as_array()
         .unwrap()
@@ -254,17 +254,23 @@ async fn code_action_resolve_promote_constructor_params() {
                 .map(|t| t.to_lowercase().contains("promot"))
                 .unwrap_or(false)
         })
-        .cloned();
+        .cloned()
+        .expect("promote action must be offered for non-promoted constructor params");
 
-    if let Some(action) = action {
-        assert!(action["edit"].is_null(), "action must be deferred");
+    assert!(action["edit"].is_null(), "action must be deferred");
 
-        let resolved = server.code_action_resolve(action).await;
-        assert!(resolved["error"].is_null());
-        let out = canonicalize_workspace_edit(&resolved["result"]["edit"], &server.uri(""));
-        expect![[r#""#]].assert_eq(&out);
-    }
-    // promote action may not apply when params are already promoted — that is valid
+    let resolved = server.code_action_resolve(action).await;
+    assert!(resolved["error"].is_null());
+    let out = canonicalize_workspace_edit(&resolved["result"]["edit"], &server.uri(""));
+    expect![[r#"
+        // promote.php
+        2:0-3:0 → ""
+        3:0-4:0 → ""
+        4:32-4:32 → "private "
+        4:46-4:46 → "private "
+        5:0-6:0 → ""
+        6:0-7:0 → """#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
