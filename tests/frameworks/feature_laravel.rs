@@ -2648,40 +2648,40 @@ async fn laravel_inlay_hints_method_bodies() {
         .inlay_hints("Illuminate/Auth/AuthManager.php", 0, 0, auth_line_count, 0)
         .await;
     expect![[r#"
-        60:65 name:
-        73:55 name:
-        86:35 name:
-        93:44 name:
-        93:51 config:
-        96:41 string:
-        129:12 name:
-        130:12 provider:
-        130:38 provider:
-        131:12 session:
-        132:53 name:
-        133:55 name:
-        134:47 name:
-        140:29 cookie:
-        142:30 events:
-        144:27 request:
-        144:47 seconds:
-        147:40 minutes:
-        166:12 provider:
-        166:38 provider:
-        167:12 request:
-        168:12 inputKey:
-        169:12 storageKey:
-        170:12 hash:
-        173:28 seconds:
-        209:32 name:
-        211:64 name:
-        234:29 driver:
-        234:38 callback:
-        235:38 callback:
-        235:49 request:
-        235:72 provider:
-        237:32 seconds:
-        279:50 callback:"#]]
+        60:65 name: [param]
+        73:55 name: [param]
+        86:35 name: [param]
+        93:44 name: [param]
+        93:51 config: [param]
+        96:41 string: [param]
+        129:12 name: [param]
+        130:12 provider: [param]
+        130:38 provider: [param]
+        131:12 session: [param]
+        132:53 name: [param]
+        133:55 name: [param]
+        134:47 name: [param]
+        140:29 cookie: [param]
+        142:30 events: [param]
+        144:27 request: [param]
+        144:47 seconds: [param]
+        147:40 minutes: [param]
+        166:12 provider: [param]
+        166:38 provider: [param]
+        167:12 request: [param]
+        168:12 inputKey: [param]
+        169:12 storageKey: [param]
+        170:12 hash: [param]
+        173:28 seconds: [param]
+        209:32 name: [param]
+        211:64 name: [param]
+        234:29 driver: [param]
+        234:38 callback: [param]
+        235:38 callback: [param]
+        235:49 request: [param]
+        235:72 provider: [param]
+        237:32 seconds: [param]
+        279:50 callback: [param]"#]]
     .assert_eq(&render_inlay_hints(&resp));
 }
 
@@ -2702,7 +2702,7 @@ async fn laravel_inlay_hints_content() {
 
     let resp = s.inlay_hints("__test_inlay_hints.php", 0, 0, 3, 0).await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
-    expect!["2:11 value:"].assert_eq(&render_inlay_hints(&resp));
+    expect!["2:11 value: [param]"].assert_eq(&render_inlay_hints(&resp));
 }
 
 // ── Rename ────────────────────────────────────────────────────────────────────

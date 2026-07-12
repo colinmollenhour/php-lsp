@@ -21,8 +21,8 @@ async fn inlay_hints_from_workspace_index_only() {
     s.open("caller.php", caller_src).await;
     let resp = s.inlay_hints("caller.php", 0, 0, 3, 0).await;
     expect![[r#"
-        1:6 name:
-        1:15 count:"#]]
+        1:6 name: [param]
+        1:15 count: [param]"#]]
     .assert_eq(&render_inlay_hints(&resp));
 }
 
@@ -42,8 +42,8 @@ function greet(string $name, int $count): void {}
         )
         .await;
     expect![[r#"
-        1:6 name:
-        1:15 count:"#]]
+        1:6 name: [param]
+        1:15 count: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -65,8 +65,8 @@ class Point {
         )
         .await;
     expect![[r#"
-        1:15 x:
-        1:18 y:"#]]
+        1:15 x: [param]
+        1:18 y: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -88,9 +88,7 @@ class Greeter {
 "#,
         )
         .await;
-    expect![[r#"
-        2:13 name:"#]]
-    .assert_eq(&out);
+    expect!["2:13 name: [param]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -105,8 +103,8 @@ greet('world', 3);
         )
         .await;
     expect![[r#"
-        2:6 name:
-        2:15 count:"#]]
+        2:6 name: [param]
+        2:15 count: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -283,9 +281,7 @@ class Greeter {
 "#,
         )
         .await;
-    expect![[r#"
-        2:14 name:"#]]
-    .assert_eq(&out);
+    expect!["2:14 name: [param]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -305,9 +301,7 @@ class Greeter {
 "#,
         )
         .await;
-    expect![[r#"
-        1:18 name:"#]]
-    .assert_eq(&out);
+    expect!["1:18 name: [param]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -347,7 +341,7 @@ async fn inlay_hints_respects_lsp_half_open_range_semantics() {
     // Range [0, 3) includes the hint (it's within the range)
     let resp = s.inlay_hints("range_test.php", 2, 0, 2, 3).await;
     let out = render_inlay_hints(&resp);
-    expect![[r#"2:2 x:"#]].assert_eq(&out);
+    expect!["2:2 x: [param]"].assert_eq(&out);
 }
 
 /// Method hint collisions: when multiple classes define a method with the same name,
@@ -374,8 +368,8 @@ class DataProcessor {
         .await;
     // Should show parameter hints for DataProcessor::process
     expect![[r#"
-        2:20 x:
-        2:23 y:"#]]
+        2:20 x: [param]
+        2:23 y: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -401,8 +395,8 @@ class TextFilter {
         )
         .await;
     expect![[r#"
-        2:15 text:
-        2:24 mode:"#]]
+        2:15 text: [param]
+        2:24 mode: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -435,8 +429,8 @@ class ChildClass extends ParentClass {
         .await;
     // Should show parent's parameter names (int $a, int $b)
     expect![[r#"
-        2:16 a:
-        2:20 b:"#]]
+        2:16 a: [param]
+        2:20 b: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -462,9 +456,9 @@ class MathHelper {
         .await;
     // Static method hints should work the same as instance methods
     expect![[r#"
-        1:26 a:
-        1:29 b:
-        1:31 : int"#]]
+        1:26 a: [param]
+        1:29 b: [param]
+        1:31 : int [type]"#]]
     .assert_eq(&out);
 }
 
@@ -497,8 +491,8 @@ class ConcreteHandler extends AbstractHandler {
         .await;
     // Should show abstract method's parameter names from parent
     expect![[r#"
-        2:18 input:
-        2:26 code:"#]]
+        2:18 input: [param]
+        2:26 code: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -556,9 +550,7 @@ add(1);
 "#,
         )
         .await;
-    expect![[r#"
-        2:4 a:"#]]
-    .assert_eq(&out);
+    expect!["2:4 a: [param]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -572,9 +564,7 @@ f(1, 2, 3);
 "#,
         )
         .await;
-    expect![[r#"
-        2:2 x:"#]]
-    .assert_eq(&out);
+    expect!["2:2 x: [param]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -588,9 +578,7 @@ $s = make();
 "#,
         )
         .await;
-    expect![[r#"
-        2:11 : string"#]]
-    .assert_eq(&out);
+    expect!["2:11 : string [type]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -619,9 +607,7 @@ greet('Alice');
 "#,
         )
         .await;
-    expect![[r#"
-        3:6 name:"#]]
-    .assert_eq(&out);
+    expect!["3:6 name: [param]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -636,8 +622,8 @@ $greet('Alice', 3);
         )
         .await;
     expect![[r#"
-        2:7 name:
-        2:16 times:"#]]
+        2:7 name: [param]
+        2:16 times: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -652,9 +638,7 @@ $result = $double(5);
 "#,
         )
         .await;
-    expect![[r#"
-        2:18 n:"#]]
-    .assert_eq(&out);
+    expect!["2:18 n: [param]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -669,8 +653,8 @@ $fn = function() { add(1, 2); };
         )
         .await;
     expect![[r#"
-        2:23 a:
-        2:26 b:"#]]
+        2:23 a: [param]
+        2:26 b: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -694,8 +678,8 @@ $logger->log('hello', 3);
         )
         .await;
     expect![[r#"
-        8:13 msg:
-        8:22 level:"#]]
+        8:13 msg: [param]
+        8:22 level: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -711,8 +695,8 @@ for (tick(1); $i < 10; tick(2)) {}
         )
         .await;
     expect![[r#"
-        2:10 n:
-        2:28 n:"#]]
+        2:10 n: [param]
+        2:28 n: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -743,9 +727,7 @@ trait Logger {
 "#,
         )
         .await;
-    expect![[r#"
-        3:40 msg:"#]]
-    .assert_eq(&out);
+    expect!["3:40 msg: [param]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -762,9 +744,7 @@ enum Status {
 "#,
         )
         .await;
-    expect![[r#"
-        4:40 msg:"#]]
-    .assert_eq(&out);
+    expect!["4:40 msg: [param]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -782,8 +762,8 @@ label('x', 2);
         )
         .await;
     expect![[r#"
-        5:6 prefix:
-        5:11 pad:"#]]
+        5:6 prefix: [param]
+        5:11 pad: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -801,9 +781,7 @@ foreach ($users as $user) {
 "#,
         )
         .await;
-    expect![[r#"
-        3:24 : User"#]]
-    .assert_eq(&out);
+    expect!["3:24 : User [type]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -833,9 +811,9 @@ record('a', 'b', 'c');
         )
         .await;
     expect![[r#"
-        2:7 messages:
-        2:12 messages:
-        2:17 messages:"#]]
+        2:7 messages: [param]
+        2:12 messages: [param]
+        2:17 messages: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -851,10 +829,10 @@ push('bucket', 1, 2, 3);
         )
         .await;
     expect![[r#"
-        2:5 key:
-        2:15 values:
-        2:18 values:
-        2:21 values:"#]]
+        2:5 key: [param]
+        2:15 values: [param]
+        2:18 values: [param]
+        2:21 values: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -901,8 +879,8 @@ $u = new User('Alice', 30);
         )
         .await;
     expect![[r#"
-        7:14 name:
-        7:23 age:"#]]
+        7:14 name: [param]
+        7:23 age: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -925,9 +903,7 @@ foreach ($users as $k => $user) {
         .await;
     // TypeMap knows the value type from array_map but not the key type (int),
     // so only the value variable gets a hint — not the key variable.
-    expect![[r#"
-        3:30 : User"#]]
-    .assert_eq(&out);
+    expect!["3:30 : User [type]"].assert_eq(&out);
 }
 
 /// Calls inside try/catch/finally bodies must receive hints.
@@ -949,9 +925,9 @@ try {
         )
         .await;
     expect![[r#"
-        3:12 resource:
-        5:12 resource:
-        7:12 resource:"#]]
+        3:12 resource: [param]
+        5:12 resource: [param]
+        7:12 resource: [param]"#]]
     .assert_eq(&out);
 }
 
@@ -968,9 +944,7 @@ $fn = fn($x) => greet($x);
 "#,
         )
         .await;
-    expect![[r#"
-        2:22 name:"#]]
-    .assert_eq(&out);
+    expect!["2:22 name: [param]"].assert_eq(&out);
 }
 
 // === LSP specification gap tests ===
@@ -986,9 +960,7 @@ async fn inlay_hints_refresh_after_did_change() {
     )
     .await;
     let resp = s.inlay_hints("main.php", 0, 0, 4, 0).await;
-    expect![[r#"
-        2:6 name:"#]]
-    .assert_eq(&render_inlay_hints(&resp));
+    expect!["2:6 name: [param]"].assert_eq(&render_inlay_hints(&resp));
 
     s.change(
         "main.php",
@@ -998,9 +970,9 @@ async fn inlay_hints_refresh_after_did_change() {
     .await;
     let resp = s.inlay_hints("main.php", 0, 0, 6, 0).await;
     expect![[r#"
-        3:6 name:
-        4:4 a:
-        4:7 b:"#]]
+        3:6 name: [param]
+        4:4 a: [param]
+        4:7 b: [param]"#]]
     .assert_eq(&render_inlay_hints(&resp));
 }
 
@@ -1037,41 +1009,13 @@ async fn inlay_hints_kind_field_values() {
     )
     .await;
     let resp = s.inlay_hints("kinds.php", 0, 0, 7, 0).await;
-    let hints = resp["result"].as_array().expect("result must be an array");
-
-    // Find the parameter hint (label ends with ':') and check kind == 2.
-    let param_hint = hints
-        .iter()
-        .find(|h| {
-            h["label"]
-                .as_str()
-                .map(|l| l.ends_with(':'))
-                .unwrap_or(false)
-        })
-        .expect("expected at least one parameter hint");
-    assert_eq!(
-        param_hint["kind"].as_u64(),
-        Some(2),
-        "parameter hint must have kind=2 (LSP InlayHintKind.Parameter), got: {}",
-        param_hint["kind"]
-    );
-
-    // Find the type hint (label starts with ': ') and check kind == 1.
-    let type_hint = hints
-        .iter()
-        .find(|h| {
-            h["label"]
-                .as_str()
-                .map(|l| l.starts_with(": "))
-                .unwrap_or(false)
-        })
-        .expect("expected at least one type hint");
-    assert_eq!(
-        type_hint["kind"].as_u64(),
-        Some(1),
-        "type hint must have kind=1 (LSP InlayHintKind.Type), got: {}",
-        type_hint["kind"]
-    );
+    // render_inlay_hints tags every hint with its [type]/[param] kind, so this
+    // pins kind=1 (Type) and kind=2 (Parameter) for every hint at once rather
+    // than only the first match of each shape.
+    expect![[r#"
+        4:21 : User [type]
+        5:6 name: [param]"#]]
+    .assert_eq(&render_inlay_hints(&resp));
 }
 
 /// When a file has no hints, `textDocument/inlayHint` must return `[]` (an

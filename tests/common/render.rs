@@ -442,7 +442,7 @@ pub fn render_inlay_hints(resp: &Value) -> String {
     if arr.is_empty() {
         return "<no hints>".to_owned();
     }
-    let mut rows: Vec<(u64, u64, String)> = arr
+    let mut rows: Vec<(u64, u64, String, &'static str)> = arr
         .iter()
         .map(|h| {
             let line = h["position"]["line"].as_u64().unwrap_or(0);
@@ -457,12 +457,17 @@ pub fn render_inlay_hints(resp: &Value) -> String {
                     .join(""),
                 _ => String::new(),
             };
-            (line, col, label)
+            let kind = match h["kind"].as_u64() {
+                Some(1) => "type",
+                Some(2) => "param",
+                _ => "?",
+            };
+            (line, col, label, kind)
         })
         .collect();
-    rows.sort();
+    rows.sort_by(|a, b| (a.0, a.1, &a.2).cmp(&(b.0, b.1, &b.2)));
     rows.into_iter()
-        .map(|(l, c, label)| format!("{l}:{c} {label}"))
+        .map(|(l, c, label, kind)| format!("{l}:{c} {label} [{kind}]"))
         .collect::<Vec<_>>()
         .join("\n")
 }
