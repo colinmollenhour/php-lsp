@@ -87,20 +87,21 @@ async fn all_features_enabled_by_default() {
 
 #[tokio::test]
 async fn initialize_returns_server_capabilities() {
-    let mut server = TestServer::new().await;
+    let (mut server, init_resp) = TestServer::new_with_options(serde_json::json!({})).await;
+    assert!(
+        !init_resp["result"]["capabilities"]["hoverProvider"].is_null(),
+        "expected hoverProvider to be advertised: {init_resp:?}"
+    );
+
     server
         .open("cap.php", "<?php\nfunction f(): void {}\n")
         .await;
     let resp = server.hover("cap.php", 1, 10).await;
-    assert!(
-        resp["error"].is_null(),
-        "hover should not error if hoverProvider is advertised: {:?}",
-        resp
-    );
-    assert!(
-        !resp["result"].is_null(),
-        "hover should return a result, confirming textDocumentSync applied the open"
-    );
+    expect![[r#"
+        ```php
+        function f(): void
+        ```"#]]
+    .assert_eq(&render_hover(&resp));
 }
 
 /// `\` must be a completion trigger character: FQN completion after a bare
@@ -326,18 +327,10 @@ async fn references_and_hover_concurrent_complete_without_deadlock() {
         srv_b.hover("conc_b.php", 1, 10)
     );
 
-    assert!(
-        refs_resp["error"].is_null(),
-        "references must not error when run concurrently: {refs_resp:?}"
-    );
-    assert!(
-        hover_resp["error"].is_null(),
-        "hover must not error when run concurrently: {hover_resp:?}"
-    );
-
-    let refs = refs_resp["result"].as_array().cloned().unwrap_or_default();
-    assert!(
-        !refs.is_empty(),
-        "references should find at least the call site: {refs_resp:?}"
-    );
+    expect!["conc_a.php:2:0-2:5"].assert_eq(&render_locations(&refs_resp, &srv_a.uri("")));
+    expect![[r#"
+        ```php
+        function greet(string $name): string
+        ```"#]]
+    .assert_eq(&render_hover(&hover_resp));
 }
