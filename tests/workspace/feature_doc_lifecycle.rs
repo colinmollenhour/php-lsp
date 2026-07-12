@@ -264,8 +264,14 @@ async fn will_save_wait_until_returns_null_or_empty_for_formatted_file() {
     expect![r#"(no formatter available)"#].assert_eq(&render_text_edits(&resp));
 }
 
+/// willSaveWaitUntil delegates to the same php-cs-fixer/phpcbf formatter as
+/// textDocument/formatting (see `src/editing/formatting.rs`), and CI's
+/// setup-php step uses `tools: none`, so neither is ever installed — this
+/// always takes the "no formatter" path in every environment this suite runs
+/// in (see `formatting_returns_null_without_external_formatter` in
+/// feature_formatting.rs).
 #[tokio::test]
-async fn will_save_wait_until_on_already_formatted_code() {
+async fn will_save_wait_until_returns_null_without_external_formatter() {
     let mut server = TestServer::new().await;
     server
         .open(
@@ -275,43 +281,18 @@ async fn will_save_wait_until_on_already_formatted_code() {
         .await;
 
     let resp = server.will_save_wait_until("wswu_formatted.php").await;
-    assert!(resp["error"].is_null(), "unexpected error: {resp:?}");
-
-    // If a formatter is available and code is already clean, it returns
-    // null or no changes needed; both are valid per LSP spec
-    let result = &resp["result"];
-    assert!(
-        result.is_null() || result.as_array().map(|a| a.is_empty()).unwrap_or(false),
-        "expected null or empty edits for already-formatted file: {resp:?}"
-    );
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
 }
 
 #[tokio::test]
-async fn will_save_wait_until_returns_edits_or_null_for_unformatted_file() {
+async fn will_save_wait_until_returns_null_for_unformatted_file_without_external_formatter() {
     let mut server = TestServer::new().await;
     server
         .open("wswu_ugly.php", "<?php\nfunction ugly( $x ){return $x;}\n")
         .await;
 
     let resp = server.will_save_wait_until("wswu_ugly.php").await;
-    assert!(resp["error"].is_null(), "unexpected error: {resp:?}");
-
-    let result = &resp["result"];
-    if let Some(edits) = result.as_array() {
-        // Formatter is available; verify the edit structure
-        for edit in edits {
-            assert!(
-                edit["range"]["start"].is_object() && edit["range"]["end"].is_object(),
-                "edit missing range: {edit:?}"
-            );
-            assert!(
-                edit["newText"].is_string(),
-                "edit missing newText: {edit:?}"
-            );
-        }
-    } else {
-        assert!(result.is_null(), "expected null or array, got: {result:?}");
-    }
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
 }
 
 #[tokio::test]
@@ -340,20 +321,16 @@ async fn will_save_wait_until_on_empty_file() {
 }
 
 #[tokio::test]
-async fn will_save_wait_until_without_php_tag() {
-    // PHP snippets without <?php tag should be handled (formatter adds wrapper)
+async fn will_save_wait_until_returns_null_without_php_tag_and_without_external_formatter() {
+    // PHP snippets without <?php tag should be handled gracefully; no
+    // formatter is installed in this suite's environment (see
+    // will_save_wait_until_returns_null_without_external_formatter above),
+    // so this deterministically returns null.
     let mut server = TestServer::new().await;
     server.open("wswu_no_tag.php", "function test( ){}\n").await;
 
     let resp = server.will_save_wait_until("wswu_no_tag.php").await;
-    assert!(resp["error"].is_null(), "unexpected error: {resp:?}");
-
-    // Should return null or edits depending on formatter availability
-    let result = &resp["result"];
-    assert!(
-        result.is_null() || result.as_array().is_some(),
-        "expected null or TextEdit array, got: {result:?}"
-    );
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
 }
 
 // --- didChange ---
@@ -369,10 +346,11 @@ async fn did_change_updates_document() {
 
     let resp = server.hover("change.php", 1, 10).await;
 
-    assert!(
-        resp["error"].is_null(),
-        "hover after change should not error"
-    );
+    expect![[r#"
+        ```php
+        function updated()
+        ```"#]]
+    .assert_eq(&render_hover(&resp));
 }
 
 // --- endpoint wiring ---
