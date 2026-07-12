@@ -598,8 +598,8 @@ async fn code_lens_correct_after_preceding_write() {
     // code_lens after the write: revision is stable during spawn_blocking,
     // so lenses must be produced (not suppressed by stale-cancel logic).
     let resp = s.code_lens("main.php").await;
-    assert!(
-        resp["result"].as_array().is_some_and(|l| !l.is_empty()),
-        "code_lens must produce lenses after a preceding write; got: {resp}"
-    );
+    expect![[r#"
+        L1:6-L1:11: 0 references [editor.action.showReferences]
+        L2:9-L2:17: 0 references [editor.action.showReferences]"#]]
+    .assert_eq(&render_code_lens(&resp));
 }
