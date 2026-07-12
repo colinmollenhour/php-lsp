@@ -220,8 +220,8 @@ class AnimalHouse extends Creature {}
 #[tokio::test]
 async fn subtypes_with_anonymous_class_does_not_panic() {
     let mut s = TestServer::new().await;
-    // Only assert no panic; anonymous classes produce no named subtype.
-    let _ = s
+    // Anonymous classes produce no named subtype.
+    let out = s
         .check_subtypes(
             r#"<?php
 interface Animal$0 {}
@@ -229,6 +229,7 @@ $obj = new class extends Animal {};
 "#,
         )
         .await;
+    expect!["<empty>"].assert_eq(&out);
 }
 
 /// When goto-implementation is requested on a symbol defined in both the current
