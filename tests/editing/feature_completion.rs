@@ -1633,7 +1633,27 @@ $s = Status::Active; $s->$0
         Property    $name
         Property    $value
         Property    name | string
-        Property    value | string|int"#]]
+        Property    value | string"#]]
+    .assert_eq(&out);
+}
+
+#[tokio::test]
+async fn completion_backed_enum_int_has_value_property() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_completion_ordered(
+            r#"<?php
+enum Priority: int { case Low = 1; }
+$p = Priority::Low; $p->$0
+"#,
+        )
+        .await;
+    expect![[r#"
+        Property    $name
+        Property    $value
+        Property    name | string
+        Property    value | int"#]]
     .assert_eq(&out);
 }
 

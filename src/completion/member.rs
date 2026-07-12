@@ -8,8 +8,8 @@ use crate::document::ast::ParsedDoc;
 use crate::text::{fqn_short_name, utf16_offset_to_byte};
 use crate::types::stub_members::stub_class_members;
 use crate::types::type_map::{
-    ClassMembers, enclosing_class_at, is_backed_enum, is_enum, members_of_class, mixin_classes_of,
-    parent_class_name,
+    ClassMembers, enclosing_class_at, enum_backing_type, is_enum, members_of_class,
+    mixin_classes_of, parent_class_name,
 };
 
 use super::callable_item;
@@ -145,11 +145,13 @@ fn all_members(
                             ..Default::default()
                         });
                     }
-                    if is_backed_enum(d, short) && seen_names.insert("value".to_string()) {
+                    if let Some(backing_type) = enum_backing_type(d, short)
+                        && seen_names.insert("value".to_string())
+                    {
                         items.push(CompletionItem {
                             label: "value".to_string(),
                             kind: Some(CompletionItemKind::PROPERTY),
-                            detail: Some("string|int".to_string()),
+                            detail: Some(backing_type),
                             ..Default::default()
                         });
                     }

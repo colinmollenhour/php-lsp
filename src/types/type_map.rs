@@ -1139,24 +1139,36 @@ fn is_enum_in_stmts(stmts: &[Stmt<'_, '_>], name: &str) -> bool {
 /// Returns `true` if `class_name` is a *backed* enum (`enum Foo: string` /
 /// `enum Foo: int`) in `doc`.  Backed enums have a `->value` property.
 pub fn is_backed_enum(doc: &ParsedDoc, class_name: &str) -> bool {
-    is_backed_enum_in_stmts(&doc.program().stmts, class_name)
+    enum_backing_type(doc, class_name).is_some()
 }
 
-fn is_backed_enum_in_stmts(stmts: &[Stmt<'_, '_>], name: &str) -> bool {
+/// Returns the declared backing type (`"string"` / `"int"`) of `class_name`
+/// if it is a backed enum in `doc`, or `None` if it is not an enum, or is an
+/// unbacked (pure) enum.
+pub fn enum_backing_type(doc: &ParsedDoc, class_name: &str) -> Option<String> {
+    enum_backing_type_in_stmts(&doc.program().stmts, class_name)
+}
+
+fn enum_backing_type_in_stmts(stmts: &[Stmt<'_, '_>], name: &str) -> Option<String> {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Enum(e) if e.name == name => return e.scalar_type.is_some(),
+            StmtKind::Enum(e) if e.name == name => {
+                return e
+                    .scalar_type
+                    .as_ref()
+                    .map(|t| t.to_string_repr().to_string());
+            }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && is_backed_enum_in_stmts(&inner.stmts, name)
+                    && let Some(ty) = enum_backing_type_in_stmts(&inner.stmts, name)
                 {
-                    return true;
+                    return Some(ty);
                 }
             }
             _ => {}
         }
     }
-    false
+    None
 }
 
 fn collect_params_stmts(stmts: &[Stmt<'_, '_>], func_name: &str, out: &mut Vec<String>) {
