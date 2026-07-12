@@ -137,6 +137,3 @@ abstract class BaseController {
     )
     .await;
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// REGRESSION TESTS - Verify bugs are fixed and don't regress
