@@ -16,7 +16,7 @@ function gree$0t(): void {}
 "#,
         )
         .await;
-    expect!["greet (Function) @ main.php:1"].assert_eq(&out);
+    expect!["greet (Function) @ main.php:1:9"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -31,7 +31,7 @@ class Mailer {
 "#,
         )
         .await;
-    expect!["send (Method) [Mailer] @ main.php:2"].assert_eq(&out);
+    expect!["send (Method) [Mailer] @ main.php:2:20"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -46,7 +46,7 @@ trait Timestampable {
 "#,
         )
         .await;
-    expect!["touch (Method) [Timestampable] @ main.php:2"].assert_eq(&out);
+    expect!["touch (Method) [Timestampable] @ main.php:2:20"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -62,7 +62,7 @@ enum Suit {
 "#,
         )
         .await;
-    expect!["label (Method) [Suit] @ main.php:3"].assert_eq(&out);
+    expect!["label (Method) [Suit] @ main.php:3:20"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -91,7 +91,7 @@ function caller(): void { leaf(); }
 "#,
         )
         .await;
-    expect!["caller @ main.php:2"].assert_eq(&out);
+    expect!["caller @ main.php:2:9 fromRanges=[2:26-2:30]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -119,7 +119,9 @@ function b(): void { target(); }
 "#,
         )
         .await;
-    expect!["a @ main.php:2\nb @ main.php:3"].assert_eq(&out);
+    expect![[r#"
+        a @ main.php:2:9 fromRanges=[2:21-2:27]
+        b @ main.php:3:9 fromRanges=[3:21-3:27]"#]].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -134,7 +136,7 @@ async fn incoming_calls_cross_file() {
 "#,
         )
         .await;
-    expect!["handle @ Controller.php:0"].assert_eq(&out);
+    expect!["handle @ Controller.php:0:15 fromRanges=[0:32-0:39]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -148,7 +150,7 @@ bootable();
 "#,
         )
         .await;
-    expect!["<file scope> @ main.php:2"].assert_eq(&out);
+    expect!["<file scope> @ main.php:2:0 fromRanges=[2:0-2:8]"].assert_eq(&out);
 }
 
 // ── call hierarchy: outgoing ───────────────────────────────────────────────────
@@ -164,7 +166,7 @@ function caller$0(): void { leaf(); }
 "#,
         )
         .await;
-    expect!["leaf @ main.php:1"].assert_eq(&out);
+    expect!["leaf @ main.php:1:9 fromRanges=[2:26-2:30]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -192,7 +194,7 @@ async fn outgoing_calls_cross_file_callee() {
 "#,
         )
         .await;
-    expect!["helper @ helpers.php:0"].assert_eq(&out);
+    expect!["helper @ helpers.php:0:15 fromRanges=[0:37-0:43]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -206,7 +208,7 @@ function caller$0(): void { helper(); helper(); }
 "#,
         )
         .await;
-    expect!["helper @ main.php:1"].assert_eq(&out);
+    expect!["helper @ main.php:1:9 fromRanges=[2:26-2:32, 2:36-2:42]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -222,7 +224,7 @@ class Order {
 "#,
         )
         .await;
-    expect!["validate @ main.php:1"].assert_eq(&out);
+    expect!["validate @ main.php:1:9 fromRanges=[3:37-3:45]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -238,7 +240,7 @@ enum Suit {
 "#,
         )
         .await;
-    expect!["fmt @ main.php:1"].assert_eq(&out);
+    expect!["fmt @ main.php:1:9 fromRanges=[3:45-3:48]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -253,7 +255,9 @@ function mai$0n(): void { for ($i = start(); $i < 10; step()) {} }
 "#,
         )
         .await;
-    expect!["start @ main.php:1\nstep @ main.php:2"].assert_eq(&out);
+    expect![[r#"
+        start @ main.php:1:9 fromRanges=[3:34-3:39]
+        step @ main.php:2:9 fromRanges=[3:52-3:56]"#]].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -269,7 +273,7 @@ function bootstra$0p(): void { Cache::warm(); }
 "#,
         )
         .await;
-    expect!["warm @ main.php:2"].assert_eq(&out);
+    expect!["warm @ main.php:2:27 fromRanges=[4:36-4:40]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -283,7 +287,7 @@ function pol$0l(): void { do {} while (tick()); }
 "#,
         )
         .await;
-    expect!["tick @ main.php:1"].assert_eq(&out);
+    expect!["tick @ main.php:1:9 fromRanges=[2:37-2:41]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -301,7 +305,7 @@ function dispa$0tch(int $x): void {
 "#,
         )
         .await;
-    expect!["action @ main.php:1"].assert_eq(&out);
+    expect!["action @ main.php:1:9 fromRanges=[4:16-4:22]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -316,7 +320,7 @@ function boo$0t(): void { $c = new Config(defaults()); }
 "#,
         )
         .await;
-    expect!["defaults @ main.php:1"].assert_eq(&out);
+    expect!["defaults @ main.php:1:9 fromRanges=[3:40-3:48]"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -330,7 +334,7 @@ function conv$0ert(): int { return (int) measure(); }
 "#,
         )
         .await;
-    expect!["measure @ main.php:1"].assert_eq(&out);
+    expect!["measure @ main.php:1:9 fromRanges=[2:39-2:46]"].assert_eq(&out);
 }
 
 // ── additional call hierarchy edge cases ────────────────────────────────────
@@ -346,7 +350,7 @@ function facto$0rial(int $n): int { return $n <= 1 ? 1 : $n * factorial($n - 1);
 "#,
         )
         .await;
-    expect!["factorial @ main.php:1"].assert_eq(&out);
+    expect!["factorial @ main.php:1:9 fromRanges=[1:60-1:69]"].assert_eq(&out);
 }
 
 /// Method calling itself recursively must appear in incoming calls.
@@ -362,7 +366,7 @@ class TreeNode {
 "#,
         )
         .await;
-    expect!["traverse @ main.php:2"].assert_eq(&out);
+    expect!["traverse @ main.php:2:20 fromRanges=[2:46-2:54]"].assert_eq(&out);
 }
 
 /// Outgoing calls must include recursive call within the function.
@@ -376,7 +380,7 @@ function recurs$0e(int $n): void { if ($n > 0) recurse($n - 1); }
 "#,
         )
         .await;
-    expect!["recurse @ main.php:1"].assert_eq(&out);
+    expect!["recurse @ main.php:1:9 fromRanges=[1:45-1:52]"].assert_eq(&out);
 }
 
 /// Calling a trait method must resolve to the trait method implementation.
@@ -396,7 +400,7 @@ class Service {
 "#,
         )
         .await;
-    expect!["run @ main.php:6"].assert_eq(&out);
+    expect!["run @ main.php:6:20 fromRanges=[6:41-6:44]"].assert_eq(&out);
 }
 
 /// Calling a trait method should show the trait method in outgoing calls.
@@ -416,7 +420,7 @@ class Service {
 "#,
         )
         .await;
-    expect!["log @ main.php:2"].assert_eq(&out);
+    expect!["log @ main.php:2:20 fromRanges=[6:41-6:44]"].assert_eq(&out);
 }
 
 /// Method with no calls to other functions must report empty outgoing calls.
@@ -451,7 +455,7 @@ class Child extends Base {
 "#,
         )
         .await;
-    expect!["setup @ main.php:2"].assert_eq(&out);
+    expect!["setup @ main.php:2:20 fromRanges=[5:42-5:47]"].assert_eq(&out);
 }
 
 /// Static method calls must be tracked in outgoing calls.
@@ -468,7 +472,7 @@ class Factory {
 "#,
         )
         .await;
-    expect!["uuid @ main.php:1"].assert_eq(&out);
+    expect!["uuid @ main.php:1:37 fromRanges=[3:49-3:53, 3:69-3:73]"].assert_eq(&out);
 }
 
 /// Multiple calls to the same function are deduplicated in outgoing calls.
@@ -485,7 +489,7 @@ class Worker {
 "#,
         )
         .await;
-    expect!["process @ main.php:1"].assert_eq(&out);
+    expect!["process @ main.php:1:31 fromRanges=[3:58-3:65, 3:73-3:80]"].assert_eq(&out);
 }
 
 /// Nullsafe method calls must be included in outgoing calls.
@@ -502,7 +506,7 @@ class Proxy {
 "#,
         )
         .await;
-    expect!["handle @ main.php:1"].assert_eq(&out);
+    expect!["handle @ main.php:1:32 fromRanges=[3:45-3:51]"].assert_eq(&out);
 }
 
 /// Calls in conditional expressions must be detected.
@@ -517,7 +521,7 @@ function decid$0e(): void { $x = check() ? 1 : 2; }
 "#,
         )
         .await;
-    expect!["check @ main.php:1"].assert_eq(&out);
+    expect!["check @ main.php:1:9 fromRanges=[2:31-2:36]"].assert_eq(&out);
 }
 
 /// Calls in array elements must be detected.
@@ -532,7 +536,7 @@ function col$0llect(): array { return [item(), item()]; }
 "#,
         )
         .await;
-    expect!["item @ main.php:1"].assert_eq(&out);
+    expect!["item @ main.php:1:9 fromRanges=[2:37-2:41, 2:45-2:49]"].assert_eq(&out);
 }
 
 /// Prepare on non-existent function must return empty.
@@ -562,7 +566,7 @@ function caller(): void { helper(); helper(); helper(); }
         )
         .await;
     // All three calls are from the same caller, deduplicated to one incoming call
-    expect!["caller @ main.php:2"].assert_eq(&out);
+    expect!["caller @ main.php:2:9 fromRanges=[2:26-2:32, 2:36-2:42, 2:46-2:52]"].assert_eq(&out);
 }
 
 /// Methods in inherited classes must show up in incoming calls.
@@ -581,7 +585,7 @@ class Derived extends Base {
 "#,
         )
         .await;
-    expect!["run @ main.php:5"].assert_eq(&out);
+    expect!["run @ main.php:5:20 fromRanges=[5:41-5:48]"].assert_eq(&out);
 }
 
 // ── selectionRange containment regression tests ────────────────────────────────
@@ -603,7 +607,7 @@ class Mailer {
 "#,
         )
         .await;
-    expect!["send (Method) [Mailer] @ main.php:3"].assert_eq(&out);
+    expect!["send (Method) [Mailer] @ main.php:3:20"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -619,7 +623,7 @@ trait Sendable {
 "#,
         )
         .await;
-    expect!["send (Method) [Sendable] @ main.php:3"].assert_eq(&out);
+    expect!["send (Method) [Sendable] @ main.php:3:20"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -636,7 +640,7 @@ enum Status {
 "#,
         )
         .await;
-    expect!["process (Method) [Status] @ main.php:4"].assert_eq(&out);
+    expect!["process (Method) [Status] @ main.php:4:20"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -655,5 +659,5 @@ class EventBus {
 "#,
         )
         .await;
-    expect!["dispatch @ main.php:4"].assert_eq(&out);
+    expect!["dispatch @ main.php:4:20 fromRanges=[5:15-5:24]"].assert_eq(&out);
 }

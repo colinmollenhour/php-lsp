@@ -917,9 +917,12 @@ pub(crate) fn render_prepare_call_hierarchy(resp: &Value, root_uri: &str) -> Str
             let uri = i["uri"].as_str().unwrap_or("?");
             let short = uri.strip_prefix(&prefix).unwrap_or(uri);
             let line = i["selectionRange"]["start"]["line"].as_u64().unwrap_or(0);
+            let col = i["selectionRange"]["start"]["character"]
+                .as_u64()
+                .unwrap_or(0);
             match i["detail"].as_str() {
-                Some(detail) => format!("{name} ({kind}) [{detail}] @ {short}:{line}"),
-                None => format!("{name} ({kind}) @ {short}:{line}"),
+                Some(detail) => format!("{name} ({kind}) [{detail}] @ {short}:{line}:{col}"),
+                None => format!("{name} ({kind}) @ {short}:{line}:{col}"),
             }
         })
         .collect();
@@ -927,6 +930,11 @@ pub(crate) fn render_prepare_call_hierarchy(resp: &Value, root_uri: &str) -> Str
     rows.join("\n")
 }
 
+/// Render an incoming/outgoing call-hierarchy call, `side` selecting the
+/// `"from"` or `"to"` item. Includes the item's own `selectionRange` (line
+/// and column) plus every call-site range in `fromRanges`, so a bug that
+/// drops, duplicates, or mislocates an individual call site — not just the
+/// wrong target item — shows up as a snapshot diff.
 pub fn render_call_hierarchy(resp: &Value, side: &str, root_uri: &str) -> String {
     if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
         return format!("error: {err}");
@@ -951,7 +959,30 @@ pub fn render_call_hierarchy(resp: &Value, side: &str, root_uri: &str) -> String
                 .as_u64()
                 .or_else(|| node["range"]["start"]["line"].as_u64())
                 .unwrap_or(0);
-            format!("{name} @ {short}:{line}")
+            let col = node["selectionRange"]["start"]["character"]
+                .as_u64()
+                .or_else(|| node["range"]["start"]["character"].as_u64())
+                .unwrap_or(0);
+            let mut from_ranges: Vec<String> = c["fromRanges"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|r| {
+                    format!(
+                        "{}:{}-{}:{}",
+                        r["start"]["line"].as_u64().unwrap_or(0),
+                        r["start"]["character"].as_u64().unwrap_or(0),
+                        r["end"]["line"].as_u64().unwrap_or(0),
+                        r["end"]["character"].as_u64().unwrap_or(0),
+                    )
+                })
+                .collect();
+            from_ranges.sort();
+            format!(
+                "{name} @ {short}:{line}:{col} fromRanges=[{}]",
+                from_ranges.join(", ")
+            )
         })
         .collect();
     rows.sort();

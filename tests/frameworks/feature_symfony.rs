@@ -395,7 +395,7 @@ mod call_hierarchy {
         let resp = server.incoming_calls(item).await;
         assert!(resp["error"].is_null());
         let out = render_call_hierarchy(&resp, "from", &server.uri(""));
-        expect!["index @ src/Controller/BlogController.php:47"].assert_eq(&out);
+        expect!["index @ src/Controller/BlogController.php:47:29 fromRanges=[59:31-59:41]"].assert_eq(&out);
     }
 }
 
