@@ -206,7 +206,11 @@ async fn signature_help_trait_method() {
 trait Logger {
     public function log(string $msg, int $level): void {}
 }
-log($0);
+class Service {
+    use Logger;
+}
+$service = new Service();
+$service->log($0);
 "#,
         )
         .await;
@@ -223,11 +227,51 @@ async fn signature_help_enum_method() {
 enum Status {
     public static function from(string $value): self {}
 }
-from($0);
+Status::from($0);
 "#,
         )
         .await;
     expect!["▶ from(string $value)  @param0"].assert_eq(&out);
+}
+
+/// A bare, receiver-less call must never resolve to a trait/interface/enum
+/// member of the same name — only a top-level `function` or a builtin is
+/// reachable without `->`/`::`. `log` has a builtin, so it must win here even
+/// though a trait in the same file declares a `log` method.
+#[tokio::test]
+async fn signature_help_bare_call_prefers_builtin_over_same_named_member() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_signature_help(
+            r#"<?php
+trait Logger {
+    public function log(string $msg, int $level): void {}
+}
+log($0);
+"#,
+        )
+        .await;
+    expect!["▶ log($num, $base = M_E)  @param0"].assert_eq(&out);
+}
+
+/// Same as above but for a name with no builtin counterpart (`from`): a bare
+/// call must show no signature rather than the enum's static method.
+#[tokio::test]
+async fn signature_help_bare_call_with_no_builtin_and_same_named_member_has_no_signature() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_signature_help(
+            r#"<?php
+enum Status {
+    public static function from(string $value): self {}
+}
+from($0);
+"#,
+        )
+        .await;
+    expect!["<no signature>"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -263,7 +307,9 @@ async fn signature_help_interface_method() {
 interface Logger {
     public function log(string $msg, int $level): void;
 }
-log($0);
+function useLogger(Logger $logger): void {
+    $logger->log($0);
+}
 "#,
         )
         .await;

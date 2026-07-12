@@ -52,7 +52,7 @@ pub fn signature_help(
         };
         find_method_params_in_hierarchy(&class_name, &func_name, ws_indexes)?
     } else {
-        find_signature(&doc.program().stmts, &func_name)
+        find_signature(&doc.program().stmts, &func_name, receiver.is_some())
             .or_else(|| builtin_signature(&func_name).map(|s| s.to_string()))
             .or_else(|| {
                 if let Some(recv) = receiver.as_deref() {
@@ -359,18 +359,25 @@ fn find_method_params_in_hierarchy(
     None
 }
 
-fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
+/// `has_receiver` gates class/interface/trait/enum member matching: a bare
+/// call (no `->`/`::`/`?->`) can only ever reach a top-level `function`
+/// declaration (or a class name used as `new ClassName(...)`), never a
+/// member of the same name, since PHP has no syntax to invoke a method
+/// without a receiver.
+fn find_signature(stmts: &[Stmt<'_, '_>], word: &str, has_receiver: bool) -> Option<String> {
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Function(f) if f.name == word => {
                 return Some(format_params_str(&f.params));
             }
             StmtKind::Class(c) => {
-                for member in c.body.members.iter() {
-                    if let ClassMemberKind::Method(m) = &member.kind
-                        && m.name == word
-                    {
-                        return Some(format_params_str(&m.params));
+                if has_receiver {
+                    for member in c.body.members.iter() {
+                        if let ClassMemberKind::Method(m) = &member.kind
+                            && m.name == word
+                        {
+                            return Some(format_params_str(&m.params));
+                        }
                     }
                 }
                 if c.name.as_ref().map(|n| n.to_string()) == Some(word.to_string()) {
@@ -383,7 +390,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                     }
                 }
             }
-            StmtKind::Interface(i) => {
+            StmtKind::Interface(i) if has_receiver => {
                 for member in i.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == word
@@ -392,7 +399,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                     }
                 }
             }
-            StmtKind::Trait(t) => {
+            StmtKind::Trait(t) if has_receiver => {
                 for member in t.body.members.iter() {
                     if let ClassMemberKind::Method(m) = &member.kind
                         && m.name == word
@@ -401,7 +408,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                     }
                 }
             }
-            StmtKind::Enum(e) => {
+            StmtKind::Enum(e) if has_receiver => {
                 for member in e.body.members.iter() {
                     if let EnumMemberKind::Method(m) = &member.kind
                         && m.name == word
@@ -412,7 +419,7 @@ fn find_signature(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(s) = find_signature(&inner.stmts, word)
+                    && let Some(s) = find_signature(&inner.stmts, word, has_receiver)
                 {
                     return Some(s);
                 }
