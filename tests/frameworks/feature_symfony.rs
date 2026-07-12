@@ -75,7 +75,18 @@ mod semantic_tokens {
     use super::*;
 
     #[tokio::test]
-    async fn semantic_tokens_full_on_blog_controller_is_nonempty_and_well_formed() {
+    async fn semantic_tokens_full_on_blog_controller_is_well_formed() {
+        // The legend is a server-wide constant, independent of the fixture
+        // under test, so a throwaway server suffices to fetch it.
+        let (_, init_resp) = TestServer::new_with_options(serde_json::json!({})).await;
+        let legend_types: Vec<&str> = init_resp["result"]["capabilities"]["semanticTokensProvider"]
+            ["legend"]["tokenTypes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+
         let mut server = TestServer::with_fixture_no_vendor("symfony-demo").await;
         server.wait_for_index_ready().await;
 
@@ -87,14 +98,203 @@ mod semantic_tokens {
         let resp = server
             .semantic_tokens_full("src/Controller/BlogController.php")
             .await;
-        assert!(resp["error"].is_null());
-        assert!(
-            !resp["result"]["data"]
-                .as_array()
-                .unwrap_or(&vec![])
-                .is_empty(),
-            "expected semantic tokens"
-        );
+        expect![[r#"
+            2:0 len=2 type=comment mods=0b0
+            3:0 len=44 type=comment mods=0b0
+            4:0 len=2 type=comment mods=0b0
+            5:0 len=44 type=comment mods=0b0
+            6:0 len=2 type=comment mods=0b0
+            7:0 len=74 type=comment mods=0b0
+            8:0 len=51 type=comment mods=0b0
+            9:0 len=3 type=comment mods=0b0
+            32:0 len=3 type=comment mods=0b0
+            33:0 len=74 type=comment mods=0b0
+            34:0 len=2 type=comment mods=0b0
+            35:0 len=45 type=comment mods=0b0
+            36:0 len=52 type=comment mods=0b0
+            37:0 len=3 type=comment mods=0b0
+            38:2 len=5 type=class mods=0b0
+            39:12 len=14 type=class mods=0b1
+            41:4 len=3 type=comment mods=0b0
+            42:0 len=82 type=comment mods=0b0
+            43:0 len=44 type=comment mods=0b0
+            44:0 len=6 type=comment mods=0b0
+            45:0 len=74 type=comment mods=0b0
+            46:0 len=7 type=comment mods=0b0
+            47:6 len=5 type=class mods=0b0
+            47:49 len=4 type=parameter mods=0b1
+            47:64 len=7 type=parameter mods=0b1
+            48:6 len=5 type=class mods=0b0
+            49:6 len=5 type=class mods=0b0
+            50:6 len=5 type=class mods=0b0
+            51:20 len=5 type=method mods=0b1
+            51:26 len=7 type=type mods=0b0
+            51:34 len=8 type=parameter mods=0b1
+            51:34 len=8 type=parameter mods=0b1
+            51:34 len=8 type=parameter mods=0b1
+            51:44 len=3 type=type mods=0b0
+            51:55 len=6 type=type mods=0b0
+            51:72 len=14 type=type mods=0b0
+            51:87 len=6 type=parameter mods=0b1
+            51:95 len=13 type=type mods=0b0
+            51:109 len=5 type=parameter mods=0b1
+            51:117 len=8 type=type mods=0b0
+            53:8 len=4 type=variable mods=0b0
+            55:29 len=3 type=method mods=0b0
+            55:33 len=5 type=string mods=0b0
+            56:12 len=4 type=variable mods=0b0
+            56:19 len=5 type=variable mods=0b0
+            56:26 len=9 type=method mods=0b0
+            56:37 len=6 type=string mods=0b0
+            56:64 len=3 type=method mods=0b0
+            56:68 len=5 type=string mods=0b0
+            59:8 len=12 type=variable mods=0b0
+            59:23 len=6 type=variable mods=0b0
+            59:31 len=10 type=method mods=0b0
+            59:42 len=5 type=variable mods=0b0
+            59:49 len=4 type=variable mods=0b0
+            61:8 len=74 type=comment mods=0b0
+            62:8 len=28 type=comment mods=0b0
+            63:8 len=69 type=comment mods=0b0
+            64:15 len=5 type=variable mods=0b0
+            64:22 len=6 type=method mods=0b0
+            64:29 len=13 type=string mods=0b0
+            64:43 len=8 type=variable mods=0b0
+            64:52 len=7 type=string mods=0b0
+            65:12 len=11 type=string mods=0b0
+            65:27 len=12 type=variable mods=0b0
+            66:12 len=9 type=string mods=0b0
+            66:25 len=4 type=variable mods=0b0
+            66:32 len=7 type=method mods=0b0
+            70:4 len=3 type=comment mods=0b0
+            71:0 len=80 type=comment mods=0b0
+            72:0 len=87 type=comment mods=0b0
+            73:0 len=76 type=comment mods=0b0
+            73:18 len=4 type=parameter mods=0b1
+            73:18 len=4 type=parameter mods=0b1
+            73:18 len=4 type=parameter mods=0b1
+            74:0 len=85 type=comment mods=0b0
+            75:0 len=86 type=comment mods=0b0
+            76:0 len=35 type=comment mods=0b0
+            77:0 len=108 type=comment mods=0b0
+            78:0 len=7 type=comment mods=0b0
+            79:6 len=5 type=class mods=0b0
+            80:20 len=8 type=method mods=0b1
+            80:29 len=4 type=type mods=0b0
+            80:42 len=8 type=type mods=0b0
+            82:8 len=79 type=comment mods=0b0
+            83:8 len=89 type=comment mods=0b0
+            84:8 len=74 type=comment mods=0b0
+            85:8 len=82 type=comment mods=0b0
+            86:8 len=2 type=comment mods=0b0
+            87:8 len=50 type=comment mods=0b0
+            88:8 len=2 type=comment mods=0b0
+            89:8 len=87 type=comment mods=0b0
+            90:8 len=52 type=comment mods=0b0
+            91:8 len=77 type=comment mods=0b0
+            92:8 len=2 type=comment mods=0b0
+            93:8 len=65 type=comment mods=0b0
+            94:8 len=22 type=comment mods=0b0
+            96:15 len=5 type=variable mods=0b0
+            96:22 len=6 type=method mods=0b0
+            96:29 len=26 type=string mods=0b0
+            96:58 len=6 type=string mods=0b0
+            96:68 len=5 type=variable mods=0b0
+            99:4 len=3 type=comment mods=0b0
+            100:0 len=77 type=comment mods=0b0
+            101:0 len=77 type=comment mods=0b0
+            102:0 len=6 type=comment mods=0b0
+            103:0 len=87 type=comment mods=0b0
+            104:0 len=7 type=comment mods=0b0
+            105:6 len=5 type=class mods=0b0
+            106:6 len=9 type=class mods=0b0
+            107:20 len=10 type=method mods=0b1
+            108:10 len=11 type=class mods=0b0
+            108:23 len=4 type=type mods=0b0
+            108:28 len=5 type=parameter mods=0b1
+            109:8 len=7 type=type mods=0b0
+            110:10 len=9 type=class mods=0b0
+            110:54 len=4 type=type mods=0b0
+            111:8 len=24 type=type mods=0b0
+            111:33 len=16 type=parameter mods=0b1
+            112:8 len=22 type=type mods=0b0
+            112:31 len=14 type=parameter mods=0b1
+            113:7 len=8 type=type mods=0b0
+            114:8 len=8 type=variable mods=0b0
+            115:8 len=8 type=variable mods=0b0
+            115:18 len=9 type=method mods=0b0
+            115:28 len=5 type=variable mods=0b0
+            116:8 len=5 type=variable mods=0b0
+            116:15 len=10 type=method mods=0b0
+            116:26 len=8 type=variable mods=0b0
+            118:8 len=5 type=variable mods=0b0
+            118:16 len=5 type=variable mods=0b0
+            118:23 len=10 type=method mods=0b0
+            118:54 len=8 type=variable mods=0b0
+            119:8 len=5 type=variable mods=0b0
+            119:15 len=13 type=method mods=0b0
+            119:29 len=8 type=variable mods=0b0
+            121:12 len=5 type=variable mods=0b0
+            121:19 len=11 type=method mods=0b0
+            121:36 len=5 type=variable mods=0b0
+            121:43 len=7 type=method mods=0b0
+            122:12 len=14 type=variable mods=0b0
+            122:28 len=7 type=method mods=0b0
+            122:36 len=8 type=variable mods=0b0
+            123:12 len=14 type=variable mods=0b0
+            123:28 len=5 type=method mods=0b0
+            125:12 len=72 type=comment mods=0b0
+            126:12 len=73 type=comment mods=0b0
+            127:12 len=70 type=comment mods=0b0
+            128:12 len=74 type=comment mods=0b0
+            129:12 len=71 type=comment mods=0b0
+            130:12 len=2 type=comment mods=0b0
+            131:12 len=73 type=comment mods=0b0
+            132:12 len=68 type=comment mods=0b0
+            133:12 len=53 type=comment mods=0b0
+            134:12 len=16 type=variable mods=0b0
+            134:30 len=8 type=method mods=0b0
+            134:63 len=8 type=variable mods=0b0
+            136:19 len=5 type=variable mods=0b0
+            136:26 len=15 type=method mods=0b0
+            136:42 len=11 type=string mods=0b0
+            136:56 len=6 type=string mods=0b0
+            136:66 len=5 type=variable mods=0b0
+            136:73 len=7 type=method mods=0b0
+            139:15 len=5 type=variable mods=0b0
+            139:22 len=6 type=method mods=0b0
+            139:29 len=35 type=string mods=0b0
+            140:12 len=6 type=string mods=0b0
+            140:22 len=5 type=variable mods=0b0
+            141:12 len=6 type=string mods=0b0
+            141:22 len=5 type=variable mods=0b0
+            145:4 len=3 type=comment mods=0b0
+            146:0 len=74 type=comment mods=0b0
+            147:0 len=78 type=comment mods=0b0
+            148:0 len=27 type=comment mods=0b0
+            149:0 len=7 type=comment mods=0b0
+            150:20 len=11 type=method mods=0b1
+            150:32 len=4 type=type mods=0b0
+            150:45 len=8 type=type mods=0b0
+            152:8 len=5 type=variable mods=0b0
+            152:16 len=5 type=variable mods=0b0
+            152:23 len=10 type=method mods=0b0
+            154:15 len=5 type=variable mods=0b0
+            154:22 len=6 type=method mods=0b0
+            154:29 len=30 type=string mods=0b0
+            155:12 len=6 type=string mods=0b0
+            155:22 len=5 type=variable mods=0b0
+            156:12 len=6 type=string mods=0b0
+            156:22 len=5 type=variable mods=0b0
+            160:6 len=5 type=class mods=0b0
+            160:14 len=6 type=method mods=0b1
+            161:27 len=7 type=type mods=0b0
+            161:46 len=8 type=type mods=0b0
+            163:15 len=5 type=variable mods=0b0
+            163:22 len=6 type=method mods=0b0
+            163:29 len=23 type=string mods=0b0
+            163:55 len=7 type=string mods=0b0"#]]
+        .assert_eq(&render_semantic_tokens(&resp, &legend_types));
     }
 }
 
