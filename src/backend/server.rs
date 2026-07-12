@@ -458,7 +458,7 @@ impl LanguageServer for Backend {
             let uri_for_class_search = uri.clone();
             let docs_for_lookup = Arc::clone(&self.docs);
             let find_class_doc_fn = move |name: &str| -> Option<Arc<ParsedDoc>> {
-                let cr = *wi.classes_by_name.get(name)?.first()?;
+                let cr = wi.resolve_class_ref(name)?;
                 let (uri, _) = wi.at(cr)?;
                 docs_for_lookup.get_doc_salsa(uri)
             };

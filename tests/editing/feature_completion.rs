@@ -5189,6 +5189,43 @@ async fn completion_static_facade_methods_from_unopened_cross_namespace_file() {
     .assert_eq(&out);
 }
 
+/// Regression test for a confirmed false positive: two unrelated classes
+/// sharing a short name in different namespaces (Laravel ships exactly this
+/// — `Illuminate\Support\Facades\Auth` the real facade, and `Illuminate\
+/// Container\Attributes\Auth` a tiny constructor-injection attribute) must
+/// resolve static-member completion to the one the file actually imports,
+/// not whichever same-named class the workspace index happens to hit first.
+#[tokio::test]
+async fn completion_static_resolves_use_imported_class_over_namespace_collision() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("FacadeAuth.php"),
+        "<?php\n\nnamespace Acme\\Support\\Facades;\n\n/**\n * @method static bool check()\n * @method static mixed user()\n */\nclass Auth\n{\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("AttributeAuth.php"),
+        "<?php\n\nnamespace Acme\\Container\\Attributes;\n\nclass Auth\n{\n    public static function resolve(): mixed {}\n}\n",
+    )
+    .unwrap();
+    let caller =
+        "<?php\nuse Acme\\Support\\Facades\\Auth;\n\nfunction f() {\n    Auth::check();\n}\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "check();", 0);
+    let resp = s.completion("caller.php", line, ch).await;
+    let out = render_completion_ordered(&resp);
+    expect![[r#"
+        Method      check
+        Method      user"#]]
+    .assert_eq(&out);
+}
+
 /// Typing the bare short name of a class that lives in a file which was
 /// never opened in the editor (e.g. a vendor package) must still surface it
 /// as a completion candidate, with an `additionalTextEdits` auto-import.

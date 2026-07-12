@@ -60,6 +60,15 @@ fn all_members(
         let mut parent: Option<String> = None;
         let mut found_in_docs = false;
 
+        // `current` may be a bare short name or a full FQN (an import-
+        // resolved receiver keeps its FQN so `find_class_doc` can pick the
+        // right same-named class from a different namespace — see
+        // `resolve_static_receiver`). AST-level matching (`members_of_class`
+        // and friends below) always compares against the short name as
+        // declared in source, so that's what they get; `find_class_doc` and
+        // `stub_class_members` want the disambiguating full name.
+        let short: &str = current.rsplit('\\').next().unwrap_or(&current);
+
         // Fast path: workspace-index lookup gives O(1) access to the one doc
         // that defines `current`. Fallback: scan all docs linearly (original
         // behaviour, used when the index is unavailable or the class is not
@@ -67,13 +76,13 @@ fn all_members(
         let fast_doc: Option<Arc<ParsedDoc>> = find_class_doc.and_then(|f| f(&current));
         let fast_ref: Option<&ParsedDoc> = fast_doc.as_deref();
         let defining: Option<(&ParsedDoc, ClassMembers)> = if let Some(fd) = fast_ref {
-            let m = members_of_class(fd, &current);
+            let m = members_of_class(fd, short);
             m.found.then_some((fd, m))
         } else {
             // PHP defines a class in exactly one file, so stop scanning once
             // the defining doc is hit.
             all.iter().find_map(|d| {
-                let m = members_of_class(d, &current);
+                let m = members_of_class(d, short);
                 m.found.then_some((*d, m))
             })
         };
@@ -124,7 +133,7 @@ fn all_members(
             } else {
                 // Built-in enum properties: every enum case has `->name: string`
                 // and backed enums also have `->value`.
-                if is_enum(d, &current) {
+                if is_enum(d, short) {
                     if seen_names.insert("name".to_string()) {
                         items.push(CompletionItem {
                             label: "name".to_string(),
@@ -133,7 +142,7 @@ fn all_members(
                             ..Default::default()
                         });
                     }
-                    if is_backed_enum(d, &current) && seen_names.insert("value".to_string()) {
+                    if is_backed_enum(d, short) && seen_names.insert("value".to_string()) {
                         items.push(CompletionItem {
                             label: "value".to_string(),
                             kind: Some(CompletionItemKind::PROPERTY),
@@ -142,7 +151,7 @@ fn all_members(
                         });
                     }
                 }
-                for mixin in mixin_classes_of(d, &current) {
+                for mixin in mixin_classes_of(d, short) {
                     queue.push(mixin);
                 }
             }
@@ -239,17 +248,24 @@ pub(super) fn resolve_static_receiver(
             None
         }
         _ => {
-            // If the name contains a backslash it's already a FQN — extract its
-            // short component directly (e.g. `\Illuminate\Support\Str::` → `Str`).
+            // If the name contains a backslash it's already a FQN — return it
+            // as-is (minus a leading `\`) rather than collapsing to the short
+            // name, so callers can disambiguate same-named classes in
+            // different namespaces instead of matching the first class with
+            // that short name found anywhere in the workspace.
             if name.contains('\\') {
-                return Some(fqn_short_name(&name).to_owned());
+                return Some(name.trim_start_matches('\\').to_owned());
             }
             // Otherwise try to expand a `use`-import alias. This handles both
             // the unaliased case (`use Foo\Bar\Str` → alias `Str` = short name `Str`)
             // and the `as`-aliased case (`use Foo\Bar\Str as Helper` → alias `Helper`
-            // maps to FQN `Foo\Bar\Str`, short name `Str`).
+            // maps to FQN `Foo\Bar\Str`, short name `Str`). Keep the full FQN
+            // (not just its short name) so a namespace collision — e.g.
+            // Laravel's `Illuminate\Support\Facades\Auth` vs `Illuminate\
+            // Container\Attributes\Auth` — resolves to the imported class,
+            // not whichever same-named class the workspace index hits first.
             if let Some(fqcn) = imports.get(&name) {
-                return Some(fqn_short_name(fqcn).to_owned());
+                return Some(fqcn.trim_start_matches('\\').to_owned());
             }
             Some(name)
         }

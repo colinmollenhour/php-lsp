@@ -216,6 +216,33 @@ impl WorkspaceIndexData {
         Some((uri, cls))
     }
 
+    /// Resolve `name` to a single `ClassRef`, disambiguating same-named
+    /// classes in different namespaces. `classes_by_name` is keyed by short
+    /// name only, so two unrelated classes sharing a name (e.g. Laravel's
+    /// `Illuminate\Support\Facades\Auth` vs `Illuminate\Container\Attributes\
+    /// Auth`) collide in one bucket; picking `.first()` unconditionally
+    /// silently returns whichever happens to be indexed first.
+    ///
+    /// `name` may be a bare short name (kept for compatibility — resolves to
+    /// the first match, as before) or a fully-qualified name (`Foo\Bar\Baz`,
+    /// optionally leading with `\`), in which case the candidate whose own
+    /// FQN matches (case-insensitively, PHP class names are
+    /// case-insensitive) is preferred over an arbitrary first match.
+    pub fn resolve_class_ref(&self, name: &str) -> Option<ClassRef> {
+        let trimmed = name.trim_start_matches('\\');
+        let short = trimmed.rsplit('\\').next().unwrap_or(trimmed);
+        let candidates = self.classes_by_name.get(short)?;
+        if trimmed.contains('\\')
+            && let Some(cr) = candidates.iter().find(|cr| {
+                self.at(**cr)
+                    .is_some_and(|(_, cls)| cls.fqn.trim_start_matches('\\').eq_ignore_ascii_case(trimmed))
+            })
+        {
+            return Some(*cr);
+        }
+        candidates.first().copied()
+    }
+
     /// O(1) replacement for the linear `find_declaration_in_indexes` scan:
     /// find a declaration by name, optionally excluding one file (the current
     /// document, which the caller has already searched with accurate AST
