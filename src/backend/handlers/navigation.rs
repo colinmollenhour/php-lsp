@@ -16,7 +16,7 @@ use super::super::helpers::{
     class_name_at_construct_decl, promoted_property_at_cursor, range_within,
 };
 use super::super::panic_guard::guard_async_result;
-use super::super::{Backend, resolve_reference_symbol};
+use super::super::{Backend, class_before_double_colon, resolve_reference_symbol};
 
 impl Backend {
     pub(crate) async fn handle_goto_definition(
@@ -220,14 +220,27 @@ impl Backend {
             if word == "__construct"
                 && let Some(doc) = self.get_doc(uri)
             {
-                // Try declaration site first; fall back to the enclosing class so
-                // that `parent::__construct()` call sites also resolve correctly
-                // instead of matching all constructors across the workspace.
+                // Try declaration site first. `parent::` is compile-time resolved
+                // in PHP — it always names the literal `extends` class, never
+                // subject to late static binding — so a `parent::__construct()`
+                // call site must resolve to that parent, not the enclosing
+                // (child) class. Only fall back to the enclosing-class heuristic
+                // when the parent can't be resolved (e.g. an external/vendor
+                // base class not present in the workspace index).
                 let decl_class =
                     class_name_at_construct_decl(doc.source(), &doc.program().stmts, position);
                 let on_call_site = decl_class.is_none();
-                let class_name =
-                    decl_class.or_else(|| enclosing_class_fqn_at(doc.source(), &doc, position));
+                let is_parent_call_site = on_call_site
+                    && class_before_double_colon(&source, position).as_deref() == Some("parent");
+                let class_name = if let Some(decl_class) = decl_class {
+                    Some(decl_class)
+                } else if is_parent_call_site {
+                    let wi = self.workspace_index_async().await;
+                    resolve_parent_construct_class(&doc, position, &wi.files)
+                        .or_else(|| enclosing_class_fqn_at(doc.source(), &doc, position))
+                } else {
+                    enclosing_class_fqn_at(doc.source(), &doc, position)
+                };
                 if let Some(class_name) = class_name {
                     // When cursor is on a call site (not the `function __construct`
                     // declaration), exclude the cursor span from results — it points
@@ -446,4 +459,30 @@ fn expand_alias_prefix(word: &str, imports: &std::collections::HashMap<String, S
         return format!("{}\\{}", ns_prefix, rest);
     }
     word.to_string()
+}
+
+/// Resolve a `parent::__construct()` call site to the FQN of the class named
+/// in the enclosing class's `extends` clause. Looks up the `extends` name
+/// (same-file, as written in source) and confirms it against an indexed
+/// class across the workspace, since the raw `extends` text alone doesn't
+/// tell us whether it's an external/vendor class we can't scope to. Returns
+/// `None` when no such class is indexed, so the caller can fall back to the
+/// enclosing-class heuristic.
+fn resolve_parent_construct_class(
+    doc: &crate::document::ast::ParsedDoc,
+    position: Position,
+    files: &[(Url, Arc<crate::index::file_index::FileIndex>)],
+) -> Option<String> {
+    let child_short = enclosing_class_at(doc.source(), doc, position)?;
+    let raw_parent = crate::types::type_map::parent_class_name(doc, &child_short)?;
+    let parent_short = fqn_short_name(&raw_parent);
+    let parent_bare = raw_parent.trim_start_matches('\\');
+    files.iter().find_map(|(_, idx)| {
+        idx.classes
+            .iter()
+            .find(|cls| {
+                cls.name.as_ref() == parent_short || cls.fqn.trim_start_matches('\\') == parent_bare
+            })
+            .map(|cls| cls.fqn.trim_start_matches('\\').to_owned())
+    })
 }

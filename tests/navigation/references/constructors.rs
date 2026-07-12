@@ -193,10 +193,12 @@ async fn references_on_constructor_scoped_by_namespace_fqn() {
 }
 
 /// Cursor on `parent::__construct()` in a child constructor must resolve to
-/// the child class's own instantiation sites, not every `__construct` in the
-/// file.
+/// the *parent* class's own instantiation sites. `parent::` is compile-time
+/// resolved in PHP — it always names the literal `extends` class, never
+/// subject to late static binding — so it must not resolve to `new Child(...)`,
+/// which invokes a different (overriding) constructor.
 #[tokio::test]
-async fn references_constructor_from_parent_call_site_scoped_to_child() {
+async fn references_constructor_from_parent_call_site_scoped_to_parent() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
@@ -209,18 +211,18 @@ class Child extends Base {
     }
 }
 new Child(1, 'Alice');
-//  ^^^^^ ref
 new Base(2);
+//  ^^^^ ref
 "#,
     )
     .await;
 }
 
-/// When cursor is on `parent::__construct()` and the owning class has no
-/// `new ClassName()` call in the file, the result must be empty rather than
-/// returning all constructors across the file.
+/// Cursor on `parent::__construct()` resolves to the parent class's own
+/// instantiation sites, even when the child class itself is never
+/// instantiated directly.
 #[tokio::test]
-async fn references_constructor_call_site_no_instantiation_returns_empty() {
+async fn references_constructor_call_site_resolves_to_parent_instantiation() {
     let mut s = TestServer::new().await;
     s.check_references_annotated(
         r#"<?php
@@ -233,6 +235,7 @@ class Beta extends Alpha {
     }
 }
 new Alpha();
+//  ^^^^^ ref
 "#,
     )
     .await;
