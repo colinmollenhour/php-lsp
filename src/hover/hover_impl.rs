@@ -70,15 +70,15 @@ fn builtin_class_hover(
     let method_names: Vec<&str> = stub
         .methods
         .iter()
-        .filter(|(_, is_static)| !is_static)
-        .map(|(n, _)| n.as_str())
+        .filter(|(_, is_static, _)| !is_static)
+        .map(|(n, _, _)| n.as_str())
         .take(8)
         .collect();
     let static_names: Vec<&str> = stub
         .methods
         .iter()
-        .filter(|(_, is_static)| *is_static)
-        .map(|(n, _)| n.as_str())
+        .filter(|(_, is_static, _)| *is_static)
+        .map(|(n, _, _)| n.as_str())
         .take(4)
         .collect();
     let mut lines = vec![format!("**{}** — built-in class", name)];

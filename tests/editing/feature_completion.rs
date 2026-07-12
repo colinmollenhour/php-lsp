@@ -1867,6 +1867,54 @@ doT$0
     );
 }
 
+/// Regression test for a confirmed bug: cross-file member completion (routed
+/// through the workspace index, unlike same-file completion) always
+/// snippeted `($1)` regardless of whether the method actually took
+/// arguments, because `ClassMembers` didn't track parameter presence at all
+/// — the has_params bit passed to `callable_item` was hardcoded `true`.
+#[tokio::test]
+async fn completion_cross_file_static_method_snippet_matches_param_count() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Reg.php"),
+        "<?php\nnamespace App;\nclass Reg {\n    public static function reset(): void {}\n    public static function set(string $key): void {}\n}\n",
+    )
+    .unwrap();
+    let caller = "<?php\nnamespace App;\nReg::reset();\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "reset();", 0);
+    let resp = s.completion("caller.php", line, ch).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let reset_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("reset"))
+        .expect("reset not in completions");
+    assert_eq!(
+        reset_item["insertText"].as_str(),
+        Some("reset()"),
+        "zero-param cross-file method must have plain call, got {reset_item:?}"
+    );
+    let set_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("set"))
+        .expect("set not in completions");
+    assert_eq!(
+        set_item["insertText"].as_str(),
+        Some("set($1)"),
+        "cross-file method with a param must have a snippet placeholder, got {set_item:?}"
+    );
+}
+
 // === Use auto-import additionalTextEdits ===
 
 #[tokio::test]

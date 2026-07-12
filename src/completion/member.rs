@@ -90,11 +90,9 @@ fn all_members(
         if let Some((d, members)) = defining {
             found_in_docs = true;
             parent = members.parent.clone();
-            for (name, meth_is_static) in members.methods {
+            for (name, meth_is_static, has_params) in members.methods {
                 if (meth_is_static == is_static) && seen_names.insert(name.clone()) {
-                    // Method params unknown here; use has_params=true so
-                    // snippet cursor lands inside parens.
-                    items.push(callable_item(&name, CompletionItemKind::METHOD, true));
+                    items.push(callable_item(&name, CompletionItemKind::METHOD, has_params));
                 }
             }
             for (name, prop_is_static) in &members.properties {
@@ -167,9 +165,9 @@ fn all_members(
             if parent.is_none() {
                 parent = stub.parent.clone();
             }
-            for (name, meth_is_static) in &stub.methods {
+            for (name, meth_is_static, has_params) in &stub.methods {
                 if (*meth_is_static == is_static) && seen_names.insert(name.clone()) {
-                    items.push(callable_item(name, CompletionItemKind::METHOD, true));
+                    items.push(callable_item(name, CompletionItemKind::METHOD, *has_params));
                 }
             }
             for (name, prop_is_static) in &stub.properties {

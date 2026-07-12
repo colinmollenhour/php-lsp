@@ -662,8 +662,8 @@ fn parent_in_stmts(stmts: &[Stmt<'_, '_>], class_name: &str) -> Option<String> {
 /// All members of a named class split by kind and static-ness.
 #[derive(Debug, Default)]
 pub struct ClassMembers {
-    /// (name, is_static)
-    pub methods: Vec<(String, bool)>,
+    /// (name, is_static, has_params)
+    pub methods: Vec<(String, bool, bool)>,
     /// (name, is_static)
     pub properties: Vec<(String, bool)>,
     /// Names of readonly properties (PHP 8.1+).
@@ -706,13 +706,21 @@ fn collect_members_stmts(
                         out.properties.push((prop.name.clone(), false));
                     }
                     for method in &db.methods {
-                        out.methods.push((method.name.clone(), method.is_static));
+                        out.methods.push((
+                            method.name.clone(),
+                            method.is_static,
+                            !method.params.is_empty(),
+                        ));
                     }
                 }
                 for member in c.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
-                            out.methods.push((m.name.to_string(), m.is_static));
+                            out.methods.push((
+                                m.name.to_string(),
+                                m.is_static,
+                                !m.params.is_empty(),
+                            ));
                             if m.name == "__construct" {
                                 for p in m.params.iter() {
                                     if p.visibility.is_some() {
@@ -752,10 +760,10 @@ fn collect_members_stmts(
                 if is_backed {
                     out.properties.push(("value".to_string(), false));
                 }
-                out.methods.push(("cases".to_string(), true));
+                out.methods.push(("cases".to_string(), true, false));
                 if is_backed {
-                    out.methods.push(("from".to_string(), true));
-                    out.methods.push(("tryFrom".to_string(), true));
+                    out.methods.push(("from".to_string(), true, true));
+                    out.methods.push(("tryFrom".to_string(), true, true));
                 }
                 for member in e.body.members.iter() {
                     match &member.kind {
@@ -763,7 +771,11 @@ fn collect_members_stmts(
                             out.constants.push(c.name.to_string());
                         }
                         EnumMemberKind::Method(m) => {
-                            out.methods.push((m.name.to_string(), m.is_static));
+                            out.methods.push((
+                                m.name.to_string(),
+                                m.is_static,
+                                !m.params.is_empty(),
+                            ));
                         }
                         EnumMemberKind::ClassConst(c) => {
                             out.constants.push(c.name.to_string());
@@ -778,7 +790,11 @@ fn collect_members_stmts(
                 for member in t.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
-                            out.methods.push((m.name.to_string(), m.is_static));
+                            out.methods.push((
+                                m.name.to_string(),
+                                m.is_static,
+                                !m.params.is_empty(),
+                            ));
                         }
                         ClassMemberKind::Property(p) => {
                             out.properties.push((p.name.to_string(), p.is_static));
@@ -1246,9 +1262,28 @@ mod tests {
         let src = "<?php\nclass Calc { public function add() {} public function sub() {} }";
         let doc = ParsedDoc::parse(src.to_string());
         let members = members_of_class(&doc, "Calc");
-        let names: Vec<&str> = members.methods.iter().map(|(n, _)| n.as_str()).collect();
+        let names: Vec<&str> = members.methods.iter().map(|(n, _, _)| n.as_str()).collect();
         assert!(names.contains(&"add"), "missing 'add'");
         assert!(names.contains(&"sub"), "missing 'sub'");
+    }
+
+    /// `has_params` distinguishes a zero-arg method from one that takes
+    /// arguments, so completion can decide whether the inserted snippet
+    /// needs a `$1` tab stop inside the parens or should insert `()` plain.
+    #[test]
+    fn members_of_class_tracks_has_params_per_method() {
+        let src = "<?php\nclass Calc { public function reset() {} public function add(int $x) {} }";
+        let doc = ParsedDoc::parse(src.to_string());
+        let members = members_of_class(&doc, "Calc");
+        let has_params = |name: &str| {
+            members
+                .methods
+                .iter()
+                .find(|(n, _, _)| n == name)
+                .map(|(_, _, p)| *p)
+        };
+        assert_eq!(has_params("reset"), Some(false));
+        assert_eq!(has_params("add"), Some(true));
     }
 
     #[test]
@@ -1321,7 +1356,7 @@ mod tests {
         let doc = ParsedDoc::parse(src.to_string());
         let members = members_of_class(&doc, "Color");
         let prop_names: Vec<&str> = members.properties.iter().map(|(n, _)| n.as_str()).collect();
-        let method_names: Vec<&str> = members.methods.iter().map(|(n, _)| n.as_str()).collect();
+        let method_names: Vec<&str> = members.methods.iter().map(|(n, _, _)| n.as_str()).collect();
         assert!(
             prop_names.contains(&"value"),
             "backed enum should expose ->value"
@@ -1354,7 +1389,7 @@ mod tests {
         let src = "<?php\ntrait Logging { public function log() {} public string $logFile; }";
         let doc = ParsedDoc::parse(src.to_string());
         let members = members_of_class(&doc, "Logging");
-        let method_names: Vec<&str> = members.methods.iter().map(|(n, _)| n.as_str()).collect();
+        let method_names: Vec<&str> = members.methods.iter().map(|(n, _, _)| n.as_str()).collect();
         let prop_names: Vec<&str> = members.properties.iter().map(|(n, _)| n.as_str()).collect();
         assert!(
             method_names.contains(&"log"),
@@ -1532,15 +1567,21 @@ mod tests {
         let src = "<?php\n/**\n * @method User find(int $id)\n * @method static Builder where(string $col, mixed $val)\n */\nclass Model {}";
         let doc = ParsedDoc::parse(src.to_string());
         let members = members_of_class(&doc, "Model");
-        let method_names: Vec<&str> = members.methods.iter().map(|(n, _)| n.as_str()).collect();
+        let method_names: Vec<&str> = members.methods.iter().map(|(n, _, _)| n.as_str()).collect();
         assert!(method_names.contains(&"find"));
         assert!(method_names.contains(&"where"));
         let where_static = members
             .methods
             .iter()
-            .find(|(n, _)| n == "where")
-            .map(|(_, s)| *s);
+            .find(|(n, _, _)| n == "where")
+            .map(|(_, s, _)| *s);
         assert_eq!(where_static, Some(true));
+        let find_has_params = members
+            .methods
+            .iter()
+            .find(|(n, _, _)| n == "find")
+            .map(|(_, _, p)| *p);
+        assert_eq!(find_has_params, Some(true));
     }
 
     #[test]
