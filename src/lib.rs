@@ -57,11 +57,12 @@ pub mod backend;
 #[cfg(test)]
 mod test_utils;
 
-// Re-exports for benchmark crates that use the flat `php_lsp::X` paths.
+// Re-exports for benchmark crates and integration tests that use the flat `php_lsp::X` paths.
 pub use analysis::semantic_diagnostics;
 pub use document::ast;
 pub use document::document_store;
 pub use editing::rename;
+pub use index::cache;
 pub use index::file_index;
 pub use lang::config;
 pub use navigation::call_hierarchy;

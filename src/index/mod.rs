@@ -3,5 +3,5 @@
 
 pub mod file_index;
 
-pub(crate) mod cache;
+pub mod cache;
 pub(crate) mod workspace_scan;
