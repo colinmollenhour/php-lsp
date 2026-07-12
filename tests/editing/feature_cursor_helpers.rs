@@ -4,24 +4,48 @@
 
 use super::*;
 use expect_test::expect;
+use serde_json::json;
 
 // ── find_use_insert_line tests ──────────────────────────────────────────
-// These test where use statements will be inserted, observable through
-// completion and hover behavior that depends on correct use insertion logic.
+// These test where auto-imported `use` statements get inserted, via the
+// additionalTextEdits on a cross-file completion (the observable effect of
+// find_use_insert_line — a plain completion never renders additionalTextEdits).
 
 #[tokio::test]
-async fn use_insert_line_completion_after_namespace() {
+async fn use_insert_line_after_existing_use_statements() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    let completion = s
-        .check_completion_ordered(
-            r#"<?php
-namespace App\Services;
-class Servi$0
+    let opened = s
+        .open_fixture(
+            r#"//- /main.php
+<?php
+namespace App;
+
+use Other\Existing;
+
+$x = new $0
+
+//- /lib/Mailer.php
+<?php
+namespace Lib;
+class Mailer {}
 "#,
         )
         .await;
-    expect!["Class       Servi"].assert_eq(&completion);
+    let c = opened.cursor().clone();
+    let resp = s.completion(&c.path, c.line, c.character).await;
+    let items = match &resp["result"] {
+        v if v.is_array() => v.as_array().cloned().unwrap_or_default(),
+        v if v["items"].is_array() => v["items"].as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let mailer_item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("Mailer"))
+        .expect("Mailer class not in completions");
+    let out = render_text_edits(&json!({ "result": mailer_item["additionalTextEdits"] }));
+    // Inserted after the existing `use` statement, not right after `namespace`.
+    expect![[r#"4:0-4:0 → "use Lib\\Mailer;\\n""#]].assert_eq(&out);
 }
 
 // ── is_after_arrow tests ────────────────────────────────────────────────
