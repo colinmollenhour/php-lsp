@@ -873,27 +873,7 @@ async fn goto_definition_resolves_use_import_across_files() {
     let (_, line, ch) = server.locate("src/Service/Greeter.php", "User $user", 0);
 
     let resp = server.definition("src/Service/Greeter.php", line, ch).await;
-    let result = &resp["result"];
-    assert!(
-        !result.is_null(),
-        "expected cross-file definition: {resp:?}"
-    );
-    let loc = if result.is_array() {
-        &result[0]
-    } else {
-        result
-    };
-    let uri = loc["uri"].as_str().unwrap();
-    assert!(
-        uri.ends_with("src/Model/User.php"),
-        "definition must resolve to User.php, got: {uri}"
-    );
-    // `class User` is on line 4 (0-indexed); the server returns a line-start range.
-    assert_eq!(
-        loc["range"]["start"]["line"],
-        json!(4),
-        "wrong line: {loc:?}"
-    );
+    expect!["src/Model/User.php:4:6-4:10"].assert_eq(&render_locations(&resp, &server.uri("")));
 }
 
 /// Goto-definition on a method call across files: `$user->greeting()` in
@@ -905,26 +885,7 @@ async fn goto_definition_method_call_across_files() {
     let (_, line, ch) = server.locate("src/Service/Greeter.php", "greeting()", 0);
 
     let resp = server.definition("src/Service/Greeter.php", line, ch).await;
-    let result = &resp["result"];
-    assert!(
-        !result.is_null(),
-        "expected cross-file method definition: {resp:?}"
-    );
-    let loc = if result.is_array() {
-        &result[0]
-    } else {
-        result
-    };
-    assert!(
-        loc["uri"].as_str().unwrap().ends_with("src/Model/User.php"),
-        "method definition must land in User.php, got: {loc:?}"
-    );
-    // `public function greeting()` is on line 12; the server returns a line-start range.
-    assert_eq!(
-        loc["range"]["start"]["line"],
-        json!(12),
-        "wrong line: {loc:?}"
-    );
+    expect!["src/Model/User.php:12:20-12:28"].assert_eq(&render_locations(&resp, &server.uri("")));
 }
 
 /// go-to-definition on a promoted constructor property should jump to the
@@ -1280,23 +1241,7 @@ async fn definition_this_method_picks_correct_parent_not_unrelated_class() {
     let ch = ch + "$this->".len() as u32;
     let resp = s.definition("BlogController.php", line, ch).await;
 
-    let result = &resp["result"];
-    assert!(
-        !result.is_null(),
-        "expected a definition location: {resp:?}"
-    );
-    let loc = if result.is_array() {
-        &result[0]
-    } else {
-        result
-    };
-    assert!(
-        loc["uri"]
-            .as_str()
-            .unwrap()
-            .ends_with("AbstractController.php"),
-        "must jump to AbstractController::render(), got: {loc:?}"
-    );
+    expect!["AbstractController.php:2:20-2:26"].assert_eq(&render_locations(&resp, &s.uri("")));
 }
 
 #[tokio::test]
@@ -1646,18 +1591,7 @@ async fn definition_php8_attribute_aliased_namespace() {
 
     // cursor on `Column` inside `#[ORM\Column]` — line 2, char 5 (the 'C')
     let resp = server.definition("Entity.php", 2, 5).await;
-    let result = &resp["result"];
-    assert!(!result.is_null(), "expected definition: {resp:?}");
-    let loc = if result.is_array() {
-        &result[0]
-    } else {
-        result
-    };
-    let uri = loc["uri"].as_str().unwrap_or("");
-    assert!(
-        uri.ends_with("Mapping/Column.php"),
-        "expected Column.php, got: {uri}"
-    );
+    expect!["Mapping/Column.php:2:6-2:12"].assert_eq(&render_locations(&resp, &server.uri("")));
 }
 
 /// Class name appearing in a string literal before its declaration must not confuse
