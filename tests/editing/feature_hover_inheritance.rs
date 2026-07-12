@@ -107,8 +107,9 @@ $d->speak();
     .await;
 }
 
-/// `$dog->speak()` where Dog extends Animal must show Dog::speak (via extends
-/// walk) when another class also has a method called `speak`.
+/// A class uses two unrelated traits, each contributing one method — hovering
+/// a call to the first trait's method must resolve to that trait, not to
+/// the composing class or the second trait.
 #[tokio::test]
 async fn hover_multi_trait_alpha() {
     let mut s = TestServer::new().await;

@@ -810,9 +810,7 @@ $a->handle('x'); $b->hand$0le(1);
 
 // ── Trait inheritance correctness ─────────────────────────────────────────────
 
-/// Two classes each define a method named `ping`; only `Server` uses the
-/// `Pingable` trait that actually has the implementation.  Hovering on
-/// `$server->ping()` must show `Server::ping`, not `Client::ping`.
+/// `self::method()` at a call site resolves to the enclosing class.
 #[tokio::test]
 async fn hover_self_static_call_resolves_enclosing_class() {
     let mut s = TestServer::new().await;
@@ -834,8 +832,9 @@ class Builder {
 
 // ── Correct receiver on multi-call line ───────────────────────────────────────
 
-/// Two different `->process()` calls on the same line — cursor on the second
-/// one must pick the second receiver, not the first.
+/// Two unrelated classes each declare a static `run` method with a different
+/// signature — hovering the call must resolve to the class named on the
+/// call (`Worker::run`), not whichever `run` happens to be declared first.
 #[tokio::test]
 async fn hover_static_call_resolves_correct_class() {
     let mut s = TestServer::new().await;
@@ -854,7 +853,6 @@ Worker::ru$0n(4);
     .await;
 }
 
-/// `self::method()` at a call site resolves to the enclosing class.
 #[tokio::test]
 async fn hover_static_keyword_in_static_call_not_intercepted() {
     // `static::method()` — hovering `static` should NOT return the keyword doc,

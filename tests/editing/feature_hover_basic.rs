@@ -50,6 +50,7 @@ async fn hover_function() {
     .await;
 }
 
+/// Template parameters are shown as-is in the signature (T, not resolved).
 #[tokio::test]
 async fn hover_function_with_template_shows_template_in_docblock() {
     let mut s = TestServer::new().await;
@@ -77,7 +78,6 @@ function identi$0ty($value) { return $value; }
     .await;
 }
 
-/// Template parameters are shown as-is in the signature (T, not resolved).
 #[tokio::test]
 async fn hover_function_with_throws_shows_tag() {
     let mut s = TestServer::new().await;
@@ -179,7 +179,9 @@ function handle(object $obj) {
     .await;
 }
 
-/// Outside the instanceof block, the method should not resolve.
+/// Two unrelated classes declare a same-named method; hovering a call on a
+/// receiver with a known concrete type must resolve to that receiver's own
+/// class, not whichever declaration comes first.
 #[tokio::test]
 async fn hover_method_call_resolves_receiver_class() {
     let mut s = TestServer::new().await;
@@ -205,16 +207,18 @@ async fn hover_method_without_instanceof_does_not_narrow() {
     s.validate_syntax(false);
     s.check_hover_annotated(
         r#"<?php
-class Processor { public function process() {} }
+class Processor { public function process(): int {} }
+class Uploader { public function process(): string {} }
 function test(mixed $obj) {
-    // Outside the if block, $obj has no narrowed type
+    // No instanceof narrowing here — $obj could be either class. With two
+    // conflicting `process()` candidates in scope, hover falls back to the
+    // first-declared one rather than reporting neither/ambiguous.
     $obj->proce$0ss();
 }
 "#,
-        // mixed type has no methods, so no hover
         expect![[r#"
             ```php
-            public function process()
+            public function process(): int
             ```"#]],
     )
     .await;
