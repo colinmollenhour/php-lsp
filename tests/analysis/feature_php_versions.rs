@@ -234,6 +234,28 @@ async fn array_all_undefined_on_php83() {
         .assert_eq(&render_diagnostics_notification(&notif));
 }
 
+#[tokio::test]
+async fn array_any_defined_on_php84() {
+    let (mut s, _) = TestServer::new_with_options(json!({
+        "phpVersion": "8.4",
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    s.check_no_diagnostics("<?php\n$any = array_any([1, 2, 3], fn ($n) => $n > 1);\n")
+        .await;
+}
+
+#[tokio::test]
+async fn array_all_defined_on_php84() {
+    let (mut s, _) = TestServer::new_with_options(json!({
+        "phpVersion": "8.4",
+        "diagnostics": { "enabled": true }
+    }))
+    .await;
+    s.check_no_diagnostics("<?php\n$all = array_all([1, 2, 3], fn ($n) => $n > 0);\n")
+        .await;
+}
+
 // ── PHP 8.5 functions (array_first, array_last) ────────────────────────────────
 
 #[tokio::test]
