@@ -233,8 +233,7 @@ $u$0->getName();
         .await;
 
     // Should resolve to User class from index (indexed version returns class keyword location)
-    expect![[r#"
-        src/Model/User.php:4:0-4:0"#]]
+    expect!["src/Model/User.php:4:6-4:10"]
     .assert_eq(&out);
 }
 
@@ -256,8 +255,7 @@ function create(UserModel $u$0): void {}
         .await;
 
     // Alias is resolved to the real FQN App\Model\User → finds the class in index
-    expect![[r#"
-        src/Model/User.php:4:0-4:0"#]]
+    expect!["src/Model/User.php:4:6-4:10"]
     .assert_eq(&out);
 }
 
@@ -598,8 +596,7 @@ $u$0->greet();
         .await;
     // No explicit `use` — namespace App\Model qualifies User to App\Model\User,
     // which the index finds directly via FQN match.
-    expect![[r#"
-        src/Model/User.php:4:0-4:0"#]]
+    expect!["src/Model/User.php:4:6-4:10"]
     .assert_eq(&out);
 }
 
@@ -619,8 +616,7 @@ function greet(UserModel $u$0): void {}
         )
         .await;
     // Alias UserModel resolved to App\Model\User via imports; index finds it
-    expect![[r#"
-        src/Model/User.php:4:0-4:0"#]]
+    expect!["src/Model/User.php:4:6-4:10"]
     .assert_eq(&out);
 }
 
@@ -1095,8 +1091,7 @@ function test(\App\Model\User $u$0): void {}
         )
         .await;
     // Should resolve to App\Model\User from the index, not Other\User.
-    expect![[r#"
-        src/Model/User.php:4:0-4:0"#]]
+    expect!["src/Model/User.php:4:6-4:10"]
     .assert_eq(&out);
 }
 
