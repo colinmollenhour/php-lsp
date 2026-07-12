@@ -2,8 +2,14 @@
 
 use super::*;
 
+use expect_test::expect;
+
+/// `formatting`/`rangeFormatting` delegate to `php-cs-fixer`/`phpcbf` on
+/// `$PATH` (see `src/editing/formatting.rs`), and CI sets `tools: none` for
+/// its PHP setup, so neither is ever installed — these handlers always take
+/// the "no formatter" path in every environment this suite runs in.
 #[tokio::test]
-async fn formatting_returns_null_or_valid_edits() {
+async fn formatting_returns_null_without_external_formatter() {
     let mut server = TestServer::new().await;
     server
         .open("fmt.php", "<?php\nfunction ugly( $x ){return $x;}\n")
@@ -11,33 +17,11 @@ async fn formatting_returns_null_or_valid_edits() {
 
     let resp = server.formatting("fmt.php").await;
 
-    assert!(resp["error"].is_null(), "formatting error: {:?}", resp);
-    match resp["result"].as_array() {
-        None => assert!(
-            resp["result"].is_null(),
-            "expected null (no formatter) or TextEdit array, got: {:?}",
-            resp["result"]
-        ),
-        Some(edits) => {
-            assert!(!edits.is_empty(), "formatter returned empty edit array");
-            for edit in edits {
-                assert!(
-                    edit["range"].is_object(),
-                    "TextEdit missing 'range': {:?}",
-                    edit
-                );
-                assert!(
-                    edit["newText"].is_string(),
-                    "TextEdit missing 'newText': {:?}",
-                    edit
-                );
-            }
-        }
-    }
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
 }
 
 #[tokio::test]
-async fn range_formatting_returns_null_or_valid_edits() {
+async fn range_formatting_returns_null_without_external_formatter() {
     let mut server = TestServer::new().await;
     server
         .open("rfmt.php", "<?php\nfunction ugly( $x ){return $x;}\n")
@@ -45,29 +29,7 @@ async fn range_formatting_returns_null_or_valid_edits() {
 
     let resp = server.range_formatting("rfmt.php", 0, 0, 2, 0).await;
 
-    assert!(resp["error"].is_null(), "rangeFormatting error: {:?}", resp);
-    match resp["result"].as_array() {
-        None => assert!(
-            resp["result"].is_null(),
-            "expected null (no formatter) or TextEdit array, got: {:?}",
-            resp["result"]
-        ),
-        Some(edits) => {
-            assert!(!edits.is_empty(), "formatter returned empty edit array");
-            for edit in edits {
-                assert!(
-                    edit["range"].is_object(),
-                    "TextEdit missing 'range': {:?}",
-                    edit
-                );
-                assert!(
-                    edit["newText"].is_string(),
-                    "TextEdit missing 'newText': {:?}",
-                    edit
-                );
-            }
-        }
-    }
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
 }
 
 /// Unknown trigger characters must return null — the handler only supports `}` and `\n`.
@@ -198,6 +160,10 @@ async fn on_type_formatting_close_brace_already_aligned() {
 }
 
 /// Range formatting with a single-line range.
+///
+/// No formatter is installed in this suite's environment (see
+/// `formatting_returns_null_without_external_formatter`), so this
+/// deterministically returns null regardless of the requested range.
 #[tokio::test]
 async fn range_formatting_single_line_range() {
     let mut server = TestServer::new().await;
@@ -212,27 +178,14 @@ async fn range_formatting_single_line_range() {
         .range_formatting("rfmt_single.php", 1, 0, 1, 38)
         .await;
 
-    assert!(resp["error"].is_null(), "rangeFormatting error: {:?}", resp);
-    match resp["result"].as_array() {
-        None => assert!(
-            resp["result"].is_null(),
-            "expected null (no formatter) or TextEdit array, got: {:?}",
-            resp["result"]
-        ),
-        Some(edits) => {
-            for edit in edits {
-                let start_line = edit["range"]["start"]["line"].as_u64().unwrap_or(0);
-                let end_line = edit["range"]["end"]["line"].as_u64().unwrap_or(0);
-                assert!(
-                    start_line >= 1 && end_line <= 1,
-                    "all edits should be within the specified range (line 1)"
-                );
-            }
-        }
-    }
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
 }
 
 /// Range formatting covering the entire file.
+///
+/// No formatter is installed in this suite's environment (see
+/// `formatting_returns_null_without_external_formatter`), so this
+/// deterministically returns null regardless of the requested range.
 #[tokio::test]
 async fn range_formatting_entire_file_range() {
     let mut server = TestServer::new().await;
@@ -242,32 +195,7 @@ async fn range_formatting_entire_file_range() {
 
     let resp = server.range_formatting("rfmt_all.php", 0, 0, 3, 0).await;
 
-    assert!(resp["error"].is_null(), "rangeFormatting error: {:?}", resp);
-    match resp["result"].as_array() {
-        None => assert!(
-            resp["result"].is_null(),
-            "expected null (no formatter) or TextEdit array, got: {:?}",
-            resp["result"]
-        ),
-        Some(edits) => {
-            assert!(
-                !edits.is_empty(),
-                "when formatter is available, whole-file range should produce edits"
-            );
-            for edit in edits {
-                assert!(
-                    edit["range"].is_object(),
-                    "TextEdit missing 'range': {:?}",
-                    edit
-                );
-                assert!(
-                    edit["newText"].is_string(),
-                    "TextEdit missing 'newText': {:?}",
-                    edit
-                );
-            }
-        }
-    }
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
 }
 
 /// Newline trigger after opening brace must indent the new line.
@@ -405,6 +333,10 @@ async fn on_type_formatting_newline_no_edit_when_already_correct() {
 }
 
 /// Range formatting on a snippet without a leading `<?php` tag.
+///
+/// No formatter is installed in this suite's environment (see
+/// `formatting_returns_null_without_external_formatter`), so this
+/// deterministically returns null regardless of the requested range.
 #[tokio::test]
 async fn range_formatting_non_php_tagged_snippet() {
     let mut server = TestServer::new().await;
@@ -420,22 +352,14 @@ async fn range_formatting_non_php_tagged_snippet() {
         .range_formatting("rfmt_no_opener.php", 2, 0, 4, 0)
         .await;
 
-    assert!(resp["error"].is_null(), "rangeFormatting error: {:?}", resp);
-    // Result is either null (no formatter) or edits within the range
-    match resp["result"].as_array() {
-        None => assert!(
-            resp["result"].is_null(),
-            "expected null (no formatter) or TextEdit array, got: {:?}",
-            resp["result"]
-        ),
-        Some(_edits) => {
-            // Formatter was available and produced edits
-            // We can't assert exact content since it depends on the tool, but we can verify no panic
-        }
-    }
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
 }
 
 /// Range formatting must not produce edits outside the requested range.
+///
+/// No formatter is installed in this suite's environment (see
+/// `formatting_returns_null_without_external_formatter`), so this
+/// deterministically returns null regardless of the requested range.
 #[tokio::test]
 async fn range_formatting_returns_no_edits_outside_requested_range() {
     let mut server = TestServer::new().await;
@@ -451,22 +375,7 @@ async fn range_formatting_returns_no_edits_outside_requested_range() {
         .range_formatting("rfmt_bounded.php", 1, 0, 1, 37)
         .await;
 
-    assert!(resp["error"].is_null(), "rangeFormatting error: {:?}", resp);
-    match resp["result"].as_array() {
-        None => {
-            // No formatter available
-        }
-        Some(edits) => {
-            for edit in edits {
-                let start_line = edit["range"]["start"]["line"].as_u64().unwrap_or(0);
-                let end_line = edit["range"]["end"]["line"].as_u64().unwrap_or(0);
-                assert!(
-                    start_line == 1 && end_line == 1,
-                    "all edits should be on line 1; got edit on lines {start_line}-{end_line}"
-                );
-            }
-        }
-    }
+    expect!["(no formatter available)"].assert_eq(&render_text_edits(&resp));
 }
 
 /// `}` trigger on a line index beyond the end of the file must return null/no-edits.
