@@ -1,3 +1,4 @@
 pub use super::formatting::{
-    class_hover_from_index, docs_for_symbol_from_index, signature_for_symbol_from_index,
+    class_hover_from_index, docs_for_symbol_from_index, docs_for_symbol_from_index_scoped,
+    signature_for_symbol_from_index, signature_for_symbol_from_index_scoped,
 };

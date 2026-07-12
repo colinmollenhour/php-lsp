@@ -9,8 +9,9 @@ use crate::completion::{CompletionCtx, filtered_completions_at};
 use crate::document::ast::ParsedDoc;
 use crate::document::open_files::compute_open_file_diagnostics;
 use crate::hover::{
-    class_hover_from_index, docs_for_symbol_from_index, extract_static_class_before_cursor,
-    hover_info_with_maps, method_hover_from_index, signature_for_symbol_from_index,
+    class_hover_from_index, docs_for_symbol_from_index, docs_for_symbol_from_index_scoped,
+    extract_static_class_before_cursor, hover_info_with_maps, method_hover_from_index,
+    signature_for_symbol_from_index_scoped,
 };
 use crate::index::file_index::ClassKind;
 use crate::index::workspace_scan::{scan_workspace, send_refresh_requests};
@@ -566,14 +567,31 @@ impl LanguageServer for Backend {
             }
             // Strip trailing ':' from named-argument labels (e.g. "param:") before lookup.
             let name = item.label.trim_end_matches(':');
+            // Method completion items carry their owning class in `data` (see
+            // member.rs's all_members) so two unrelated classes declaring a
+            // same-named method don't resolve to whichever is indexed first.
+            let class_hint = item
+                .data
+                .as_ref()
+                .and_then(|d| d.get("class"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             let all_indexes = self.docs.all_indexes();
             if item.detail.is_none()
-                && let Some(sig) = signature_for_symbol_from_index(name, &all_indexes)
+                && let Some(sig) = signature_for_symbol_from_index_scoped(
+                    name,
+                    &all_indexes,
+                    class_hint.as_deref(),
+                )
             {
                 item.detail = Some(sig);
             }
             if item.documentation.is_none()
-                && let Some(md) = docs_for_symbol_from_index(name, &all_indexes)
+                && let Some(md) = docs_for_symbol_from_index_scoped(
+                    name,
+                    &all_indexes,
+                    class_hint.as_deref(),
+                )
             {
                 item.documentation = Some(Documentation::MarkupContent(MarkupContent {
                     kind: MarkupKind::Markdown,

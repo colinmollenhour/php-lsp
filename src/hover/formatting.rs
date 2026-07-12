@@ -244,6 +244,15 @@ pub(crate) fn format_prop_prefix(
 }
 
 /// Return a function/method signature string from a `FileIndex` slice.
+/// A class whose FQN or short name matches `class_hint` (case-insensitive,
+/// ignoring a leading `\`). Empty/absent hint matches every class — the
+/// original unscoped behavior.
+fn class_matches_hint(cls: &crate::index::file_index::ClassDef, class_hint: Option<&str>) -> bool {
+    let Some(hint) = class_hint else { return true };
+    let hint = hint.trim_start_matches('\\');
+    cls.fqn.trim_start_matches('\\').eq_ignore_ascii_case(hint) || cls.name.eq_ignore_ascii_case(hint)
+}
+
 pub fn signature_for_symbol_from_index(
     name: &str,
     indexes: &[(
@@ -251,34 +260,56 @@ pub fn signature_for_symbol_from_index(
         std::sync::Arc<crate::index::file_index::FileIndex>,
     )],
 ) -> Option<String> {
+    signature_for_symbol_from_index_scoped(name, indexes, None)
+}
+
+/// Like [`signature_for_symbol_from_index`], but when `class_hint` is given,
+/// only a method whose owning class matches it is considered — disambiguates
+/// same-named methods on unrelated classes (e.g. two classes both declaring
+/// `save()`) instead of returning whichever one is indexed first. A hint
+/// also skips the free-function search entirely, since a hint means the
+/// symbol is known to be a method.
+pub fn signature_for_symbol_from_index_scoped(
+    name: &str,
+    indexes: &[(
+        tower_lsp::lsp_types::Url,
+        std::sync::Arc<crate::index::file_index::FileIndex>,
+    )],
+    class_hint: Option<&str>,
+) -> Option<String> {
     for (_, idx) in indexes {
-        for f in &idx.functions {
-            if f.name.as_ref() == name {
-                let params_str = f
-                    .params
-                    .iter()
-                    .map(|p| {
-                        let mut s = String::new();
-                        if let Some(t) = &p.type_hint {
-                            s.push_str(&format!("{} ", t));
-                        }
-                        if p.variadic {
-                            s.push_str("...");
-                        }
-                        s.push_str(&format!("${}", p.name));
-                        s
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let ret = f
-                    .return_type
-                    .as_deref()
-                    .map(|r| format!(": {}", r))
-                    .unwrap_or_default();
-                return Some(format!("function {}({}){}", name, params_str, ret));
+        if class_hint.is_none() {
+            for f in &idx.functions {
+                if f.name.as_ref() == name {
+                    let params_str = f
+                        .params
+                        .iter()
+                        .map(|p| {
+                            let mut s = String::new();
+                            if let Some(t) = &p.type_hint {
+                                s.push_str(&format!("{} ", t));
+                            }
+                            if p.variadic {
+                                s.push_str("...");
+                            }
+                            s.push_str(&format!("${}", p.name));
+                            s
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let ret = f
+                        .return_type
+                        .as_deref()
+                        .map(|r| format!(": {}", r))
+                        .unwrap_or_default();
+                    return Some(format!("function {}({}){}", name, params_str, ret));
+                }
             }
         }
         for cls in &idx.classes {
+            if !class_matches_hint(cls, class_hint) {
+                continue;
+            }
             for m in &cls.methods {
                 if m.name.as_ref() == name {
                     let params_str = m
@@ -318,23 +349,43 @@ pub fn docs_for_symbol_from_index(
         std::sync::Arc<crate::index::file_index::FileIndex>,
     )],
 ) -> Option<String> {
-    if let Some(sig) = signature_for_symbol_from_index(name, indexes) {
+    docs_for_symbol_from_index_scoped(name, indexes, None)
+}
+
+/// Like [`docs_for_symbol_from_index`], but scoped to a class hint — see
+/// [`signature_for_symbol_from_index_scoped`]. Also skips the PHP-builtin
+/// fallback when a class hint is given, since a hint means the symbol is
+/// known to be a user-defined method, not a global builtin function.
+pub fn docs_for_symbol_from_index_scoped(
+    name: &str,
+    indexes: &[(
+        tower_lsp::lsp_types::Url,
+        std::sync::Arc<crate::index::file_index::FileIndex>,
+    )],
+    class_hint: Option<&str>,
+) -> Option<String> {
+    if let Some(sig) = signature_for_symbol_from_index_scoped(name, indexes, class_hint) {
         let mut value = wrap_php(&sig);
         for (_, idx) in indexes {
-            for f in &idx.functions {
-                if f.name.as_ref() == name {
-                    if let Some(raw) = &f.docblock {
-                        let db = crate::lang::docblock::parse_docblock(raw);
-                        let md = db.to_markdown();
-                        if !md.is_empty() {
-                            value.push_str("\n\n---\n\n");
-                            value.push_str(&md);
+            if class_hint.is_none() {
+                for f in &idx.functions {
+                    if f.name.as_ref() == name {
+                        if let Some(raw) = &f.docblock {
+                            let db = crate::lang::docblock::parse_docblock(raw);
+                            let md = db.to_markdown();
+                            if !md.is_empty() {
+                                value.push_str("\n\n---\n\n");
+                                value.push_str(&md);
+                            }
                         }
+                        break;
                     }
-                    break;
                 }
             }
             for cls in &idx.classes {
+                if !class_matches_hint(cls, class_hint) {
+                    continue;
+                }
                 for m in &cls.methods {
                     if m.name.as_ref() == name {
                         if let Some(raw) = &m.docblock {
@@ -350,7 +401,7 @@ pub fn docs_for_symbol_from_index(
                 }
             }
         }
-        if is_php_builtin(name) {
+        if class_hint.is_none() && is_php_builtin(name) {
             value.push_str(&format!(
                 "\n\n[php.net documentation]({})",
                 php_doc_url(name)
@@ -358,7 +409,7 @@ pub fn docs_for_symbol_from_index(
         }
         return Some(value);
     }
-    if is_php_builtin(name) {
+    if class_hint.is_none() && is_php_builtin(name) {
         return Some(format!(
             "```php\nfunction {}()\n```\n\n[php.net documentation]({})",
             name,

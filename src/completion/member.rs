@@ -92,7 +92,12 @@ fn all_members(
             parent = members.parent.clone();
             for (name, meth_is_static, has_params) in members.methods {
                 if (meth_is_static == is_static) && seen_names.insert(name.clone()) {
-                    items.push(callable_item(&name, CompletionItemKind::METHOD, has_params));
+                    let mut item = callable_item(&name, CompletionItemKind::METHOD, has_params);
+                    // Disambiguates completion_resolve's lookup when another
+                    // class elsewhere in the workspace declares a method of
+                    // the same name — see resolve_static_receiver's FQN note.
+                    item.data = Some(serde_json::json!({ "class": current }));
+                    items.push(item);
                 }
             }
             for (name, prop_is_static) in &members.properties {
@@ -167,7 +172,9 @@ fn all_members(
             }
             for (name, meth_is_static, has_params) in &stub.methods {
                 if (*meth_is_static == is_static) && seen_names.insert(name.clone()) {
-                    items.push(callable_item(name, CompletionItemKind::METHOD, *has_params));
+                    let mut item = callable_item(name, CompletionItemKind::METHOD, *has_params);
+                    item.data = Some(serde_json::json!({ "class": current }));
+                    items.push(item);
                 }
             }
             for (name, prop_is_static) in &stub.properties {

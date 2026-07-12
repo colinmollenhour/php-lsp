@@ -68,6 +68,58 @@ async fn completion_resolve_idempotent_when_resolved() {
     assert_eq!(out1, out2, "resolve should be idempotent");
 }
 
+/// Regression test for a confirmed bug: two unrelated classes declaring a
+/// same-named method both live in the workspace index; completion_resolve
+/// looked up detail/documentation by bare method name across the whole
+/// workspace with no notion of which class the completion item actually
+/// belonged to, so it could return the wrong class's docblock/signature.
+#[tokio::test]
+async fn completion_resolve_scopes_to_owning_class_on_name_collision() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("Wanted.php"),
+        "<?php\nnamespace App\\Wanted;\nclass Target {\n    /** The one we want. */\n    public static function save(): string { return 'w'; }\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("Other.php"),
+        "<?php\nnamespace App\\Other;\nclass Target {\n    /** Not this one. */\n    public static function save(int $x): void {}\n}\n",
+    )
+    .unwrap();
+    let caller =
+        "<?php\nuse App\\Wanted\\Target;\n\nfunction f() {\n    Target::save();\n}\n";
+    std::fs::write(tmp.path().join("caller.php"), caller).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.validate_syntax(false);
+    s.wait_for_index_ready().await;
+    s.open("caller.php", caller).await;
+
+    let (_, line, ch) = s.locate("caller.php", "save();", 0);
+    let resp = s.completion("caller.php", line, ch).await;
+    let items: Vec<_> = resp["result"]
+        .as_array()
+        .or_else(|| resp["result"]["items"].as_array())
+        .map(|a| a.to_vec())
+        .unwrap_or_default();
+    let item = items
+        .iter()
+        .find(|i| i["label"].as_str() == Some("save"))
+        .expect("save not in completions")
+        .clone();
+
+    let resolved = s.completion_resolve(item).await;
+    let out = render_resolved_completion_item(&resolved);
+    assert!(
+        out.contains("The one we want."),
+        "resolve must use the imported Target::save's own docblock, got: {out}"
+    );
+    assert!(
+        !out.contains("Not this one."),
+        "resolve must not pick up the unrelated same-named method's docblock, got: {out}"
+    );
+}
+
 // ============================================================================
 // codeAction/resolve tests
 // ============================================================================

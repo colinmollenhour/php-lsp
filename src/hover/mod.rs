@@ -13,5 +13,6 @@ pub use parsing::extract_receiver_var_before_cursor;
 pub use parsing::extract_static_class_before_cursor;
 pub use parsing::resolve_use_alias;
 pub use symbols::{
-    class_hover_from_index, docs_for_symbol_from_index, signature_for_symbol_from_index,
+    class_hover_from_index, docs_for_symbol_from_index, docs_for_symbol_from_index_scoped,
+    signature_for_symbol_from_index, signature_for_symbol_from_index_scoped,
 };
