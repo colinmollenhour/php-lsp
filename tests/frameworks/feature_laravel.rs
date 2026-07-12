@@ -419,7 +419,7 @@ async fn laravel_hover_implements_interface() {
     let out = render_hover(&resp);
     expect![[r#"
         ```php
-        class Factory
+        interface Factory
         ```"#]]
     .assert_eq(&out);
 }
@@ -2844,7 +2844,7 @@ async fn laravel_type_hierarchy_subtypes() {
         .as_array()
         .map(|a| a.iter().filter_map(|i| i["name"].as_str()).collect())
         .unwrap_or_default();
-    expect!["AuthManager, BroadcastManager, CacheManager, QueueingFactory, FilesystemManager, MailManager, ChannelManager, QueueManager, RedisManager, MailFake, NotificationFake, Factory, Factory"].assert_eq(&names.join(", "));
+    expect!["AuthManager"].assert_eq(&names.join(", "));
 }
 
 /// `textDocument/implementation` on the `Factory` interface name returns
@@ -2873,21 +2873,7 @@ async fn laravel_find_implementations_interface_name() {
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_locations(&resp, &s.uri(""));
-    expect![[r#"
-        Illuminate/Auth/AuthManager.php:17:0-17:0
-        Illuminate/Broadcasting/BroadcastManager.php:37:0-37:0
-        Illuminate/Cache/CacheManager.php:23:0-23:0
-        Illuminate/Contracts/Cookie/QueueingFactory.php:4:0-4:0
-        Illuminate/Filesystem/FilesystemManager.php:32:0-32:0
-        Illuminate/Mail/MailManager.php:37:0-37:0
-        Illuminate/Notifications/ChannelManager.php:13:0-13:0
-        Illuminate/Queue/QueueManager.php:15:0-15:0
-        Illuminate/Redis/RedisManager.php:21:0-21:0
-        Illuminate/Support/Testing/Fakes/MailFake.php:18:0-18:0
-        Illuminate/Support/Testing/Fakes/NotificationFake.php:17:0-17:0
-        Illuminate/Validation/Factory.php:10:0-10:0
-        Illuminate/View/Factory.php:13:0-13:0"#]]
-    .assert_eq(&out);
+    expect!["Illuminate/Auth/AuthManager.php:17:0-17:0"].assert_eq(&out);
 }
 
 // ── Under-load stability ──────────────────────────────────────────────────────

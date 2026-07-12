@@ -487,49 +487,72 @@ pub fn method_hover_from_index(
 }
 
 /// Build a hover for a class/interface/trait/enum found by short name in the workspace index.
+///
+/// `fqn` is the fully-qualified name the caller resolved `word` to (e.g. via
+/// a `use ... as Alias` import), when known. Across a large workspace many
+/// unrelated classes can share a short name (and even the same local alias),
+/// so when `fqn` is available a candidate whose own `cls.fqn` matches it
+/// exactly is preferred over the first short-name match found. Falls back to
+/// the first short-name match when `fqn` is `None` (no `use` import to
+/// disambiguate a genuinely ambiguous bare reference).
 pub fn class_hover_from_index(
     word: &str,
+    fqn: Option<&str>,
     indexes: &[(
         tower_lsp::lsp_types::Url,
         std::sync::Arc<crate::index::file_index::FileIndex>,
     )],
 ) -> Option<Hover> {
-    use crate::index::file_index::ClassKind;
-
+    let mut first_match: Option<&crate::index::file_index::ClassDef> = None;
     for (_, idx) in indexes {
         for cls in &idx.classes {
             if cls.name.as_ref() == word || cls.fqn.as_ref().trim_start_matches('\\') == word {
-                let kw = match cls.kind {
-                    ClassKind::Interface => "interface",
-                    ClassKind::Trait => "trait",
-                    ClassKind::Enum => "enum",
-                    ClassKind::Class => {
-                        if cls.is_abstract {
-                            "abstract class"
-                        } else if cls.is_readonly {
-                            "readonly class"
-                        } else {
-                            "class"
-                        }
+                if let Some(target) = fqn {
+                    if cls.fqn.as_ref().trim_start_matches('\\') == target {
+                        return Some(class_hover_for(cls));
                     }
-                };
-                let mut sig = format!("{} {}", kw, &cls.name.to_string());
-                if let Some(parent) = &cls.parent {
-                    sig.push_str(&format!(" extends {}", parent));
+                    if first_match.is_none() {
+                        first_match = Some(cls);
+                    }
+                    continue;
                 }
-                if !cls.implements.is_empty() {
-                    let list: Vec<&str> = cls.implements.iter().map(|s| s.as_ref()).collect();
-                    sig.push_str(&format!(" implements {}", list.join(", ")));
-                }
-                return Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value: wrap_php(&sig),
-                    }),
-                    range: None,
-                });
+                return Some(class_hover_for(cls));
             }
         }
     }
-    None
+    first_match.map(class_hover_for)
+}
+
+fn class_hover_for(cls: &crate::index::file_index::ClassDef) -> Hover {
+    use crate::index::file_index::ClassKind;
+
+    let kw = match cls.kind {
+        ClassKind::Interface => "interface",
+        ClassKind::Trait => "trait",
+        ClassKind::Enum => "enum",
+        ClassKind::Class => {
+            if cls.is_abstract {
+                "abstract class"
+            } else if cls.is_readonly {
+                "readonly class"
+            } else {
+                "class"
+            }
+        }
+    };
+    let mut sig = format!("{} {}", kw, &cls.name.to_string());
+    if let Some(parent) = &cls.parent {
+        sig.push_str(&format!(" extends {}", parent));
+    }
+    if !cls.implements.is_empty() {
+        let list: Vec<&str> = cls.implements.iter().map(|s| s.as_ref()).collect();
+        sig.push_str(&format!(" implements {}", list.join(", ")));
+    }
+    Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: wrap_php(&sig),
+        }),
+        range: None,
+    }
 }

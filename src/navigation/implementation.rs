@@ -104,28 +104,23 @@ pub fn find_implementations_from_workspace(
         if let Some(refs) = wi.subtypes_of.get(key) {
             for r in refs {
                 if let Some((uri, cls)) = wi.at(*r) {
-                    // Re-check with `name_matches` so a bare-name subtype_of
-                    // entry survives an FQN-qualified search and vice versa.
-                    let extends_match = cls
-                        .parent
-                        .as_deref()
-                        .map(|p| name_matches(p, word, fqn))
-                        .unwrap_or(false);
-                    let implements_match = cls.implements.iter().any(|iface| {
-                        if name_matches(iface.as_ref(), word, fqn) {
-                            return true;
+                    let file_idx = wi.files.get(r.file as usize).map(|(_, idx)| idx.as_ref());
+                    // Re-check each candidate: the raw short-name `subtypes_of`
+                    // prefilter is over-inclusive across a large workspace (many
+                    // unrelated classes can share both a short name and a
+                    // same-named use-import alias while resolving to different
+                    // FQNs), so when a target FQN is available every candidate
+                    // must be confirmed against its own `use_imports`/namespace
+                    // via `resolves_to_fqn` rather than trusting the bare name.
+                    let extends_match = cls.parent.as_deref().is_some_and(|p| match fqn {
+                        Some(f) => file_idx.is_some_and(|idx| resolves_to_fqn(p, f, idx)),
+                        None => name_matches(p, word, None),
+                    });
+                    let implements_match = cls.implements.iter().any(|iface| match fqn {
+                        Some(f) => {
+                            file_idx.is_some_and(|idx| resolves_to_fqn(iface.as_ref(), f, idx))
                         }
-                        // The implements clause may use a use-import alias for `word`.
-                        // e.g. `use A\B\Factory as FactoryContract` + `implements FactoryContract`
-                        // → iface = "FactoryContract", word = "Factory"
-                        if let Some((_, file_idx)) = wi.files.get(r.file as usize) {
-                            file_idx.use_imports.iter().any(|(alias, resolved_fqn)| {
-                                alias.as_ref() == iface.as_ref()
-                                    && crate::text::fqn_short_name(resolved_fqn) == word
-                            })
-                        } else {
-                            false
-                        }
+                        None => name_matches(iface.as_ref(), word, None),
                     });
                     if extends_match || implements_match {
                         let pos = tower_lsp::lsp_types::Position {
@@ -250,6 +245,43 @@ pub(crate) fn alias_resolves_to(
         alias.as_ref() == name
             && (resolved.as_ref() == fqn || resolved.trim_start_matches('\\') == fqn)
     })
+}
+
+/// Returns `true` when `written` — a name from an `extends`/`implements`/`use`
+/// clause in `idx`'s file — refers to `target_fqn`.
+///
+/// Unlike [`name_matches`], this does not treat a bare short-name match as
+/// automatically correct: when `written` has no explicit FQN form, it is
+/// resolved through `idx.use_imports` first, and an entry found there is
+/// authoritative even if its resolved FQN differs from `target_fqn` (an
+/// explicit import always shadows a same-named symbol elsewhere). Only when
+/// no import shadows `written` does it fall back to implicit same-namespace
+/// resolution, mirroring how PHP resolves an unqualified class name with no
+/// matching `use` statement to `<current-namespace>\<written>`.
+///
+/// This is the disambiguation the raw `subtypes_of` short-name prefilter
+/// cannot do on its own: many unrelated classes across a large workspace can
+/// share both a short name (e.g. `Factory`) and a same-named `use` alias
+/// (e.g. `FactoryContract`) while resolving to entirely different FQNs.
+pub(crate) fn resolves_to_fqn(
+    written: &str,
+    target_fqn: &str,
+    idx: &crate::index::file_index::FileIndex,
+) -> bool {
+    if written.contains('\\') {
+        return written.trim_start_matches('\\') == target_fqn;
+    }
+    if let Some((_, resolved)) = idx
+        .use_imports
+        .iter()
+        .find(|(alias, _)| alias.as_ref() == written)
+    {
+        return resolved.as_ref() == target_fqn || resolved.trim_start_matches('\\') == target_fqn;
+    }
+    match idx.namespace.as_deref() {
+        Some(ns) => format!("{ns}\\{written}") == target_fqn,
+        None => written == target_fqn,
+    }
 }
 
 /// Mir-backed variant of [`find_implementations_from_workspace`].

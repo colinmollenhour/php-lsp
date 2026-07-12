@@ -753,12 +753,16 @@ impl LanguageServer for Backend {
             if let Some(word) = crate::text::word_at_position(&source, position) {
                 let wi = self.workspace_index_async().await;
                 // Try the literal word first.
-                if let Some(h) = class_hover_from_index(&word, &wi.files) {
+                if let Some(h) = class_hover_from_index(&word, None, &wi.files) {
                     return Ok(Some(h));
                 }
-                // Try alias resolution.
-                if let Some(resolved) = crate::hover::resolve_use_alias(&doc.program().stmts, &word)
-                    && let Some(h) = class_hover_from_index(&resolved, &wi.files)
+                // Try alias resolution. The resolved FQN disambiguates between
+                // same-named classes in different namespaces (e.g. many
+                // vendored `Factory` classes all aliased to `FactoryContract`).
+                if let Some((resolved, resolved_fqn)) =
+                    crate::hover::resolve_use_alias_fqn(&doc.program().stmts, &word)
+                    && let Some(h) =
+                        class_hover_from_index(&resolved, Some(&resolved_fqn), &wi.files)
                 {
                     return Ok(Some(h));
                 }
@@ -1157,11 +1161,12 @@ impl LanguageServer for Backend {
             let source = self.get_open_text(uri).unwrap_or_default();
             let imports = self.file_imports(uri);
             let raw_word = crate::text::word_at_position(&source, position).unwrap_or_default();
+            let wi = self.workspace_index_async().await;
             // `word_at_position` includes `\` as a word character, so the cursor on
             // a use-statement import (`use A\B\Foo`) returns the full qualified name.
             // Split to recover the short name and treat the rest as the FQN so the
             // workspace index lookup (keyed by short name) still finds subtypes.
-            let (word, fqn_owned): (String, Option<String>) = if raw_word.contains('\\') {
+            let (word, mut fqn_owned): (String, Option<String>) = if raw_word.contains('\\') {
                 let short = raw_word
                     .rsplit('\\')
                     .next()
@@ -1173,13 +1178,28 @@ impl LanguageServer for Backend {
                 let fqn = imports.get(&raw_word).cloned();
                 (raw_word, fqn)
             };
+            // The cursor may sit on the class/interface's own declaration name
+            // rather than a usage — there is no `use` import for a symbol to
+            // reference itself, so `imports` above finds nothing. Resolve the
+            // FQN from the workspace index instead, scoped to this file, so a
+            // same-named class declared elsewhere can't be mismatched onto it.
+            if fqn_owned.is_none() {
+                fqn_owned = wi
+                    .classes_by_name
+                    .get(&word)
+                    .and_then(|refs| {
+                        refs.iter()
+                            .filter_map(|r| wi.at(*r))
+                            .find(|(u, _)| *u == uri)
+                    })
+                    .map(|(_, cls)| cls.fqn.as_ref().to_string());
+            }
             let fqn = fqn_owned.as_deref();
             // First pass: open-file ParsedDocs give accurate character positions.
             let open_docs = self.docs.docs_for(&self.open_urls());
             let mut locs = find_implementations(&word, fqn, &open_docs);
             // Second pass: mir-backed subtype graph (fixes aliased/FQN extends),
             // falling back to the raw-name subtypes_of map when mir is cold.
-            let wi = self.workspace_index_async().await;
             if locs.is_empty() {
                 let fqn_for_mir = fqn.unwrap_or(&word).to_string();
                 let subtype_urls = self.docs.class_subtype_urls(&fqn_for_mir);
@@ -1320,7 +1340,7 @@ impl LanguageServer for Backend {
             // Phase J: use the salsa-memoized aggregate's `classes_by_name` map.
             let wi = self.workspace_index_async().await;
             Ok(
-                prepare_type_hierarchy_from_workspace(&source, &wi, position)
+                prepare_type_hierarchy_from_workspace(&source, uri, &wi, position)
                     .map(|item| vec![item]),
             )
         })
@@ -1360,12 +1380,20 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
         guard_async_result("subtypes", async move {
             let wi = self.workspace_index_async().await;
-            // Resolve the item's FQCN for mir's subtype graph.
+            // Resolve the item's FQCN for mir's subtype graph. `classes_by_name`
+            // is keyed by short name only, so a name shared by many classes
+            // across the workspace (e.g. Laravel's ~16 `Factory` classes) needs
+            // `params.item.uri` to pick the right one instead of an arbitrary
+            // first match.
             let item_fqn = wi
                 .classes_by_name
                 .get(&params.item.name)
-                .and_then(|refs| refs.first())
-                .and_then(|r| wi.at(*r))
+                .and_then(|refs| {
+                    refs.iter()
+                        .filter_map(|r| wi.at(*r))
+                        .find(|(u, _)| **u == params.item.uri)
+                        .or_else(|| refs.first().and_then(|r| wi.at(*r)))
+                })
                 .map(|(_, cls)| cls.fqn.as_ref().to_string());
             let subtype_urls = item_fqn
                 .as_deref()

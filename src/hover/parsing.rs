@@ -135,6 +135,14 @@ pub(crate) fn extract_name_from_chars_end(chars: &[char]) -> Option<String> {
 /// Given `use App\Foo as Bar`, hovering on `Bar` anywhere in the file should
 /// resolve to `Foo` so the declaration lookup succeeds.
 pub fn resolve_use_alias(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
+    resolve_use_alias_fqn(stmts, word).map(|(short, _)| short)
+}
+
+/// Like [`resolve_use_alias`], but also returns the full FQN the alias
+/// resolves to, so callers can disambiguate between same-named classes in
+/// different namespaces (e.g. many vendored `Factory` classes all locally
+/// aliased to `FactoryContract`) instead of matching on the short name alone.
+pub fn resolve_use_alias_fqn(stmts: &[Stmt<'_, '_>], word: &str) -> Option<(String, String)> {
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Use(u) if u.kind == UseKind::Normal => {
@@ -142,15 +150,15 @@ pub fn resolve_use_alias(stmts: &[Stmt<'_, '_>], word: &str) -> Option<String> {
                     if let Some(alias) = item.alias
                         && alias == word
                     {
-                        let fqn = item.name.to_string_repr();
+                        let fqn = item.name.to_string_repr().into_owned();
                         let short = fqn_short_name(&fqn).to_owned();
-                        return Some(short);
+                        return Some((short, fqn));
                     }
                 }
             }
             StmtKind::Namespace(ns) => {
                 if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(s) = resolve_use_alias(&inner.stmts, word)
+                    && let Some(s) = resolve_use_alias_fqn(&inner.stmts, word)
                 {
                     return Some(s);
                 }

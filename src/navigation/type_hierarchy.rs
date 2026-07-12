@@ -27,8 +27,16 @@ fn make_item_from_index(
 
 /// Phase J — Prepare from the salsa-memoized workspace aggregate. Constant-time
 /// name lookup via `classes_by_name` instead of walking every file's classes.
+///
+/// `uri` is the document the cursor is in. `classes_by_name` is keyed by
+/// short name only, so an unqualified name shared by many classes across the
+/// workspace (e.g. Laravel's ~16 `Factory` classes) would otherwise resolve
+/// to an arbitrary one via `.first()`. When one of the candidates is declared
+/// in `uri` itself — the common case of the cursor sitting on that class's
+/// own declaration — it is preferred over an arbitrary first match.
 pub fn prepare_type_hierarchy_from_workspace(
     source: &str,
+    uri: &Url,
     wi: &crate::db::workspace_index::WorkspaceIndexData,
     position: Position,
 ) -> Option<TypeHierarchyItem> {
@@ -36,7 +44,11 @@ pub fn prepare_type_hierarchy_from_workspace(
     use crate::text::word_at_position;
     let word = word_at_position(source, position)?;
     let refs = wi.classes_by_name.get(&word)?;
-    let (uri, cls) = wi.at(*refs.first()?)?;
+    let (uri, cls) = refs
+        .iter()
+        .filter_map(|r| wi.at(*r))
+        .find(|(u, _)| *u == uri)
+        .or_else(|| refs.first().and_then(|r| wi.at(*r)))?;
     let kind = match cls.kind {
         ClassKind::Class | ClassKind::Trait => SymbolKind::CLASS,
         ClassKind::Interface => SymbolKind::INTERFACE,
@@ -121,7 +133,7 @@ pub fn subtypes_of_mir_backed(
     subtype_urls: &[Url],
 ) -> Vec<TypeHierarchyItem> {
     if subtype_urls.is_empty() {
-        return subtypes_of_from_workspace(item, wi);
+        return subtypes_of_from_workspace(item, item_fqn, wi);
     }
     use crate::index::file_index::ClassKind;
     use crate::navigation::implementation::{alias_resolves_to, name_matches};
@@ -164,16 +176,41 @@ pub fn subtypes_of_mir_backed(
 
 /// Phase J — Subtypes via the pre-built `subtypes_of` reverse map. O(matches)
 /// instead of O(files × classes).
+///
+/// `item_fqn` is the FQCN of the hierarchy item when known. The raw-name
+/// `subtypes_of` map is keyed by short name only, so it is over-inclusive
+/// across a large workspace (e.g. many unrelated `Factory` interfaces each
+/// aliased to the same `FactoryContract` locally). Each candidate is
+/// therefore re-checked against `item_fqn` via `resolves_to_fqn`, which
+/// resolves the candidate's own `extends`/`implements`/`use` clause through
+/// its `use_imports` and namespace before accepting the match. Falls back to
+/// a bare short-name match when `item_fqn` is unavailable.
 pub fn subtypes_of_from_workspace(
     item: &TypeHierarchyItem,
+    item_fqn: Option<&str>,
     wi: &crate::db::workspace_index::WorkspaceIndexData,
 ) -> Vec<TypeHierarchyItem> {
     use crate::index::file_index::ClassKind;
+    use crate::navigation::implementation::resolves_to_fqn;
     let Some(refs) = wi.subtypes_of.get(item.name.as_str()) else {
         return Vec::new();
     };
     refs.iter()
-        .filter_map(|r| wi.at(*r))
+        .filter_map(|r| {
+            let (uri, cls) = wi.at(*r)?;
+            let file_idx = wi.files.get(r.file as usize).map(|(_, idx)| idx.as_ref());
+            let matches = match item_fqn {
+                Some(f) => {
+                    let named =
+                        |name: &str| file_idx.is_some_and(|idx| resolves_to_fqn(name, f, idx));
+                    cls.parent.as_deref().is_some_and(&named)
+                        || cls.implements.iter().any(|iface| named(iface.as_ref()))
+                        || cls.traits.iter().any(|t| named(t.as_ref()))
+                }
+                None => true,
+            };
+            matches.then_some((uri, cls))
+        })
         .map(|(uri, cls)| {
             let kind = match cls.kind {
                 ClassKind::Class | ClassKind::Trait => SymbolKind::CLASS,
