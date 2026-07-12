@@ -74,11 +74,16 @@ async fn will_rename_files_rewrites_use_statements_in_dependents() {
     let root = server.uri("");
     let snap = canonicalize_workspace_edit(&resp["result"], &root);
     expect![[r#"
+        // src/Model/User.php
+        4:6-4:10 → "Account"
+
         // src/Service/Greeter.php
         4:4-4:18 → "App\\Model\\Account"
+        8:26-8:30 → "Account"
 
         // src/Service/Registry.php
-        4:4-4:18 → "App\\Model\\Account""#]]
+        4:4-4:18 → "App\\Model\\Account"
+        11:29-11:33 → "Account""#]]
     .assert_eq(&snap);
 }
 

@@ -12,6 +12,8 @@ use crate::index::workspace_scan::{scan_workspace, send_refresh_requests};
 use crate::lang::autoload::Psr4Map;
 use crate::lang::config::LspConfig;
 use crate::lang::phpstorm_meta::PhpStormMeta;
+use crate::navigation::references::{SymbolKind, find_references_with_target};
+use crate::text::fqn_short_name;
 
 use super::super::helpers::php_file_op;
 use super::super::{Backend, IndexReadyNotification};
@@ -515,6 +517,25 @@ impl Backend {
             if let Some(changes) = edit.changes {
                 for (uri, edits) in changes {
                     merged_changes.entry(uri).or_default().extend(edits);
+                }
+            }
+
+            // Also rename the declaration itself (never touched by `use_edits_for_rename`) plus type-hint-like refs; Class-kind lookup never emits `use` spans, so this can't overlap the edits above.
+            let old_short = fqn_short_name(&old_fqn);
+            let new_short = fqn_short_name(&new_fqn);
+            if old_short != new_short {
+                let locations = find_references_with_target(
+                    old_short,
+                    &all_docs,
+                    true,
+                    Some(SymbolKind::Class),
+                    &old_fqn,
+                );
+                for loc in locations {
+                    merged_changes.entry(loc.uri).or_default().push(TextEdit {
+                        range: loc.range,
+                        new_text: new_short.to_string(),
+                    });
                 }
             }
         }
