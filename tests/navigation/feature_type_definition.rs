@@ -169,21 +169,6 @@ function process(?User $u$0): void {}
 }
 
 #[tokio::test]
-async fn type_definition_union_type_not_supported() {
-    let mut s = TestServer::new().await;
-    s.check_type_definition_annotated(
-        r#"<?php
-class Admin {}
-//    ^^^^^ type
-class User {}
-//    ^^^^ type
-function process(Admin|User $u$0): void {}
-"#,
-    )
-    .await;
-}
-
-#[tokio::test]
 async fn type_definition_fully_qualified_parameter() {
     let mut s = TestServer::new().await;
     s.check_type_definition_annotated(
@@ -299,9 +284,9 @@ class Service {
     .await;
 }
 
-/// Union types (PHP 8.0+) now return all matching types in the union.
+/// Union types (PHP 8.0+) return all matching types in the union.
 #[tokio::test]
-async fn type_definition_limitation_union_types_not_supported() {
+async fn type_definition_union_type_returns_all_members() {
     let mut s = TestServer::new().await;
     s.check_type_definition_annotated(
         r#"<?php
@@ -315,9 +300,9 @@ function authenticate(Admin|User $a$0): void {}
     .await;
 }
 
-/// Intersection types (PHP 8.1+) are now supported and return all matching types.
+/// Intersection types (PHP 8.1+) return all matching types.
 #[tokio::test]
-async fn type_definition_limitation_intersection_types_not_supported() {
+async fn type_definition_intersection_type_returns_all_members() {
     let mut s = TestServer::new().await;
     s.check_type_definition_annotated(
         r#"<?php
@@ -1086,7 +1071,10 @@ $untyped$0 = 123;
 
 // ── Edge Cases with Index Resolution ───────────────────────────────────
 
-/// When same class name exists in both index and open file, prefer exact FQN match.
+/// A same-named `User` class is open locally (in `namespace Other`) and a
+/// different `User` lives in the index (`App\Model\User`). An FQN-qualified
+/// reference to `App\Model\User` must resolve to the indexed class, not the
+/// unrelated open-doc class that only shares the short name.
 #[tokio::test]
 async fn type_definition_index_prefers_exact_fqn() {
     let mut s = TestServer::with_fixture("psr4-mini").await;
@@ -1094,13 +1082,19 @@ async fn type_definition_index_prefers_exact_fqn() {
 
     let out = s
         .check_type_definition(
-            r#"<?php
+            r#"//- /other.php
+<?php
+namespace Other;
+class User {}
+
+//- /main.php
+<?php
 namespace App\Model;
-function test(User $u$0): void {}
+function test(\App\Model\User $u$0): void {}
 "#,
         )
         .await;
-    // Should resolve to App\Model\User from index (exact FQN)
+    // Should resolve to App\Model\User from the index, not Other\User.
     expect![[r#"
         src/Model/User.php:4:0-4:0"#]]
     .assert_eq(&out);

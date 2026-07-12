@@ -98,21 +98,24 @@ fn resolve_type_at_cursor(
 /// matching locations for that type's class/interface declarations.
 /// Returns empty vec if no type found, single-element vec for simple types,
 /// multiple elements for union types (e.g., Admin|User).
-pub fn goto_type_definition(
+/// First pass: look only in files whose namespace + short class name matches
+/// the cursor's resolved FQN exactly. Callers should try this — and the index
+/// equivalent, `goto_type_definition_from_index_exact` — before falling back
+/// to [`goto_type_definition_short_name_fallback`], so an unrelated
+/// same-short-named class in another open file/namespace can never preempt a
+/// correctly-namespaced match that only lives in the background index.
+pub fn goto_type_definition_exact(
     source: &str,
     doc: &ParsedDoc,
     analysis: Option<&FileAnalysis>,
     all_docs: &[(Url, Arc<ParsedDoc>)],
     position: Position,
 ) -> Vec<Location> {
-    let Some((imports, class_name)) = resolve_type_at_cursor(source, doc, analysis, position)
-    else {
+    let Some((_, class_name)) = resolve_type_at_cursor(source, doc, analysis, position) else {
         return Vec::new();
     };
 
     let mut results = Vec::new();
-
-    // Look only in files whose namespace + short class name matches the FQN.
     for candidate in type_candidates(&class_name) {
         let cand_short = fqn_short_name(candidate.trim_start_matches('\\'));
         let cand_fqn = candidate.trim_start_matches('\\');
@@ -136,36 +139,44 @@ pub fn goto_type_definition(
             }
         }
     }
+    dedup_locations(&mut results);
+    results
+}
 
-    // If results found in FQN pass, return them
-    if !results.is_empty() {
-        dedup_locations(&mut results);
-        return results;
+/// Fallback: short-name search across all open docs, ignoring namespace.
+/// Skipped by callers when the class name came from an import: imports take
+/// precedence, so if the exact pass didn't find it in the imported namespace,
+/// don't fall back to an ambiguous short-name search.
+pub fn goto_type_definition_short_name_fallback(
+    source: &str,
+    doc: &ParsedDoc,
+    analysis: Option<&FileAnalysis>,
+    all_docs: &[(Url, Arc<ParsedDoc>)],
+    position: Position,
+) -> Vec<Location> {
+    let Some((imports, class_name)) = resolve_type_at_cursor(source, doc, analysis, position)
+    else {
+        return Vec::new();
+    };
+    if imports.values().any(|v| v == &class_name) {
+        return Vec::new();
     }
 
-    // Fallback: short-name search across all docs.
-    // Skip fallback if the class_name came from an import: imports take precedence,
-    // so if not found in their declared namespace, don't fall back to short-name search.
-    let is_from_import = imports.values().any(|v| v == &class_name);
-    if !is_from_import {
-        for candidate in type_candidates(&class_name) {
-            let cand_short = fqn_short_name(candidate.trim_start_matches('\\'));
-            for (uri, other_doc) in all_docs {
-                let other_sv = other_doc.view();
-                if let Some(range) =
-                    find_class_range(other_sv, &other_doc.program().stmts, cand_short)
-                {
-                    results.push(Location {
-                        uri: uri.clone(),
-                        range,
-                    });
-                }
+    let mut results = Vec::new();
+    for candidate in type_candidates(&class_name) {
+        let cand_short = fqn_short_name(candidate.trim_start_matches('\\'));
+        for (uri, other_doc) in all_docs {
+            let other_sv = other_doc.view();
+            if let Some(range) = find_class_range(other_sv, &other_doc.program().stmts, cand_short)
+            {
+                results.push(Location {
+                    uri: uri.clone(),
+                    range,
+                });
             }
         }
-
-        dedup_locations(&mut results);
     }
-
+    dedup_locations(&mut results);
     results
 }
 
@@ -446,23 +457,22 @@ fn find_class_range(sv: SourceView<'_>, stmts: &[Stmt<'_, '_>], name: &str) -> O
     None
 }
 
-/// Find type definition locations using `FileIndex` entries.
-/// Returns all matching locations (multiple for union types).
-pub fn goto_type_definition_from_index(
+/// First pass: look for an exact FQN match in `FileIndex` entries (high
+/// priority). Callers should try this — and the open-docs equivalent,
+/// [`goto_type_definition_exact`] — before either's short-name fallback; see
+/// [`goto_type_definition_short_name_fallback`] for why.
+pub fn goto_type_definition_from_index_exact(
     source: &str,
     doc: &ParsedDoc,
     analysis: Option<&FileAnalysis>,
     indexes: &[(Url, std::sync::Arc<crate::index::file_index::FileIndex>)],
     position: Position,
 ) -> Vec<Location> {
-    let Some((imports, class_name)) = resolve_type_at_cursor(source, doc, analysis, position)
-    else {
+    let Some((_, class_name)) = resolve_type_at_cursor(source, doc, analysis, position) else {
         return Vec::new();
     };
 
     let mut results = Vec::new();
-
-    // First pass: look for exact FQN match (high priority)
     for candidate in type_candidates(&class_name) {
         let cand_fqn = candidate.trim_start_matches('\\');
         for (uri, idx) in indexes {
@@ -478,36 +488,46 @@ pub fn goto_type_definition_from_index(
             }
         }
     }
+    dedup_locations(&mut results);
+    results
+}
 
-    // If found in first pass, deduplicate and return those
-    if !results.is_empty() {
-        dedup_locations(&mut results);
-        return results;
+/// Fallback: short-name match in `FileIndex` entries, ignoring namespace
+/// (lower priority, may be ambiguous). Skipped when the class name came from
+/// an import: imports take precedence, so if the exact pass didn't find it
+/// in the imported namespace, don't fall back to an ambiguous short-name
+/// search.
+pub fn goto_type_definition_from_index_short_name_fallback(
+    source: &str,
+    doc: &ParsedDoc,
+    analysis: Option<&FileAnalysis>,
+    indexes: &[(Url, std::sync::Arc<crate::index::file_index::FileIndex>)],
+    position: Position,
+) -> Vec<Location> {
+    let Some((imports, class_name)) = resolve_type_at_cursor(source, doc, analysis, position)
+    else {
+        return Vec::new();
+    };
+    if imports.values().any(|v| v == &class_name) {
+        return Vec::new();
     }
 
-    // Second pass: look for short name match (lower priority, may be ambiguous)
-    // Skip fallback if the class_name came from an import: imports take precedence,
-    // so if not found in their declared namespace, don't fall back to short-name search.
-    let is_from_import = imports.values().any(|v| v == &class_name);
-    if !is_from_import {
-        for candidate in type_candidates(&class_name) {
-            let cn_short = fqn_short_name(candidate);
-            for (uri, idx) in indexes {
-                for cls in &idx.classes {
-                    let short = fqn_short_name(cls.name.as_ref());
-                    if short == cn_short {
-                        let range = zero_width_range(cls.start_line);
-                        results.push(Location {
-                            uri: uri.clone(),
-                            range,
-                        });
-                    }
+    let mut results = Vec::new();
+    for candidate in type_candidates(&class_name) {
+        let cn_short = fqn_short_name(candidate);
+        for (uri, idx) in indexes {
+            for cls in &idx.classes {
+                let short = fqn_short_name(cls.name.as_ref());
+                if short == cn_short {
+                    let range = zero_width_range(cls.start_line);
+                    results.push(Location {
+                        uri: uri.clone(),
+                        range,
+                    });
                 }
             }
         }
-
-        dedup_locations(&mut results);
     }
-
+    dedup_locations(&mut results);
     results
 }

@@ -29,7 +29,10 @@ use crate::navigation::implementation::{
     find_implementations, find_implementations_mir_backed, find_method_implementations_mir_backed,
 };
 use crate::navigation::moniker::moniker_at;
-use crate::navigation::type_definition::{goto_type_definition, goto_type_definition_from_index};
+use crate::navigation::type_definition::{
+    goto_type_definition_exact, goto_type_definition_from_index_exact,
+    goto_type_definition_from_index_short_name_fallback, goto_type_definition_short_name_fallback,
+};
 use crate::navigation::type_hierarchy::{
     prepare_type_hierarchy_from_workspace, subtypes_of_mir_backed, supertypes_of_from_workspace,
 };
@@ -1251,15 +1254,40 @@ impl LanguageServer for Backend {
                 None => return Ok(None),
             };
             let analysis = self.cached_analysis_async(uri).await;
-            // First pass: open-file ParsedDocs give accurate character positions.
             let open_docs = self.docs.docs_for(&self.open_urls());
-            let mut results =
-                goto_type_definition(&source, &doc, analysis.as_deref(), &open_docs, position);
+            let all_indexes = self.docs.all_indexes();
 
-            // If no results from first pass, try background files via FileIndex (line-only positions).
+            // Exact FQN/namespace matches (open docs, then background index)
+            // outrank *either* source's short-name fallback, so an unrelated
+            // same-short-named class in another open file can never preempt
+            // a correctly-namespaced match that only lives in the index.
+            let mut results = goto_type_definition_exact(
+                &source,
+                &doc,
+                analysis.as_deref(),
+                &open_docs,
+                position,
+            );
             if results.is_empty() {
-                let all_indexes = self.docs.all_indexes();
-                results = goto_type_definition_from_index(
+                results = goto_type_definition_from_index_exact(
+                    &source,
+                    &doc,
+                    analysis.as_deref(),
+                    &all_indexes,
+                    position,
+                );
+            }
+            if results.is_empty() {
+                results = goto_type_definition_short_name_fallback(
+                    &source,
+                    &doc,
+                    analysis.as_deref(),
+                    &open_docs,
+                    position,
+                );
+            }
+            if results.is_empty() {
+                results = goto_type_definition_from_index_short_name_fallback(
                     &source,
                     &doc,
                     analysis.as_deref(),
