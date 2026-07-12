@@ -1,10 +1,11 @@
 //! References import collection tests (protocol-wired).
-//! Tests verify that import statements are correctly identified and used by references.
+//! Cursor placed on a `use` import segment currently resolves to nothing —
+//! these tests pin that known limitation so a future change to it is visible.
 
 use super::*;
 
 #[tokio::test]
-async fn references_includes_class_imports() {
+async fn references_excludes_class_import_alias() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     // Cursor on an import alias — no definitions or usages resolve through it.
@@ -50,7 +51,7 @@ define('LIMIT', 100);
 }
 
 #[tokio::test]
-async fn references_finds_aliased_class_imports() {
+async fn references_excludes_aliased_class_import() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     // Cursor on the original class name in an aliased import — no refs resolve.
@@ -98,7 +99,7 @@ $x = Status::Status;
 }
 
 #[tokio::test]
-async fn references_respects_namespace_context() {
+async fn references_excludes_namespaced_import() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     // Cursor on an import inside a namespace — no cross-file refs resolve.
@@ -114,7 +115,7 @@ class Logger {}
 }
 
 #[tokio::test]
-async fn references_handles_function_imports_correctly() {
+async fn references_excludes_builtin_function_import() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     // Cursor on a built-in function import segment — no refs resolve.
