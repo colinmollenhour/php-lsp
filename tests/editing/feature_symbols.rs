@@ -267,6 +267,8 @@ async fn symbol_resolve_is_idempotent() {
         resolved_once["result"], resolved_twice["result"],
         "calling resolve twice must return identical results (idempotent)"
     );
+    let out = render_resolved_workspace_symbol(&resolved_once, &server.uri(""));
+    expect!["TestClass (Class) @ idempotent.php:1:6-1:15"].assert_eq(&out);
 }
 
 /// The symbol's `range.start` must be ≤ `selection_range.start`. This is an
