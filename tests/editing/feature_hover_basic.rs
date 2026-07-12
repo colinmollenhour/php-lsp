@@ -341,6 +341,33 @@ echo $q$0->x;
     .await;
 }
 
+/// Hover's response always includes a `range` covering the hovered word
+/// (`word_range_at`) — no test in the suite checks it, since `render_hover`
+/// only surfaces markdown `contents`, never `range`. A regression in
+/// `word_range_at`'s boundary math (off-by-one column, wrong word split)
+/// would pass every other hover test unnoticed.
+#[tokio::test]
+async fn hover_range_covers_the_hovered_word() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let opened = s
+        .open_fixture(
+            r#"<?php
+class Greeter {}
+$g = new Gree$0ter();
+"#,
+        )
+        .await;
+    let c = opened.cursor().clone();
+    let resp = s.hover(&c.path, c.line, c.character).await;
+    let r = &resp["result"]["range"];
+    let rendered = format!(
+        "{}:{}-{}:{}",
+        r["start"]["line"], r["start"]["character"], r["end"]["line"], r["end"]["character"]
+    );
+    expect!["2:9-2:16"].assert_eq(&rendered);
+}
+
 /// After `if ($x instanceof Foo)`, hovering on `$x->method()` inside the block
 /// should resolve to Foo::method().
 #[tokio::test]
