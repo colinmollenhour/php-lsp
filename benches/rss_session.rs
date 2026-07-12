@@ -274,9 +274,13 @@ async fn run() {
             if mode == "body" || (round + i) % 2 == 0 {
                 text.push(' ');
             } else if mode == "samename" {
-                text.push_str(&format!("\nfunction bench_tmp_{i}(): int {{ return 1; }}\n"));
+                text.push_str(&format!(
+                    "\nfunction bench_tmp_{i}(): int {{ return 1; }}\n"
+                ));
             } else {
-                text.push_str(&format!("\nfunction bench_tmp_{round}_{i}(): int {{ return {round}; }}\n"));
+                text.push_str(&format!(
+                    "\nfunction bench_tmp_{round}_{i}(): int {{ return {round}; }}\n"
+                ));
             }
             c.notify(
                 "textDocument/didChange",
@@ -310,9 +314,7 @@ async fn run() {
         if round % RSS_SAMPLE_EVERY == 0 {
             let rss = rss_mb();
             peak = peak.max(rss);
-            eprintln!(
-                "round {round:>3}/{rounds}: rss {rss:.0} MB (baseline {rss_baseline:.0})"
-            );
+            eprintln!("round {round:>3}/{rounds}: rss {rss:.0} MB (baseline {rss_baseline:.0})");
         }
     }
 

@@ -163,8 +163,16 @@ fn main() {
     let sweep_ok = sweep_max <= SWEEP_CEILING_MS;
     println!(
         "\nmemo-hit sweep max {hit_max:.3} ms (ceiling {HIT_CEILING_MS}): {}; post-edit sweep max {sweep_max:.3} ms (ceiling {SWEEP_CEILING_MS}): {}",
-        if hit_ok { "OK" } else { "OVER — read path re-coupled to workspace size!" },
-        if sweep_ok { "OK" } else { "OVER — O(N) work is back on the edit path!" },
+        if hit_ok {
+            "OK"
+        } else {
+            "OVER — read path re-coupled to workspace size!"
+        },
+        if sweep_ok {
+            "OK"
+        } else {
+            "OVER — O(N) work is back on the edit path!"
+        },
     );
     if !hit_ok || !sweep_ok {
         std::process::exit(1);

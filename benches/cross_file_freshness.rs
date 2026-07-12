@@ -155,11 +155,12 @@ fn spawn_server() -> Client {
 
 fn base_text(renamed: bool) -> String {
     let name = if renamed { "BaseRenamed" } else { "Base" };
-    format!("<?php\nclass {name} {{\n    public function ping(): int {{\n        return 1;\n    }}\n}}\n")
+    format!(
+        "<?php\nclass {name} {{\n    public function ping(): int {{\n        return 1;\n    }}\n}}\n"
+    )
 }
 
-const CONSUMER_TEXT: &str =
-    "<?php\nclass Consumer {\n    public function go(): int {\n        $b = new Base();\n        return $b->ping();\n    }\n}\n";
+const CONSUMER_TEXT: &str = "<?php\nclass Consumer {\n    public function go(): int {\n        $b = new Base();\n        return $b->ping();\n    }\n}\n";
 
 fn write_workspace(root: &Path, size: usize) {
     std::fs::write(root.join("base.php"), base_text(false)).unwrap();
@@ -205,7 +206,10 @@ async fn run_size(size: usize) -> Option<(f64, f64)> {
         return None;
     }
 
-    for (uri, text) in [(&base_uri, base_text(false)), (&consumer_uri, CONSUMER_TEXT.to_string())] {
+    for (uri, text) in [
+        (&base_uri, base_text(false)),
+        (&consumer_uri, CONSUMER_TEXT.to_string()),
+    ] {
         c.notify(
             "textDocument/didOpen",
             json!({"textDocument": {"uri": uri, "languageId": "php", "version": 1, "text": text}}),

@@ -69,7 +69,8 @@ impl Client {
     /// Handle a server→client message that is not the awaited response:
     /// record indexReady, ack server requests.
     async fn absorb(&mut self, msg: &Value) {
-        if msg.get("method") == Some(&json!("$/php-lsp/indexReady")) && self.index_ready_at.is_none()
+        if msg.get("method") == Some(&json!("$/php-lsp/indexReady"))
+            && self.index_ready_at.is_none()
         {
             self.index_ready_at = Some(Instant::now());
         }
@@ -154,7 +155,8 @@ fn definition_is_correct(resp: &Value) -> bool {
         Value::Object(_) => result["uri"].as_str().into_iter().collect(),
         _ => return false,
     };
-    uris.iter().any(|u| u.ends_with("Illuminate/Support/Str.php"))
+    uris.iter()
+        .any(|u| u.ends_with("Illuminate/Support/Str.php"))
 }
 
 fn completion_is_correct(resp: &Value) -> bool {
@@ -166,9 +168,7 @@ fn completion_is_correct(resp: &Value) -> bool {
         },
         _ => return false,
     };
-    items
-        .iter()
-        .any(|i| i["label"].as_str() == Some("camel"))
+    items.iter().any(|i| i["label"].as_str() == Some("camel"))
 }
 
 // ---------- scenario runner (child process) ----------
@@ -178,7 +178,10 @@ fn rss_mb() -> f64 {
         .args(["-o", "rss=", "-p", &std::process::id().to_string()])
         .output()
         .expect("ps");
-    let kb: f64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0.0);
+    let kb: f64 = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0.0);
     kb / 1024.0
 }
 
@@ -232,7 +235,10 @@ async fn run_scenario(name: &str, root: &Path) -> Value {
             }
             if definition_is_correct(&resp) {
                 first_def_ms = Some(ms(t0.elapsed()));
-                eprintln!("  [{name}] first correct definition: {:.0} ms", first_def_ms.unwrap());
+                eprintln!(
+                    "  [{name}] first correct definition: {:.0} ms",
+                    first_def_ms.unwrap()
+                );
             }
         }
         if first_completion_ms.is_none() {
@@ -304,12 +310,7 @@ fn fixture_root() -> Option<PathBuf> {
 fn run_child(scenario: &str, root: &Path, cache_dir: &Path) -> Option<Value> {
     let exe = std::env::current_exe().expect("current_exe");
     let out = std::process::Command::new(exe)
-        .args([
-            "--scenario",
-            scenario,
-            "--root",
-            root.to_str().unwrap(),
-        ])
+        .args(["--scenario", scenario, "--root", root.to_str().unwrap()])
         .env("XDG_CACHE_HOME", cache_dir)
         .stderr(std::process::Stdio::inherit())
         .output()
@@ -332,9 +333,8 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--scenario") {
         let scenario = args[i + 1].clone();
-        let root = PathBuf::from(
-            args[args.iter().position(|a| a == "--root").unwrap() + 1].clone(),
-        );
+        let root =
+            PathBuf::from(args[args.iter().position(|a| a == "--root").unwrap() + 1].clone());
         // Mirror the production runtime config (src/main.rs) — the blocking
         // pool cap shapes both scan throughput and RSS.
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -378,7 +378,12 @@ fn main() {
     );
     println!(
         "\n{:>8}  {:>13}  {:>17}  {:>19}  {:>13}  {:>7}",
-        "scenario", "initialize ms", "first goto-def ms", "first completion ms", "indexReady ms", "RSS MB"
+        "scenario",
+        "initialize ms",
+        "first goto-def ms",
+        "first completion ms",
+        "indexReady ms",
+        "RSS MB"
     );
     for r in &results {
         let row = (
