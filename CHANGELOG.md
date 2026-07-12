@@ -2,6 +2,31 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.15.1] — 2026-07-12
+
+### Fixed
+
+- **Parse-error diagnostics now carry a proper code and clean message**: previously had no `code` at all and could leak a raw byte-offset `Debug` string (e.g. `Span { start: 16, end: 17 }`) into the message; now uses a `SyntaxError` code and renders the position as line:col.
+- **"Extract variable" no longer offered on non-expressions**: the eligibility check was purely textual and could offer the action on a bare class name, function name, or an entire class body, producing invalid PHP when applied. It now requires the selection to cover a real AST expression.
+- **Renaming a class's file only rewrote importers, not the declaration**: `willRenameFiles` now also renames the `class`/`interface`/`trait`/`enum` declaration in the moved file itself, instead of leaving it out of sync with dependents' updated `use` imports.
+- **`textDocument/rename` on a class missed type-hint occurrences**: renames now also update `function greet(User $user)`-style type hints, `extends`/`implements`, and static-call class tokens, in addition to `use` imports and `new`/`instanceof` sites.
+- **Find-references resolved `parent::__construct()` to the child class**: now resolves to the actual parent class named in the `extends` clause.
+- **Hover, go-to-implementation, and type-hierarchy cold-index fallbacks could match the wrong class**: same-short-name classes sharing a local `use ... as Alias` (e.g. Laravel's many `Factory` classes aliased to `FactoryContract`) are now disambiguated by FQN instead of by bare short name.
+- **Type hierarchy could list a supertype twice**: fixed a missing dedup when two classes with the same short name shared a common ancestor.
+- **`workspaceSymbol/resolve` never resolved real results from live client traffic**: results were always treated as an already-resolved zero-width range; it now falls through to compute the real name range.
+- **Document-symbol and call-hierarchy selection ranges could escape their own symbol's range, or land on the wrong name**: fixed a fallback that pointed at byte offset 0, and PHP 8 attributes on a member no longer cause its name search to match text inside the attribute.
+- **Go-to-type-definition ranges from the index were always zero-width**: results now highlight the actual class-name span instead of collapsing to line-start.
+- **Signature help could resolve a bare call to a trait/interface/enum member**: e.g. `log($0)` matching a same-named trait method instead of the `log()` builtin; matches on those now require a receiver (`->`/`::`).
+- **Enum `->value` completion always showed `string|int`**: now shows the enum's real declared backing type.
+- **"Extract constant" could duplicate an existing constant declaration**: no longer offered when the selection is already the RHS of a `const` declaration.
+- **Find-references from an enum case's own declaration found nothing**: case declarations are now classified and searched like class constants, so all real usages are found.
+- **"Convert to closure" dropped variables captured from the outer scope**: arrow-function-to-closure conversion now synthesizes a `use (...)` clause for them, instead of producing a runtime "undefined variable" error.
+- **`textDocument/typeDefinition` could resolve to an unrelated same-named class from an open file**: exact FQN matches from the background index now outrank an open document's ambiguous short-name fallback.
+
+### Dependencies
+
+- **mir updated to 0.53.1**: fixes a hover regression on static-property access and a chained-call completion fallback; seeds `$this` into free-standing closures.
+
 ## [0.15.0] — 2026-07-02
 
 ### Features
