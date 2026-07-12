@@ -293,7 +293,8 @@ async fn rename_on_nonexistent_symbol_does_not_error() {
     s.validate_syntax(false);
     s.open("rn.php", "<?php\n// nothing to rename\n").await;
     let resp = s.rename("rn.php", 1, 5, "NewName").await;
-    assert!(resp["error"].is_null(), "rename errored: {resp:?}");
+    let snap = canonicalize_workspace_edit(&resp["result"], &s.uri(""));
+    expect![[r#""#]].assert_eq(&snap);
 }
 
 // --- psr4-mini fixture: cross-file rename + PSR4-aware file rename ---
