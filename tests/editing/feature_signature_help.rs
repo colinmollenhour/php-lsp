@@ -246,7 +246,11 @@ greet($0);
 "#,
         )
         .await;
-    expect!["▶ greet(string $name, int $times)  @param0"].assert_eq(&out);
+    expect![[r#"
+        ▶ greet(string $name, int $times)  @param0
+          param string $name: The user's name
+          param int $times: How many times to greet"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -488,7 +492,8 @@ greet($0);
         .await;
     expect![[r#"
         ▶ greet(string $name)  @param0
-          doc: Greet a user by name."#]]
+          doc: Greet a user by name.
+          param string $name: The user's name"#]]
     .assert_eq(&out);
 }
 
@@ -595,5 +600,8 @@ greet($0);
         )
         .await;
     // No "doc:" line because there is no free-text description.
-    expect!["▶ greet(string $name)  @param0"].assert_eq(&out);
+    expect![[r#"
+        ▶ greet(string $name)  @param0
+          param string $name: The user's name"#]]
+    .assert_eq(&out);
 }

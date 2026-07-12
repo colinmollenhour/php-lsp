@@ -429,6 +429,29 @@ pub fn render_signature_help(resp: &Value) -> String {
         if !doc.is_empty() {
             out.push_str(&format!("\n  doc: {doc}"));
         }
+        // Render each parameter's own documentation (from @param docblock
+        // tags), when present. Omitted entirely for params with none, so
+        // signatures with no per-param docs render exactly as before.
+        for param in sig["parameters"].as_array().into_iter().flatten() {
+            let pdoc = param["documentation"]["value"]
+                .as_str()
+                .or_else(|| param["documentation"].as_str())
+                .unwrap_or("");
+            if pdoc.is_empty() {
+                continue;
+            }
+            let plabel = match &param["label"] {
+                Value::String(s) => s.clone(),
+                Value::Array(offsets) => offsets
+                    .iter()
+                    .filter_map(|v| v.as_u64())
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+                    .join("-"),
+                _ => String::new(),
+            };
+            out.push_str(&format!("\n  param {plabel}: {pdoc}"));
+        }
         out.push('\n');
     }
     out.trim_end().to_owned()
