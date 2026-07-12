@@ -257,6 +257,11 @@ fn deprecated_mod(doc: Option<&php_ast::Comment<'_>>) -> u32 {
 /// and emit `TT_COMMENT` tokens.  Each physical line of a multi-line comment
 /// is emitted as a separate token because the LSP protocol requires tokens to
 /// fit on a single line.
+/// Strip a trailing `\r` so CRLF line endings don't leak into comment lengths.
+fn trim_trailing_cr(s: &str) -> &str {
+    s.strip_suffix('\r').unwrap_or(s)
+}
+
 fn collect_comments(sv: SourceView<'_>, out: &mut Vec<RawToken>) {
     let bytes = sv.source().as_bytes();
     let len = bytes.len();
@@ -302,7 +307,7 @@ fn collect_comments(sv: SourceView<'_>, out: &mut Vec<RawToken>) {
                     while i < len && bytes[i] != b'\n' {
                         i += 1;
                     }
-                    let text = &sv.source()[start..i];
+                    let text = trim_trailing_cr(&sv.source()[start..i]);
                     let len_utf16: u32 = utf16_code_units(text);
                     push_at(out, sv, start as u32, len_utf16, TT_COMMENT, 0);
                 } else if bytes[i + 1] == b'*' {
@@ -329,7 +334,7 @@ fn collect_comments(sv: SourceView<'_>, out: &mut Vec<RawToken>) {
                 while i < len && bytes[i] != b'\n' {
                     i += 1;
                 }
-                let text = &sv.source()[start..i];
+                let text = trim_trailing_cr(&sv.source()[start..i]);
                 let len_utf16: u32 = utf16_code_units(text);
                 push_at(out, sv, start as u32, len_utf16, TT_COMMENT, 0);
             }
@@ -349,7 +354,7 @@ fn emit_multiline_comment(sv: SourceView<'_>, start: usize, end: usize, out: &mu
         if ch == '\n' {
             let line_end = start + rel; // byte index of newline
             if line_end > line_start {
-                let segment = &sv.source()[line_start..line_end];
+                let segment = trim_trailing_cr(&sv.source()[line_start..line_end]);
                 let len_utf16: u32 = utf16_code_units(segment);
                 if len_utf16 > 0 {
                     push_at(out, sv, line_start as u32, len_utf16, TT_COMMENT, 0);
@@ -951,5 +956,28 @@ mod tests {
         let l = legend();
         assert_eq!(l.token_types.len(), 13);
         assert_eq!(l.token_modifiers.len(), 5);
+    }
+
+    #[test]
+    fn comment_lengths_exclude_crlf_carriage_return() {
+        let src = "<?php\r\n// line comment\r\n# hash comment\r\n/* block\r\ncomment */\r\n";
+        let d = doc(src);
+        let sv = d.view();
+        let mut raw: Vec<RawToken> = Vec::new();
+        collect_comments(sv, &mut raw);
+        let comment_lens: Vec<u32> = raw
+            .into_iter()
+            .filter(|&(_, _, _, tt, _)| tt == TT_COMMENT)
+            .map(|(_, _, len, _, _)| len)
+            .collect();
+        assert_eq!(
+            comment_lens,
+            vec![
+                "// line comment".len() as u32,
+                "# hash comment".len() as u32,
+                "/* block".len() as u32,
+                "comment */".len() as u32,
+            ]
+        );
     }
 }

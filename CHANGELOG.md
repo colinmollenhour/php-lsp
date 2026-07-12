@@ -13,6 +13,7 @@ All notable changes to php-lsp are documented here.
 - **Find-references resolved `parent::__construct()` to the child class**: now resolves to the actual parent class named in the `extends` clause.
 - **Hover, go-to-implementation, and type-hierarchy cold-index fallbacks could match the wrong class**: same-short-name classes sharing a local `use ... as Alias` (e.g. Laravel's many `Factory` classes aliased to `FactoryContract`) are now disambiguated by FQN instead of by bare short name.
 - **Type hierarchy could list a supertype twice**: fixed a missing dedup when two classes with the same short name shared a common ancestor.
+- **Semantic tokens for comments were one character too long on CRLF files**: the scan for `//`, `#`, and `/* */` comments included the trailing `\r` in the token length, most visible on Windows checkouts.
 - **`workspaceSymbol/resolve` never resolved real results from live client traffic**: results were always treated as an already-resolved zero-width range; it now falls through to compute the real name range.
 - **Document-symbol and call-hierarchy selection ranges could escape their own symbol's range, or land on the wrong name**: fixed a fallback that pointed at byte offset 0, and PHP 8 attributes on a member no longer cause its name search to match text inside the attribute.
 - **Go-to-type-definition ranges from the index were always zero-width**: results now highlight the actual class-name span instead of collapsing to line-start.
