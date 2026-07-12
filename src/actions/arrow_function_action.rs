@@ -552,7 +552,12 @@ fn build_arrow_to_closure_action(
 /// Build the closure source text for the given arrow function.
 ///
 /// Params and return type are extracted verbatim from source; the body
-/// expression is wrapped in `{ return <expr>; }`.
+/// expression is wrapped in `{ return <expr>; }`. Arrow functions
+/// auto-capture every outer-scope variable they read (by value — they can
+/// never write back into it), but a plain closure only sees what it
+/// declares in `use (...)`, so any such variable must be captured
+/// explicitly or the generated closure fails at runtime with an undefined
+/// variable.
 fn build_closure_text(af: &ArrowFunctionExpr<'_, '_>, span: Span, source: &str) -> Option<String> {
     let af_start = span.start as usize;
 
@@ -576,7 +581,49 @@ fn build_closure_text(af: &ArrowFunctionExpr<'_, '_>, span: Span, source: &str) 
     let static_prefix = if af.is_static { "static " } else { "" };
     let by_ref_marker = if af.by_ref { "&" } else { "" };
 
+    let param_names = collect_vars(params_text);
+    let captured = collect_vars(body_text)
+        .into_iter()
+        .filter(|v| !param_names.contains(v))
+        .collect::<Vec<_>>();
+    let use_clause = if captured.is_empty() {
+        String::new()
+    } else {
+        format!(" use ({})", captured.join(", "))
+    };
+
     Some(format!(
-        "{static_prefix}function{by_ref_marker}{params_text}{ret_text} {{ return {body_text}; }}"
+        "{static_prefix}function{by_ref_marker}{params_text}{use_clause}{ret_text} {{ return {body_text}; }}"
     ))
+}
+
+/// Heuristic text scan for `$var` references, deduped in first-appearance
+/// order and excluding `$this` (always implicitly bound in a non-static
+/// closure, never valid in a `use` clause). Doesn't distinguish reads from
+/// writes or account for nested-closure scoping — matches the level of
+/// rigor `collect_vars_in_text` uses elsewhere in the action layer.
+fn collect_vars(text: &str) -> Vec<String> {
+    let mut vars: Vec<String> = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+                end += 1;
+            }
+            if end > start {
+                let name = &text[start..end];
+                let full = format!("${name}");
+                if name != "this" && !vars.contains(&full) {
+                    vars.push(full);
+                }
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    vars
 }

@@ -414,6 +414,9 @@ $result = array_map($0fn(int $n) => $n * $n$0, $items);
     .assert_eq(&out);
 }
 
+/// The inner arrow function reads `$a` from the outer scope — arrow functions
+/// auto-capture that for free, but a plain closure needs an explicit
+/// `use ($a)` or `$a` is undefined at runtime. Converting must synthesize it.
 #[tokio::test]
 async fn to_closure_converts_innermost_nested_arrow() {
     let mut s = TestServer::new().await;
@@ -428,11 +431,13 @@ $outer = fn($a) => $0fn($b) => $a + $b$0;
         .await;
     expect![[r#"
         <?php
-        $outer = fn($a) => function($b) { return $a + $b; };
+        $outer = fn($a) => function($b) use ($a) { return $a + $b; };
     "#]]
     .assert_eq(&out);
 }
 
+/// Same use-clause requirement as above, with the outer scope being a plain
+/// closure's parameter rather than another arrow function's.
 #[tokio::test]
 async fn to_closure_converts_arrow_inside_closure_body() {
     let mut s = TestServer::new().await;
@@ -450,8 +455,65 @@ $outer = function(int $a) {
     expect![[r#"
         <?php
         $outer = function(int $a) {
-            return function(int $b) { return $a + $b; };
+            return function(int $b) use ($a) { return $a + $b; };
         };
+    "#]]
+    .assert_eq(&out);
+}
+
+/// Multiple distinct outer-scope reads must all land in the use clause, in
+/// first-appearance order, deduped (`$a` appears twice).
+#[tokio::test]
+async fn to_closure_captures_multiple_outer_variables() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+function make($a, $b, $c) {
+    return $0fn($x) => $a + $b * $x + $a - $c$0;
+}
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        function make($a, $b, $c) {
+            return function($x) use ($a, $b, $c) { return $a + $b * $x + $a - $c; };
+        }
+    "#]]
+    .assert_eq(&out);
+}
+
+/// `$this` is always implicitly available in a non-static closure — it must
+/// never be added to the synthesized `use` clause (`use ($this)` is a PHP
+/// fatal error).
+#[tokio::test]
+async fn to_closure_does_not_capture_this() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+class Greeter {
+    public string $name = "World";
+    public function make() {
+        return $0fn() => "Hello, {$this->name}"$0;
+    }
+}
+"#,
+            "Convert to closure",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        class Greeter {
+            public string $name = "World";
+            public function make() {
+                return function() { return "Hello, {$this->name}"; };
+            }
+        }
     "#]]
     .assert_eq(&out);
 }
