@@ -3,11 +3,11 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::render::render_linked_editing_range;
 pub use common::render::{
     assert_document_symbol_containment, assert_linked_editing_ranges_share_text,
     assert_selection_range_invariant,
 };
+use common::render::{render_linked_editing_range, render_selection_range};
 pub use common::{
     TestServer, canonicalize_workspace_edit, lines_of, render_completion,
     render_completion_ordered, render_document_symbols, render_hover, render_inlay_hints,
