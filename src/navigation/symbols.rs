@@ -26,17 +26,25 @@ pub fn document_symbols(_source: &str, doc: &ParsedDoc) -> Vec<DocumentSymbol> {
     symbols_from_statements(sv, &doc.program().stmts)
 }
 
+/// A `Location`'s range is a `workspace_symbols_from_index` placeholder — `zero_width_range`
+/// collapsed to the start of a line — rather than a genuinely precise, already-resolved range.
+fn is_placeholder_range(range: &Range) -> bool {
+    range.start == range.end && range.start.character == 0
+}
+
 /// Fill in the sv.source() range for a `WorkspaceSymbol` whose `location` carries only a URI
-/// (i.e. `OneOf::Right(WorkspaceLocation)`).  If the range is already present, or if the
-/// document cannot be found, the symbol is returned unchanged. If the symbol name is not found
-/// in the source, the URI-only location is preserved.
+/// (i.e. `OneOf::Right(WorkspaceLocation)`) or a line-level placeholder range produced by
+/// `workspace_symbols_from_index`. If the range is already precise, or if the document cannot
+/// be found, the symbol is returned unchanged. If the symbol name is not found in the source,
+/// the existing location is preserved.
 pub fn resolve_workspace_symbol(
     mut symbol: WorkspaceSymbol,
     docs: &[(Url, Arc<ParsedDoc>)],
 ) -> WorkspaceSymbol {
     let uri = match &symbol.location {
-        // Already fully resolved — nothing to do.
-        OneOf::Left(_) => return symbol,
+        // Genuinely precise range — already resolved, nothing to do.
+        OneOf::Left(loc) if !is_placeholder_range(&loc.range) => return symbol,
+        OneOf::Left(loc) => loc.uri.clone(),
         OneOf::Right(wl) => wl.uri.clone(),
     };
     for (doc_uri, doc) in docs {

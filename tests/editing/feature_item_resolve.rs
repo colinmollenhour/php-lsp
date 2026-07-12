@@ -482,7 +482,7 @@ class Database {}
     let symbol = symbols[0].clone();
     let resolved = s.workspace_symbol_resolve(symbol).await;
     let out = render_resolved_workspace_symbol(&resolved, &s.uri(""));
-    expect!["Database (Class) @ main.php:1:0-1:0"].assert_eq(&out);
+    expect!["Database (Class) @ main.php:1:6-1:14"].assert_eq(&out);
 }
 
 #[tokio::test]
@@ -522,9 +522,9 @@ function tested() {}
         results.push(render_resolved_workspace_symbol(&resolved, &s.uri("")));
     }
     expect![[r#"
-        test (Function) @ main.php:1:0-1:0
-        testing (Function) @ main.php:2:0-2:0
-        tested (Function) @ main.php:3:0-3:0"#]]
+        test (Function) @ main.php:1:9-1:13
+        testing (Function) @ main.php:2:9-2:16
+        tested (Function) @ main.php:3:9-3:15"#]]
     .assert_eq(&results.join("\n"));
 }
 
