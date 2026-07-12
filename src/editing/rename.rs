@@ -4,23 +4,60 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
 use crate::document::ast::ParsedDoc;
-use crate::navigation::references::find_references_with_use;
+use crate::navigation::references::{SymbolKind, find_references_with_use};
 use crate::navigation::walk::{collect_var_refs_in_scope, property_refs_in_stmts};
 use crate::text::utf16_code_units;
 
 /// Compute a WorkspaceEdit that renames every occurrence of `word` to `new_name`
 /// across all open documents (including the declaration site).
+///
+/// Equivalent to `rename_with_kind(word, new_name, all_docs, None, target_fqn)` —
+/// kept as a stable, kind-agnostic entry point for callers (e.g. benchmarks) that
+/// don't classify the symbol. Prefer `rename_with_kind` when the caller knows the
+/// symbol is a class: it merges in `use`-import edits that this path can miss.
 pub fn rename(
     word: &str,
     new_name: &str,
     all_docs: &[(Url, Arc<ParsedDoc>)],
     target_fqn: Option<&str>,
 ) -> WorkspaceEdit {
-    use crate::navigation::references::find_references_with_target;
+    rename_with_kind(word, new_name, all_docs, None, target_fqn)
+}
 
-    let locations = match target_fqn {
-        Some(fqn) => find_references_with_target(word, all_docs, true, None, fqn),
-        None => find_references_with_use(word, all_docs, true),
+/// Like `rename`, but takes the caller's classified `SymbolKind` (from
+/// `symbol_kind_at`/`resolve_reference_symbol`) so a class rename can merge two
+/// span sources that each cover only half the picture:
+/// - the class-kind walker (`Some(SymbolKind::Class)`, via `class_refs_in_stmts`)
+///   is type-hint aware — it catches type hints, `extends`/`implements`,
+///   `instanceof`, `new`, and static-call class tokens — but never looks at `use`
+///   statements;
+/// - the general word walker used for every other rename catches `use` imports
+///   (and declarations/`new` sites, which are `ExprKind::Identifier` nodes) but has
+///   no `visit_type_hint` override, so it's blind to type hints.
+///
+/// Without merging both, renaming a class silently leaves type-hint occurrences
+/// (`function greet(User $user)`) referring to a class that no longer exists.
+pub fn rename_with_kind(
+    word: &str,
+    new_name: &str,
+    all_docs: &[(Url, Arc<ParsedDoc>)],
+    kind: Option<SymbolKind>,
+    target_fqn: Option<&str>,
+) -> WorkspaceEdit {
+    use crate::navigation::references::{
+        dedup_ref_locations, find_references_with_target, use_import_locations,
+    };
+
+    let locations = match (kind, target_fqn) {
+        (Some(SymbolKind::Class), Some(fqn)) => {
+            let mut locs =
+                find_references_with_target(word, all_docs, true, Some(SymbolKind::Class), fqn);
+            locs.extend(use_import_locations(word, all_docs));
+            dedup_ref_locations(&mut locs);
+            locs
+        }
+        (_, Some(fqn)) => find_references_with_target(word, all_docs, true, None, fqn),
+        (_, None) => find_references_with_use(word, all_docs, true),
     };
 
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();

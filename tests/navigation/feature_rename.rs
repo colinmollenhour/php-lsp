@@ -250,11 +250,6 @@ $b = new Widget();
 /// renaming the class in one file must rewrite both the `use` import segment
 /// and short-name expression sites in dependents. Snapshot pinned so the
 /// merged AST walker can't silently drop either category.
-///
-/// Note: type hints and inline fully-qualified `\App\Widget` references are
-/// intentionally omitted — the general rename walker only emits spans for
-/// `ExprKind::Identifier` whose text equals the short name, so neither form
-/// participates in the cross-file rename surface today.
 #[tokio::test]
 async fn rename_class_rewrites_use_imports_across_files() {
     let mut s = TestServer::new().await;
@@ -334,9 +329,11 @@ async fn rename_class_edits_all_dependents() {
 
         // src/Service/Greeter.php
         4:14-4:18 → "Account"
+        8:26-8:30 → "Account"
 
         // src/Service/Registry.php
-        4:14-4:18 → "Account""#]]
+        4:14-4:18 → "Account"
+        11:29-11:33 → "Account""#]]
     .assert_eq(&snap);
 }
 

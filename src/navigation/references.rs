@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 use super::walk::{
     all_class_ref_names_in_stmts, class_refs_in_stmts, constant_refs_in_stmts,
     function_refs_in_stmts, global_constant_refs_in_stmts, method_refs_in_stmts, new_refs_in_stmts,
-    property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use,
+    property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use, use_import_refs_in_stmts,
 };
 use crate::document::ast::{ParsedDoc, str_offset_in_range};
 use crate::document::document_store::DocumentStore;
@@ -84,6 +84,39 @@ pub fn find_references_with_use(
     include_declaration: bool,
 ) -> Vec<Location> {
     find_references_inner(word, all_docs, include_declaration, true, None, None)
+}
+
+/// Collect `use`-import spans matching `word` across `all_docs`, as `Location`s.
+///
+/// The class-kind walker (`class_refs_in_stmts`, reached via `find_references_with_target`
+/// when `kind` is `Some(SymbolKind::Class)`) is type-hint aware but never looks at `use`
+/// statements — only the general word walker does. Class rename needs both categories of
+/// span, so this lets the caller compute the class-kind results and the `use`-import
+/// results separately and merge them.
+pub fn use_import_locations(word: &str, all_docs: &[(Url, Arc<ParsedDoc>)]) -> Vec<Location> {
+    all_docs
+        .par_iter()
+        .flat_map_iter(|(uri, doc)| {
+            let source = doc.source();
+            if !source.contains(word) {
+                return Vec::new();
+            }
+            let mut spans = Vec::new();
+            use_import_refs_in_stmts(source, &doc.program().stmts, word, &mut spans);
+            let sv = doc.view();
+            spans
+                .into_iter()
+                .map(|span| {
+                    let start = sv.position_of(span.start);
+                    let end = sv.position_of(span.end);
+                    Location {
+                        uri: uri.clone(),
+                        range: Range { start, end },
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Find only `new ClassName(...)` instantiation sites across all docs.

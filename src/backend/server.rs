@@ -50,12 +50,13 @@ use crate::editing::document_link::document_links;
 use crate::editing::folding::folding_ranges;
 use crate::editing::formatting::{format_document, format_range};
 use crate::editing::on_type_format::on_type_format;
-use crate::editing::rename::{prepare_rename, rename, rename_property, rename_variable};
+use crate::editing::rename::{prepare_rename, rename_property, rename_variable, rename_with_kind};
 use crate::editing::selection_range::selection_ranges;
 use crate::editing::signature_help::signature_help;
 
 use super::helpers::{
     cursor_is_on_property_decl, is_after_arrow, promoted_property_at_cursor, run_phpunit,
+    symbol_kind_at,
 };
 use super::{Backend, publish_with_dependents};
 
@@ -679,10 +680,17 @@ impl LanguageServer for Backend {
                     let imports = self.file_imports(uri);
                     crate::navigation::moniker::resolve_fqn(doc, &word, &imports)
                 });
-                Ok(Some(rename(
+                // Class renames need `symbol_kind_at`'s cursor context (not just
+                // FQN resolution, which also succeeds for functions/constants) so
+                // `rename_with_kind` knows to merge `use`-import edits with the
+                // type-hint-aware class walker. Every other kind keeps the
+                // existing general-walker behavior unchanged.
+                let kind = symbol_kind_at(&source, position, &word);
+                Ok(Some(rename_with_kind(
                     &word,
                     &params.new_name,
                     &all_docs,
+                    kind,
                     target_fqn.as_deref(),
                 )))
             }

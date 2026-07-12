@@ -6,7 +6,7 @@ use std::ops::ControlFlow;
 use php_ast::{
     Attribute, CatchClause, ClassMember, ClassMemberKind, EnumMember, EnumMemberKind, Expr,
     ExprKind, MethodDecl, Name, NamespaceBody, Span, Stmt, StmtKind, TraitUseDecl, TypeHint,
-    TypeHintKind, UnaryPostfixOp, UnaryPrefixOp,
+    TypeHintKind, UnaryPostfixOp, UnaryPrefixOp, UseDecl,
     visitor::{
         Visitor, walk_attribute, walk_catch_clause, walk_class_member, walk_enum_member, walk_expr,
         walk_stmt, walk_trait_use, walk_type_hint,
@@ -88,32 +88,7 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
             StmtKind::Trait(t) => self.push_name_str(t.name.or_error(), stmt.span),
             StmtKind::Enum(e) => self.push_name_str(e.name.or_error(), stmt.span),
             StmtKind::Use(u) if self.include_use => {
-                for use_item in u.uses.iter() {
-                    let fqn = use_item.name.to_string_repr().into_owned();
-                    if let Some(alias) = use_item.alias {
-                        // If there's an alias and it matches, emit the alias span (not the FQN)
-                        if alias == self.word {
-                            // Find the position of the alias in the source
-                            if let Some(offset) = str_offset(self.source, alias) {
-                                self.out.push(Span {
-                                    start: offset,
-                                    end: offset + alias.len() as u32,
-                                });
-                            }
-                        }
-                    } else {
-                        // No alias: check if the last segment of FQN matches
-                        let last_seg = fqn_short_name(&fqn);
-                        if last_seg == self.word {
-                            let name_span = use_item.name.span();
-                            let offset = (fqn.len() - last_seg.len()) as u32;
-                            self.out.push(Span {
-                                start: name_span.start + offset,
-                                end: name_span.start + fqn.len() as u32,
-                            });
-                        }
-                    }
-                }
+                push_use_item_spans(self.source, u, self.word, &mut self.out);
             }
             _ => {}
         }
@@ -171,6 +146,80 @@ impl<'arena, 'src> Visitor<'arena, 'src> for AllRefsVisitor<'_> {
         }
         walk_expr(self, expr)
     }
+}
+
+/// Push a span for each `use` import item in `u` whose local name — the
+/// alias when aliased, otherwise the last segment of the imported FQN —
+/// equals `word`. Shared by `AllRefsVisitor` (general word walker) and
+/// [`use_import_refs_in_stmts`] (used to merge `use`-import spans into the
+/// class-kind walker for rename).
+fn push_use_item_spans(source: &str, u: &UseDecl<'_, '_>, word: &str, out: &mut Vec<Span>) {
+    for use_item in u.uses.iter() {
+        let fqn = use_item.name.to_string_repr().into_owned();
+        if let Some(alias) = use_item.alias {
+            // If there's an alias and it matches, emit the alias span (not the FQN).
+            if alias == word
+                && let Some(offset) = str_offset(source, alias)
+            {
+                out.push(Span {
+                    start: offset,
+                    end: offset + alias.len() as u32,
+                });
+            }
+        } else {
+            // No alias: check if the last segment of FQN matches.
+            let last_seg = fqn_short_name(&fqn);
+            if last_seg == word {
+                let name_span = use_item.name.span();
+                let offset = (fqn.len() - last_seg.len()) as u32;
+                out.push(Span {
+                    start: name_span.start + offset,
+                    end: name_span.start + fqn.len() as u32,
+                });
+            }
+        }
+    }
+}
+
+/// Collect spans of `use` import items matching `word` (see
+/// [`push_use_item_spans`]), recursing into braced namespaces.
+///
+/// The class-kind walker ([`class_refs_in_stmts`]) is type-hint aware
+/// (type hints, `extends`/`implements`, `instanceof`, `new`, static calls)
+/// but — unlike [`AllRefsVisitor`] — never looks at `use` statements. Rename
+/// needs both sets of spans for a class rename to be complete; this function
+/// supplies the half that `class_refs_in_stmts` omits so callers can merge
+/// the two.
+pub fn use_import_refs_in_stmts(
+    source: &str,
+    stmts: &[Stmt<'_, '_>],
+    word: &str,
+    out: &mut Vec<Span>,
+) {
+    struct UseImportVisitor<'a> {
+        source: &'a str,
+        word: &'a str,
+        out: Vec<Span>,
+    }
+
+    impl<'arena, 'src> Visitor<'arena, 'src> for UseImportVisitor<'_> {
+        fn visit_stmt(&mut self, stmt: &Stmt<'arena, 'src>) -> ControlFlow<()> {
+            if let StmtKind::Use(u) = &stmt.kind {
+                push_use_item_spans(self.source, u, self.word, &mut self.out);
+            }
+            walk_stmt(self, stmt)
+        }
+    }
+
+    let mut v = UseImportVisitor {
+        source,
+        word,
+        out: Vec::new(),
+    };
+    for stmt in stmts {
+        let _ = v.visit_stmt(stmt);
+    }
+    out.append(&mut v.out);
 }
 
 // ── Variable rename helpers ───────────────────────────────────────────────────
