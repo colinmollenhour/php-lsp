@@ -22,8 +22,8 @@ mod feature_doc_lifecycle;
 mod feature_execute_command;
 #[path = "workspace/feature_file_ops.rs"]
 mod feature_file_ops;
-#[path = "workspace/feature_file_rename_protocol.rs"]
-mod feature_file_rename_protocol;
+#[path = "workspace/feature_use_statement_navigation.rs"]
+mod feature_use_statement_navigation;
 #[path = "workspace/feature_incremental.rs"]
 mod feature_incremental;
 #[path = "workspace/feature_indexing_perf.rs"]

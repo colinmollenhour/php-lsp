@@ -1,5 +1,9 @@
-//! File rename use import rewriting tests (protocol-wired).
-//! Tests verify that use statements are correctly parsed and referenced.
+//! Hover/references/definition with the cursor inside a `use` import line
+//! itself (not on a usage site). Hover echoes the raw `use` line back as
+//! text; references/definition currently resolve to nothing from this
+//! position — these tests pin that behavior. Coverage for the actual
+//! willRenameFiles/willDeleteFiles use-statement rewrite lives in
+//! feature_file_ops.rs.
 
 use super::*;
 use expect_test::expect;
@@ -38,7 +42,7 @@ echo 'ok';
 }
 
 #[tokio::test]
-async fn aliased_imports_resolve() {
+async fn aliased_import_cursor_finds_no_references() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let refs = s
@@ -50,7 +54,7 @@ class OldService {}
 "#,
         )
         .await;
-    // Aliased import should find the target class
+    // Cursor on the original class name inside an aliased import — no refs resolve.
     expect!["<none>"].assert_eq(&refs);
 }
 
@@ -139,7 +143,7 @@ $log = new Logger();
 }
 
 #[tokio::test]
-async fn utf16_offsets_in_use_statements() {
+async fn definition_on_use_statement_segment_finds_nothing() {
     let mut s = TestServer::new().await;
     let def = s
         .check_definition(
@@ -150,12 +154,12 @@ echo 'test';
 "#,
         )
         .await;
-    // UTF-16 offset handling should work for ASCII
+    // Cursor on a `use` import segment — no definition resolves.
     expect!["<none>"].assert_eq(&def);
 }
 
 #[tokio::test]
-async fn use_with_alias_preserves_original() {
+async fn aliased_import_alias_cursor_finds_no_references() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let refs = s
@@ -167,6 +171,6 @@ class MyClass {}
 "#,
         )
         .await;
-    // Alias import should reference original class name
+    // Cursor on the class-name segment of an aliased import — no refs resolve.
     expect!["<none>"].assert_eq(&refs);
 }
