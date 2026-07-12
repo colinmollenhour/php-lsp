@@ -1641,7 +1641,7 @@ impl TestServer {
         };
 
         // For multi-file edits, prefer the edits targeting the cursor file.
-        let cursor_uri = format!("file://{cursor_path}");
+        let cursor_uri = self.uri(&cursor_path);
         let text_edits = changes
             .get(&cursor_uri)
             .or_else(|| changes.values().next())
