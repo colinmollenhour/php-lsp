@@ -3,6 +3,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
+use common::render::render_linked_editing_range;
 pub use common::render::{
     assert_document_symbol_containment, assert_linked_editing_ranges_share_text,
     assert_selection_range_invariant,

@@ -5,11 +5,20 @@ use expect_test::expect;
 // ── LSP-spec same-text invariant ────────────────────────────────────────────
 
 /// Every range in a `LinkedEditingRanges` response must cover identical
-/// text — linked-mode typing replicates one edit across all of them.
-async fn check_invariant(s: &mut TestServer, path: &str, src: &str, line: u32, character: u32) {
+/// text — linked-mode typing replicates one edit across all of them. Also
+/// snapshots the rendered ranges so a regression collapsing to 0/1 ranges
+/// (which would make the share-text invariant vacuously true) is caught.
+async fn check_invariant(
+    s: &mut TestServer,
+    path: &str,
+    src: &str,
+    line: u32,
+    character: u32,
+) -> String {
     s.open(path, src).await;
     let resp = s.linked_editing_range(path, line, character).await;
     assert_linked_editing_ranges_share_text(&resp, src);
+    render_linked_editing_range(&resp)
 }
 
 #[tokio::test]
@@ -17,7 +26,7 @@ async fn linked_ranges_cover_same_text_across_fixtures() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     // Function decl + calls.
-    check_invariant(
+    let fn_out = check_invariant(
         &mut s,
         "fn.php",
         "<?php\nfunction greet() {}\ngreet();\ngreet();\n",
@@ -28,7 +37,7 @@ async fn linked_ranges_cover_same_text_across_fixtures() {
     // Method decl + same-class call.
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    check_invariant(
+    let method_out = check_invariant(
         &mut s,
         "method.php",
         "<?php\nclass Calc {\n    public function add(): void {}\n    public function self_call(): void { $this->add(); }\n}\n",
@@ -39,7 +48,7 @@ async fn linked_ranges_cover_same_text_across_fixtures() {
     // Variable decl + uses.
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    check_invariant(
+    let var_out = check_invariant(
         &mut s,
         "var.php",
         "<?php\nfunction f(): void {\n    $foo = 1;\n    echo $foo;\n    $foo += 2;\n}\n",
@@ -50,7 +59,7 @@ async fn linked_ranges_cover_same_text_across_fixtures() {
     // Unicode identifier.
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
-    check_invariant(
+    let cjk_out = check_invariant(
         &mut s,
         "cjk.php",
         "<?php\nfunction 名前() {}\n名前();\n",
@@ -58,6 +67,26 @@ async fn linked_ranges_cover_same_text_across_fixtures() {
         10,
     )
     .await;
+
+    expect![[r#"
+        1:9-1:14
+        2:0-2:5
+        3:0-3:5
+        pattern: [a-zA-Z_\u00A0-\uFFFF][a-zA-Z0-9_\u00A0-\uFFFF]*
+        ---
+        2:20-2:23
+        3:47-3:50
+        pattern: [a-zA-Z_\u00A0-\uFFFF][a-zA-Z0-9_\u00A0-\uFFFF]*
+        ---
+        2:4-2:8
+        3:9-3:13
+        4:4-4:8
+        pattern: \$[a-zA-Z_\u00A0-\uFFFF][a-zA-Z0-9_\u00A0-\uFFFF]*
+        ---
+        1:9-1:11
+        2:0-2:2
+        pattern: [a-zA-Z_\u00A0-\uFFFF][a-zA-Z0-9_\u00A0-\uFFFF]*"#]]
+    .assert_eq(&[fn_out, method_out, var_out, cjk_out].join("\n---\n"));
 }
 
 // ── basic shape: declaration only ───────────────────────────────────────────
