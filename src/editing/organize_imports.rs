@@ -193,7 +193,8 @@ fn find_use_block(source: &str) -> Option<UseBlock> {
                 (UseKind::Class, rest.trim_end_matches(';').trim())
             };
 
-            if let Some(us) = parse_use_statement(stmt_text, kind) {
+            let parsed = parse_use_statement(stmt_text, kind);
+            if !parsed.is_empty() {
                 if first_line.is_none() {
                     first_line = Some(line_no);
                     indent = line
@@ -202,7 +203,7 @@ fn find_use_block(source: &str) -> Option<UseBlock> {
                         .collect::<String>();
                 }
                 last_line = Some(line_no);
-                statements.push(us);
+                statements.extend(parsed);
             }
             continue;
         }
@@ -239,8 +240,58 @@ fn find_use_block(source: &str) -> Option<UseBlock> {
     })
 }
 
-fn parse_use_statement(text: &str, kind: UseKind) -> Option<UseStatement> {
-    // Handle `Foo\Bar as Baz` and plain `Foo\Bar`.
+/// Parse the text of one `use` statement (the part between `use `/`use function `/
+/// `use const ` and the trailing `;`). Returns zero, one, or several
+/// `UseStatement`s: a group-use like `App\{Foo, Bar as B, function helper}`
+/// expands to one entry per member. Only single-line group use is handled —
+/// a brace-group split across multiple lines isn't recognized as a use
+/// statement at all by `find_use_block`'s per-line scan, same as before this
+/// function existed.
+fn parse_use_statement(text: &str, kind: UseKind) -> Vec<UseStatement> {
+    if let Some(brace_start) = text.find('{') {
+        let Some(brace_end) = text[brace_start..].find('}').map(|i| brace_start + i) else {
+            return Vec::new();
+        };
+        let ns_prefix = text[..brace_start].trim().trim_end_matches('\\');
+        return text[brace_start + 1..brace_end]
+            .split(',')
+            .filter_map(|member| parse_group_member(member, ns_prefix, kind.clone()))
+            .collect();
+    }
+
+    parse_single_use(text, kind).into_iter().collect()
+}
+
+/// Parse one member of a group-use brace list, e.g. `Bar as B` or
+/// `function helper`. `kind` is the group's own kind (`Class` unless this is
+/// a `use function`/`use const` group, in which case a per-member
+/// `function`/`const` prefix isn't valid PHP and is treated as part of the name).
+fn parse_group_member(member: &str, ns_prefix: &str, kind: UseKind) -> Option<UseStatement> {
+    let member = member.trim();
+    if member.is_empty() {
+        return None;
+    }
+    let (member_kind, rest) = if kind == UseKind::Class {
+        if let Some(r) = member.strip_prefix("function ") {
+            (UseKind::Function, r.trim_start())
+        } else if let Some(r) = member.strip_prefix("const ") {
+            (UseKind::Const, r.trim_start())
+        } else {
+            (UseKind::Class, member)
+        }
+    } else {
+        (kind, member)
+    };
+    let full = if ns_prefix.is_empty() {
+        rest.to_string()
+    } else {
+        format!("{ns_prefix}\\{rest}")
+    };
+    parse_single_use(&full, member_kind)
+}
+
+/// Parse a single (non-group) `use` target: `Foo\Bar as Baz` or plain `Foo\Bar`.
+fn parse_single_use(text: &str, kind: UseKind) -> Option<UseStatement> {
     let (fqn_part, alias) = if let Some((fqn, al)) = text.split_once(" as ") {
         (fqn.trim(), Some(al.trim().to_string()))
     } else {

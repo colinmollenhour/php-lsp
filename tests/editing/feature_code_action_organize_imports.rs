@@ -413,3 +413,89 @@ deflate(format('x'));$0
     "#]]
     .assert_eq(&out);
 }
+
+/// Regression test for a confirmed false positive: a PHP 7+ group-use
+/// import (`use App\{Foo, Bar};`) was parsed as one opaque unit whose
+/// "short name" was the literal string `"{Foo, Bar}"`, which never matches
+/// real usages — so `is_used` always reported false and the whole group,
+/// including members that ARE referenced, was deleted outright.
+#[tokio::test]
+async fn organize_imports_expands_group_use_members_used() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+use App\{Foo, Bar};
+
+$f = new Foo();
+$b = new Bar();$0
+"#,
+            "Organize imports",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        use App\Bar;
+        use App\Foo;
+
+        $f = new Foo();
+        $b = new Bar();
+    "#]]
+    .assert_eq(&out);
+}
+
+/// Same group-use expansion, but only one member is actually referenced —
+/// the unused member must be dropped while the used one is kept, proving
+/// each member is checked independently rather than as an all-or-nothing unit.
+#[tokio::test]
+async fn organize_imports_expands_group_use_drops_unused_member() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+use App\{Foo, Bar};
+
+$f = new Foo();$0
+"#,
+            "Organize imports",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        use App\Foo;
+
+        $f = new Foo();
+    "#]]
+    .assert_eq(&out);
+}
+
+/// Group-use with an alias and a mixed `function` member — both the alias
+/// binding and the per-member kind must be preserved through expansion.
+#[tokio::test]
+async fn organize_imports_expands_group_use_with_alias_and_function_member() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_code_action_apply(
+            r#"<?php
+use App\{Foo as F, function helper};
+
+$f = new F();
+helper();$0
+"#,
+            "Organize imports",
+        )
+        .await;
+    expect![[r#"
+        <?php
+        use App\Foo as F;
+
+        use function App\helper;
+
+        $f = new F();
+        helper();
+    "#]]
+    .assert_eq(&out);
+}
