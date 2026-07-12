@@ -92,20 +92,7 @@ echo 'hel$0lo';
         .await;
     let c = opened.cursor();
     let resp = s.document_highlight(&c.path, c.line, c.character).await;
-    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let result = &resp["result"];
-    if let Some(highlights) = result.as_array() {
-        assert_eq!(
-            highlights.len(),
-            0,
-            "cursor on string literal should return no highlights"
-        );
-    } else {
-        assert!(
-            result.is_null(),
-            "expected null or empty array for string literal, got: {result:?}"
-        );
-    }
+    expect!["<no highlights>"].assert_eq(&render_document_highlight(&resp));
 }
 
 #[tokio::test]
@@ -186,28 +173,10 @@ greet();
         .await;
     let c = opened.cursor();
     let resp = s.document_highlight(&c.path, c.line, c.character).await;
-    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let highlights = resp["result"].as_array().expect("array");
-    let out = highlights
-        .iter()
-        .map(|h| {
-            let sl = h["range"]["start"]["line"].as_u64().unwrap_or(0);
-            let sc = h["range"]["start"]["character"].as_u64().unwrap_or(0);
-            let ec = h["range"]["end"]["character"].as_u64().unwrap_or(0);
-            let kind = match h["kind"].as_u64() {
-                Some(1) => "text",
-                Some(2) => "read",
-                Some(3) => "write",
-                _ => "?",
-            };
-            format!("{sl}:{sc}-{ec} ({kind})")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     expect![[r#"
-        1:9-14 (text)
-        2:0-5 (text)"#]]
-    .assert_eq(&out);
+        1:9-1:14 [text]
+        2:0-2:5 [text]"#]]
+    .assert_eq(&render_document_highlight(&resp));
 }
 
 #[tokio::test]
@@ -222,20 +191,7 @@ function greet() {}$0
         .await;
     let c = opened.cursor();
     let resp = s.document_highlight(&c.path, c.line, c.character).await;
-    assert!(resp["error"].is_null(), "documentHighlight error: {resp:?}");
-    let result = &resp["result"];
-    if let Some(highlights) = result.as_array() {
-        assert_eq!(
-            highlights.len(),
-            0,
-            "cursor beyond line end should return no highlights"
-        );
-    } else {
-        assert!(
-            result.is_null(),
-            "expected null or empty array when cursor is beyond line end, got: {result:?}"
-        );
-    }
+    expect!["<no highlights>"].assert_eq(&render_document_highlight(&resp));
 }
 
 #[tokio::test]
