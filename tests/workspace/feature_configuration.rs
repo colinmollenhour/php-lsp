@@ -47,12 +47,13 @@ async fn change_configuration_invalid_php_version_logs_warning() {
     ]]
     .assert_eq(&warning_text);
 
+    // Invalid versions skip environment detection and fall straight to the
+    // latest stub (PHP_8_5), which resolve_php_version reports as explicit
+    // ("set by editor") since from_value already set cfg.php_version — this
+    // is deterministic, not environment-dependent.
     let info_msg = server.client().read_notification("window/logMessage").await;
     let info_text = extract_log_message(&info_msg);
-    assert!(
-        info_text.starts_with("php-lsp: using PHP "),
-        "expected PHP version log: {info_text:?}"
-    );
+    expect!["php-lsp: using PHP 8.5 (set by editor)"].assert_eq(&info_text);
 }
 
 #[tokio::test]
