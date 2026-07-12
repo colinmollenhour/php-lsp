@@ -122,6 +122,11 @@ async fn unknown_command_returns_null() {
             json!({ "command": "unknown.command", "arguments": [] }),
         )
         .await;
+    assert!(
+        resp["error"].is_null(),
+        "expected success, got error: {}",
+        resp["error"]
+    );
     expect!["null"].assert_eq(&resp["result"].to_string());
 }
 
