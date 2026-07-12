@@ -107,6 +107,10 @@ class Foo {
         "should not offer visibility change inside method body, got: {out}"
     );
     assert!(
+        !out.contains("Make protected"),
+        "should not offer visibility change inside method body, got: {out}"
+    );
+    assert!(
         !out.contains("Make private"),
         "should not offer visibility change inside method body, got: {out}"
     );
