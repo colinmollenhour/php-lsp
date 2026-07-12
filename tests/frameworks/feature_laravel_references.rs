@@ -19,6 +19,8 @@
 
 use super::*;
 
+use expect_test::expect;
+
 /// Path to the cloned Laravel fixture.
 const LARAVEL_SRC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/benches/fixtures/laravel/src");
 
@@ -63,28 +65,30 @@ async fn laravel_references_str_lower() {
         .references("Illuminate/Support/Str.php", 755, 27, false)
         .await;
 
-    assert!(resp["error"].is_null(), "references error: {resp:#}");
-
-    let locs = resp["result"]
-        .as_array()
-        .expect("expected array of locations");
-
+    let out = render_locations(&resp, &server.uri(""));
     assert!(
-        locs.len() >= 8,
-        "expected ≥8 references to Str::lower, got {}: {locs:#?}",
-        locs.len()
+        out.matches('\n').count() + 1 >= 8,
+        "expected >=8 references to Str::lower: {out}"
     );
-
-    let uris: Vec<&str> = locs.iter().map(|l| l["uri"].as_str().unwrap()).collect();
     assert!(
-        uris.iter().any(|u| u.contains("QueriesRelationships")),
-        "QueriesRelationships.php (known Str::lower caller) missing from results: {uris:?}"
+        out.contains("QueriesRelationships"),
+        "QueriesRelationships.php (known Str::lower caller) missing from results: {out}"
     );
-
-    println!(
-        "laravel_references_str_lower: {} references found",
-        locs.len()
-    );
+    expect![[r#"
+        Illuminate/Database/Eloquent/Concerns/QueriesRelationships.php:869:47-869:52
+        Illuminate/Foundation/Console/DocsCommand.php:239:25-239:30
+        Illuminate/Foundation/Console/DocsCommand.php:241:58-241:63
+        Illuminate/Foundation/Console/DocsCommand.php:241:78-241:83
+        Illuminate/Foundation/Console/DocsCommand.php:247:61-247:66
+        Illuminate/Foundation/Console/ViewMakeCommand.php:184:29-184:34
+        Illuminate/Support/Str.php:1568:87-1568:92
+        Illuminate/Support/Str.php:1594:29-1594:34
+        Illuminate/Support/Str.php:1719:41-1719:46
+        Illuminate/Support/Str.php:1860:23-1860:28
+        Illuminate/Support/Stringable.php:486:31-486:36
+        Illuminate/Validation/Concerns/ValidatesAttributes.php:1466:41-1466:46
+        Illuminate/Validation/Concerns/ValidatesAttributes.php:2492:24-2492:29"#]]
+    .assert_eq(&out);
 }
 
 // ── Str class itself ──────────────────────────────────────────────────────────
@@ -116,20 +120,21 @@ async fn laravel_references_str_class() {
         .references("Illuminate/Support/Str.php", 22, 6, false)
         .await;
 
-    assert!(resp["error"].is_null(), "references error: {resp:#}");
-
-    let locs = resp["result"]
-        .as_array()
-        .expect("expected array of locations");
-
+    let out = render_locations(&resp, &server.uri(""));
     assert!(
-        locs.len() >= 20,
-        "expected ≥20 references to class Str, got {}: refs truncated or broken",
-        locs.len()
+        out.matches('\n').count() + 1 >= 20,
+        "expected >=20 references to class Str, refs truncated or broken: {out}"
     );
-
-    println!(
-        "laravel_references_str_class: {} references found",
-        locs.len()
-    );
+    // Spot-check a few known callers by name rather than snapshotting the
+    // full multi-hundred-line result set across the whole framework corpus.
+    for known_caller in [
+        "Illuminate/Auth/Access/Gate.php",
+        "Illuminate/Collections/Arr.php",
+        "Illuminate/View/View.php",
+    ] {
+        assert!(
+            out.contains(known_caller),
+            "expected {known_caller} (known Str caller) in results: {out}"
+        );
+    }
 }
