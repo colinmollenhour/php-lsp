@@ -121,17 +121,19 @@ async fn add_workspace_folder_idempotent_on_duplicate() {
     expect![[r#"Class       UniqueGadget @ UniqueGadget.php:1"#]].assert_eq(&out);
 }
 
+/// `didChangeWorkspaceFolders` removal only drops the folder from the
+/// tracked-roots list (`root_paths`) — it does not evict already-indexed
+/// docs, so a removed folder's symbols stay queryable by design. This pins
+/// that documented behavior; it is not evidence the removal did anything,
+/// since a no-op handler would produce an identical result.
 #[tokio::test]
-async fn remove_workspace_folder_does_not_crash_and_keeps_indexed_docs() {
+async fn remove_workspace_folder_keeps_already_indexed_docs_queryable() {
     let mut server = TestServer::with_fixture("psr4-mini").await;
     server.wait_for_index_ready().await;
 
     let root_uri = server.uri("").trim_end_matches('/').to_string();
     server.remove_workspace_folder(&root_uri).await;
 
-    // Removing a folder keeps already-indexed docs in memory (no negative
-    // assertion possible here since the root folder was removed and its
-    // symbols remain accessible by design).
     let out = server.snapshot_workspace_symbols("User").await;
     expect!["Class       User @ src/Model/User.php:4"].assert_eq(&out);
 }
