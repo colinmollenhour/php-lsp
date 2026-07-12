@@ -2590,13 +2590,12 @@ async fn laravel_code_actions_class_declaration() {
     let resp = s
         .code_action("Illuminate/Auth/AuthManager.php", 17, 0, 17, 50)
         .await;
-    // Result may be null when all interface methods are already implemented,
-    // imports are sorted, and no methods fall in the narrow range.
-    // The test guards that the request completes without error or timeout.
-    assert!(
-        resp["error"].is_null(),
-        "code action request failed: {resp:#}"
-    );
+    expect![[r#"
+        refactor         Generate 4 getters/setters
+        refactor         Promote constructor parameter
+        refactor.extract Extract interface 'AuthManagerInterface' [edit]
+        refactor.extract Extract variable [edit]"#]]
+    .assert_eq(&render_code_actions(&resp));
 }
 
 // ── Signature Help ────────────────────────────────────────────────────────────
@@ -2648,12 +2647,42 @@ async fn laravel_inlay_hints_method_bodies() {
     let resp = s
         .inlay_hints("Illuminate/Auth/AuthManager.php", 0, 0, auth_line_count, 0)
         .await;
-    assert!(resp["error"].is_null(), "error: {resp:#}");
-    // Hints may be empty for a file without inferred types, but the request must complete.
-    assert!(
-        !resp["result"].is_null(),
-        "inlay hints response should not be null"
-    );
+    expect![[r#"
+        60:65 name:
+        73:55 name:
+        86:35 name:
+        93:44 name:
+        93:51 config:
+        96:41 string:
+        129:12 name:
+        130:12 provider:
+        130:38 provider:
+        131:12 session:
+        132:53 name:
+        133:55 name:
+        134:47 name:
+        140:29 cookie:
+        142:30 events:
+        144:27 request:
+        144:47 seconds:
+        147:40 minutes:
+        166:12 provider:
+        166:38 provider:
+        167:12 request:
+        168:12 inputKey:
+        169:12 storageKey:
+        170:12 hash:
+        173:28 seconds:
+        209:32 name:
+        211:64 name:
+        234:29 driver:
+        234:38 callback:
+        235:38 callback:
+        235:49 request:
+        235:72 provider:
+        237:32 seconds:
+        279:50 callback:"#]]
+    .assert_eq(&render_inlay_hints(&resp));
 }
 
 /// Inlay hints for a file with inferred parameter types actually contain labels.
@@ -2899,22 +2928,23 @@ async fn laravel_features_stable_with_multiple_open_files() {
     )
     .await;
 
-    // Hover must complete without timeout.
+    // Hover must complete without timeout and return real content.
     let hover = s.hover("Illuminate/Auth/AuthManager.php", 69, 20).await;
+    let hover_out = render_hover(&hover);
     assert!(
-        hover["error"].is_null(),
-        "hover failed under load: {hover:#}"
+        !hover_out.contains("error:") && hover_out != "<no hover>",
+        "hover failed or returned nothing under load: {hover_out}"
     );
-    assert!(!hover["result"].is_null(), "hover returned null under load");
 
-    // Document symbols must complete without timeout.
+    // Document symbols must complete without timeout and return real symbols.
     let syms = s.document_symbols("Illuminate/Auth/AuthManager.php").await;
+    let syms_out = render_document_symbols(&syms);
     assert!(
-        syms["error"].is_null(),
-        "documentSymbol failed under load: {syms:#}"
+        !syms_out.contains("error:") && syms_out != "<no symbols>",
+        "documentSymbol failed or returned nothing under load: {syms_out}"
     );
 
-    // Completion must complete without timeout.
+    // Completion must complete without timeout and offer real items.
     let comp = s
         .completion("Illuminate/Auth/AuthManager.php", 59, 15)
         .await;
@@ -2929,19 +2959,21 @@ async fn laravel_features_stable_with_multiple_open_files() {
         .unwrap_or(0);
     assert!(items >= 1, "completion returned 0 items under load");
 
-    // Workspace symbols must complete without timeout.
+    // Workspace symbols must complete without timeout and find a Guard-related symbol.
     let ws = s.workspace_symbols("Guard").await;
+    let ws_out = render_workspace_symbols(&ws, &s.uri(""));
     assert!(
-        ws["error"].is_null(),
-        "workspace/symbol failed under load: {ws:#}"
+        ws_out.to_lowercase().contains("guard"),
+        "workspace/symbol failed or found no Guard match under load: {ws_out}"
     );
 
-    // References must complete without timeout (result may be small but must not panic).
+    // References must complete without timeout and return real locations.
     let refs = s
         .references("Illuminate/Auth/AuthManager.php", 69, 20, true)
         .await;
+    let refs_out = render_locations(&refs, &s.uri(""));
     assert!(
-        refs["error"].is_null(),
-        "references failed under load: {refs:#}"
+        !refs_out.contains("error:") && refs_out != "<none>",
+        "references failed or returned nothing under load: {refs_out}"
     );
 }
