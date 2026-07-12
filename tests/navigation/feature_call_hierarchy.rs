@@ -121,7 +121,8 @@ function b(): void { target(); }
         .await;
     expect![[r#"
         a @ main.php:2:9 fromRanges=[2:21-2:27]
-        b @ main.php:3:9 fromRanges=[3:21-3:27]"#]].assert_eq(&out);
+        b @ main.php:3:9 fromRanges=[3:21-3:27]"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]
@@ -257,7 +258,8 @@ function mai$0n(): void { for ($i = start(); $i < 10; step()) {} }
         .await;
     expect![[r#"
         start @ main.php:1:9 fromRanges=[3:34-3:39]
-        step @ main.php:2:9 fromRanges=[3:52-3:56]"#]].assert_eq(&out);
+        step @ main.php:2:9 fromRanges=[3:52-3:56]"#]]
+    .assert_eq(&out);
 }
 
 #[tokio::test]

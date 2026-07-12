@@ -22,8 +22,6 @@ mod feature_doc_lifecycle;
 mod feature_execute_command;
 #[path = "workspace/feature_file_ops.rs"]
 mod feature_file_ops;
-#[path = "workspace/feature_use_statement_navigation.rs"]
-mod feature_use_statement_navigation;
 #[path = "workspace/feature_incremental.rs"]
 mod feature_incremental;
 #[path = "workspace/feature_indexing_perf.rs"]
@@ -38,6 +36,8 @@ mod feature_pull_diagnostics;
 mod feature_push_diagnostics;
 #[path = "workspace/feature_server.rs"]
 mod feature_server;
+#[path = "workspace/feature_use_statement_navigation.rs"]
+mod feature_use_statement_navigation;
 #[path = "workspace/feature_workspace_folders.rs"]
 mod feature_workspace_folders;
 #[path = "workspace/feature_workspace_scan.rs"]
