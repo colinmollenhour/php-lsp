@@ -210,6 +210,15 @@ async fn cross_file_diagnostics_republish_on_dependency_change() {
         .open("user2.php", "<?php\n$w = new Widget2();\n")
         .await;
 
+    // Drain the dependents-sweep that user2's own open triggered in the
+    // background, so its leftover salsa snapshot can't stall the change
+    // below's synchronous `set_open_text` write (see
+    // cross_file_republish_fans_out_to_multiple_dependents).
+    let _ = server
+        .client()
+        .drain_publish_diagnostics_uris(tokio::time::Duration::from_millis(200))
+        .await;
+
     server
         .change("dep2.php", 2, "<?php\nclass Gadget2 {}\n")
         .await;
@@ -393,6 +402,15 @@ async fn cross_file_republish_uses_empty_array_for_clean_dependent() {
     let notif = server.open("clean_b.php", "<?php\naa();\n").await;
     expect!["1:0-1:4 [1] UndefinedFunction: Function aa() is not defined"]
         .assert_eq(&render_diagnostics_notification(&notif));
+
+    // clean_b's own open triggers a dependents-sweep that re-analyzes
+    // clean_a in the background; drain it before editing clean_a so that
+    // sweep's leftover salsa snapshot can't stall the edit's synchronous
+    // `set_open_text` write (see cross_file_republish_fans_out_to_multiple_dependents).
+    let _ = server
+        .client()
+        .drain_publish_diagnostics_uris(tokio::time::Duration::from_millis(200))
+        .await;
 
     server
         .change(
