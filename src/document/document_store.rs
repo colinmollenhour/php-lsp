@@ -220,8 +220,10 @@ impl DocumentStore {
     /// `analyze_file` memo costs ~50 KiB resident (measured on the Laravel
     /// fixture), so an unbounded sweep on a very large workspace would trade
     /// too much memory for latency; beyond the cap the references path simply
-    /// stays lazy for the excess files.
-    pub const WARM_SWEEP_MAX_FILES: usize = 20_000;
+    /// stays lazy for the excess files. Matches mir's `analyze_file`
+    /// `lru = 16384` — sweeping more than the memo table holds would evict
+    /// the sweep's own tail.
+    pub const WARM_SWEEP_MAX_FILES: usize = 16_384;
 
     /// Drive every workspace file through mir's memoized `analyze_file` query
     /// so later reference/rename requests are memo hits instead of cold
