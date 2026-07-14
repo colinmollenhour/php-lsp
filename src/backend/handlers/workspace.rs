@@ -472,14 +472,17 @@ impl Backend {
                 docs.mark_index_ready();
                 drop(docs);
                 client.send_notification::<IndexReadyNotification>(()).await;
+                let sweep_open = open_files.urls();
                 drop(tokio::task::spawn_blocking(move || {
                     salsa_docs.get_workspace_index_salsa();
                     // Warm mir's `analyze_file` memos across the workspace so
                     // the first references/rename on any symbol answers from
-                    // memo hits instead of a cold multi-second analysis.
+                    // memo hits instead of a cold multi-second analysis. Files
+                    // the user already has open (and their dependencies) warm
+                    // first.
                     if warm_analysis {
                         let cancel = salsa_docs.begin_warm_sweep();
-                        salsa_docs.warm_analysis_sweep(&cancel);
+                        salsa_docs.warm_analysis_sweep(&sweep_open, &cancel);
                     }
                 }));
             });

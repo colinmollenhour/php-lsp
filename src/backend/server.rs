@@ -336,9 +336,10 @@ impl LanguageServer for Backend {
                     if open_files.current_version(&uri) != Some(version) {
                         return;
                     }
+                    let open_urls = open_files.urls();
                     drop(tokio::task::spawn_blocking(move || {
                         let cancel = docs.begin_warm_sweep();
-                        docs.warm_analysis_sweep(&cancel);
+                        docs.warm_analysis_sweep(&open_urls, &cancel);
                     }));
                 }
             });
@@ -465,9 +466,10 @@ impl LanguageServer for Backend {
             // branch switch, not just after in-editor edits.
             if self.config.load().warm_analysis && self.docs.is_index_ready() {
                 let docs = Arc::clone(&self.docs);
+                let open_urls = self.open_files.urls();
                 drop(tokio::task::spawn_blocking(move || {
                     let cancel = docs.begin_warm_sweep();
-                    docs.warm_analysis_sweep(&cancel);
+                    docs.warm_analysis_sweep(&open_urls, &cancel);
                 }));
             }
         })

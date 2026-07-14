@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -108,6 +109,18 @@ impl Default for DocumentStore {
 
 impl DocumentStore {
     pub fn new() -> Self {
+        // Deep type-inference recursion on pathological files can overflow
+        // rayon's default worker stack (observed as a crash on framework
+        // fixtures under load — and the warm sweep analyzes *every* workspace
+        // file, so one such file must not take the server down). Size the
+        // global pool's stacks once before any parallel analysis runs;
+        // build_global fails harmlessly if a pool already exists.
+        static RAYON_STACK: OnceLock<()> = OnceLock::new();
+        RAYON_STACK.get_or_init(|| {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .stack_size(16 * 1024 * 1024)
+                .build_global();
+        });
         DocumentStore {
             caches: CacheRegistry::new(),
             lsp_ws_files: DashMap::new(),
@@ -215,20 +228,47 @@ impl DocumentStore {
     /// analyses (~20 ms per file on real code — a few hundred candidate files
     /// makes an interactive request take seconds).
     ///
+    /// `priority` files (and the files declaring the classes they reference —
+    /// the user's working set) are warmed first, so requests against open
+    /// files go warm within the sweep's first seconds even on workspaces
+    /// where the full sweep takes much longer.
+    ///
     /// Background-priority: processes files in small chunks, yielding to
     /// interactive reads at each boundary, and stops at the next boundary once
     /// `cancel` flips. Re-running after edits is cheap — unaffected files
     /// revalidate via salsa without re-analysis. Blocking; call from
     /// `spawn_blocking`.
-    pub fn warm_analysis_sweep(&self, cancel: &mir_analyzer::IndexCancel) {
+    pub fn warm_analysis_sweep(&self, priority: &[Url], cancel: &mir_analyzer::IndexCancel) {
+        // Dedicated thread with a generous stack: the serial prepare phase and
+        // priority resolution recurse over real-world ASTs whose depth can
+        // exceed the default 2 MiB thread stack (debug builds especially).
+        // One pathological file must not abort the whole server process.
+        std::thread::scope(|s| {
+            let _ = std::thread::Builder::new()
+                .name("php-lsp-warm-sweep".into())
+                .stack_size(32 * 1024 * 1024)
+                .spawn_scoped(s, || self.warm_analysis_sweep_inner(priority, cancel))
+                .map(|h| h.join());
+        });
+    }
+
+    fn warm_analysis_sweep_inner(&self, priority: &[Url], cancel: &mir_analyzer::IndexCancel) {
         const CHUNK: usize = 32;
-        let files: Vec<Arc<str>> = self
-            .lsp_ws_files
+        let front: Vec<Arc<str>> = self.sweep_priority_files(priority);
+        let front_set: HashSet<&str> = front.iter().map(|f| f.as_ref()).collect();
+        let files: Vec<Arc<str>> = front
             .iter()
-            .filter(|e| !self.deleted_uris.contains(e.key()))
-            .map(|e| Arc::from(e.key().as_str()))
+            .cloned()
+            .chain(
+                self.lsp_ws_files
+                    .iter()
+                    .filter(|e| !self.deleted_uris.contains(e.key()))
+                    .map(|e| Arc::<str>::from(e.key().as_str()))
+                    .filter(|f| !front_set.contains(f.as_ref())),
+            )
             .take(Self::WARM_SWEEP_MAX_FILES)
             .collect();
+        drop(front_set);
         let session = self.analysis_session(self.workspace_php_version());
         for chunk in files.chunks(CHUNK) {
             if cancel.is_cancelled() {
@@ -250,6 +290,48 @@ impl DocumentStore {
     /// Warm sweeps that ran to completion. See `$/php-lsp/debugStats`.
     pub fn warm_sweeps_completed(&self) -> u64 {
         self.warm_sweeps_completed.load(Ordering::Relaxed)
+    }
+
+    /// The sweep's front of the queue: `priority` files themselves plus the
+    /// files declaring the classes they reference (type hints, `use` imports,
+    /// `new`, `extends`, …) — the set a request against an open file most
+    /// likely touches. Resolution goes through the memoized workspace index,
+    /// matching by FQN with a short-name fallback.
+    fn sweep_priority_files(&self, priority: &[Url]) -> Vec<Arc<str>> {
+        if priority.is_empty() {
+            return Vec::new();
+        }
+        let ws = self.get_workspace_index_salsa();
+        let mut out: Vec<Arc<str>> = Vec::new();
+        let mut seen: HashSet<Arc<str>> = HashSet::new();
+        let push = |uri: &Url, out: &mut Vec<Arc<str>>, seen: &mut HashSet<Arc<str>>| {
+            let f: Arc<str> = Arc::from(uri.as_str());
+            if seen.insert(Arc::clone(&f)) {
+                out.push(f);
+            }
+        };
+        for uri in priority {
+            push(uri, &mut out, &mut seen);
+        }
+        for uri in priority {
+            let Some(doc) = self.get_doc_salsa(uri) else {
+                continue;
+            };
+            for fqn in crate::navigation::references::collect_referenced_class_fqns(&doc) {
+                let short = crate::text::fqn_short_name(&fqn);
+                let Some(refs) = ws.classes_by_name.get(short) else {
+                    continue;
+                };
+                for &r in refs {
+                    if let Some((decl_uri, cls)) = ws.at(r)
+                        && cls.fqn.trim_start_matches('\\') == fqn
+                    {
+                        push(decl_uri, &mut out, &mut seen);
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Mark the workspace reference index as fully built. Called by the scan
@@ -1506,7 +1588,7 @@ mod tests {
         assert_eq!(cold.len(), 1, "caller.php references Svc::run once");
 
         let cancel = store.begin_warm_sweep();
-        store.warm_analysis_sweep(&cancel);
+        store.warm_analysis_sweep(&[], &cancel);
         let warm = store.session_references_to(&sym, &files, None);
         assert_eq!(cold, warm, "sweep must not change reference results");
 
@@ -1516,9 +1598,29 @@ mod tests {
             "<?php\nnamespace App;\nclass Caller {\n    private Svc $s;\n    public function go(): void { $this->s->run(); $this->s->run(); }\n}",
         );
         let cancel = store.begin_warm_sweep();
-        store.warm_analysis_sweep(&cancel);
+        store.warm_analysis_sweep(&[], &cancel);
         let after_edit = store.session_references_to(&sym, &files, None);
         assert_eq!(after_edit.len(), 2, "re-sweep must see the new reference");
+    }
+
+    #[test]
+    fn sweep_priority_puts_open_files_and_their_dependencies_first() {
+        let store = DocumentStore::new();
+        store.ingest(
+            uri("/a.php"),
+            "<?php\nnamespace App;\nclass A { public function go(B $b): void {} }",
+        );
+        store.ingest(uri("/b.php"), "<?php\nnamespace App;\nclass B {}");
+        store.ingest(uri("/unrelated.php"), "<?php\nnamespace App;\nclass C {}");
+        store.mark_index_ready();
+
+        let front = store.sweep_priority_files(&[uri("/a.php")]);
+        let front: Vec<&str> = front.iter().map(|f| f.as_ref()).collect();
+        assert_eq!(
+            front,
+            vec![uri("/a.php").as_str(), uri("/b.php").as_str()],
+            "open file first, then the files declaring its referenced classes"
+        );
     }
 
     #[test]
@@ -1533,7 +1635,7 @@ mod tests {
         let cancel = store.begin_warm_sweep();
         cancel.cancel();
         // Pre-cancelled token: returns without analyzing (must not hang/panic).
-        store.warm_analysis_sweep(&cancel);
+        store.warm_analysis_sweep(&[], &cancel);
         // A newer sweep's token supersedes the old one.
         let old = store.begin_warm_sweep();
         let _new = store.begin_warm_sweep();

@@ -199,7 +199,7 @@ fn main() {
         );
         let t = Instant::now();
         let cancel = store.begin_warm_sweep();
-        store.warm_analysis_sweep(&cancel);
+        store.warm_analysis_sweep(&[], &cancel);
         let sweep_ms = t.elapsed().as_secs_f64() * 1000.0;
         let t = Instant::now();
         std::hint::black_box(store.session_references_to(&sym, &files, None));
@@ -207,7 +207,7 @@ fn main() {
         // No-op re-sweep: nothing changed, so this is pure memo validation.
         let t = Instant::now();
         let cancel = store.begin_warm_sweep();
-        store.warm_analysis_sweep(&cancel);
+        store.warm_analysis_sweep(&[], &cancel);
         let noop_ms = t.elapsed().as_secs_f64() * 1000.0;
         noop_by_n.push((n, noop_ms));
         println!("{n:>7}  {sweep_ms:>10.1} {cold_ms:>12.3} {warmed_ms:>12.3} {noop_ms:>10.3}");
@@ -277,6 +277,22 @@ fn main() {
     );
 
     let session_ok = long_session_gate(&sym);
+
+    // Boot-to-warm at 10k files: informational, dashboard-tracked. The plan's
+    // decision point for disk-persisting analysis results is this number
+    // exceeding ~30 s on real hardware — synthetic files are cheaper than real
+    // code (~4x, measured on the Laravel fixture), so scale accordingly.
+    {
+        let (store, _) = build(10_000);
+        let t = Instant::now();
+        let cancel = store.begin_warm_sweep();
+        store.warm_analysis_sweep(&[], &cancel);
+        println!(
+            "\n=== BOOT-TO-WARM: full sweep at N=10000 = {:.1} s ===",
+            t.elapsed().as_secs_f64()
+        );
+    }
+
     if !warm_gate_ok || !noop_ok || !session_ok {
         std::process::exit(1);
     }
@@ -300,7 +316,7 @@ fn long_session_gate(sym: &Name) -> bool {
             .filter(|u| reachable.contains(u.as_str())),
     );
     let cancel = store.begin_warm_sweep();
-    store.warm_analysis_sweep(&cancel);
+    store.warm_analysis_sweep(&[], &cancel);
 
     let (svc_url, _) = service_file();
     let mut queries: Vec<f64> = Vec::with_capacity(ITERS);
@@ -315,7 +331,7 @@ fn long_session_gate(sym: &Name) -> bool {
             ),
         );
         let cancel = store.begin_warm_sweep();
-        store.warm_analysis_sweep(&cancel);
+        store.warm_analysis_sweep(&[], &cancel);
         let t = Instant::now();
         std::hint::black_box(store.session_references_to(sym, &files, None));
         queries.push(t.elapsed().as_secs_f64() * 1000.0);
