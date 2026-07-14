@@ -60,6 +60,11 @@ use super::helpers::{
 };
 use super::{Backend, publish_with_dependents};
 
+/// Idle time after the last edit before the background analysis re-warm runs.
+/// Long enough that a typing burst triggers one sweep, not one per pause;
+/// short enough that references asked "shortly after editing" are warm again.
+const WARM_RESWEEP_IDLE_MS: u64 = 1_000;
+
 #[async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -286,6 +291,7 @@ impl LanguageServer for Backend {
             let cfg = self.config.load();
             let diag_cfg = cfg.diagnostics.clone();
             let debounce_ms = cfg.debounce_ms;
+            let warm_analysis = cfg.warm_analysis;
             tokio::spawn(async move {
                 // Debounce: if another edit arrives before we parse, the version
                 // gate below will discard this result.
@@ -307,9 +313,33 @@ impl LanguageServer for Backend {
                         });
 
                 // Only apply if no newer edit arrived while we were parsing.
-                if open_files.current_version(&uri) == Some(version) {
-                    open_files.set_parse_diagnostics(&uri, parse_diags);
-                    publish_with_dependents(client, docs, open_files, uri, diag_cfg).await;
+                if open_files.current_version(&uri) != Some(version) {
+                    return;
+                }
+                open_files.set_parse_diagnostics(&uri, parse_diags);
+                publish_with_dependents(
+                    client,
+                    Arc::clone(&docs),
+                    open_files.clone(),
+                    uri.clone(),
+                    diag_cfg,
+                )
+                .await;
+
+                // Re-warm the analysis memos this edit invalidated once typing
+                // goes idle, so the next references/rename stays a memo hit.
+                // Unaffected files revalidate without re-analysis, so the sweep
+                // cost tracks what the edit actually touched.
+                if warm_analysis && docs.is_index_ready() {
+                    tokio::time::sleep(std::time::Duration::from_millis(WARM_RESWEEP_IDLE_MS))
+                        .await;
+                    if open_files.current_version(&uri) != Some(version) {
+                        return;
+                    }
+                    drop(tokio::task::spawn_blocking(move || {
+                        let cancel = docs.begin_warm_sweep();
+                        docs.warm_analysis_sweep(&cancel);
+                    }));
                 }
             });
         })
@@ -429,6 +459,17 @@ impl LanguageServer for Backend {
             }
             // File changes may affect cross-file features — refresh all live editors.
             send_refresh_requests(&self.client).await;
+
+            // Bulk external changes (git checkout, generators) invalidate many
+            // analysis memos at once; re-warm so references stay fast after a
+            // branch switch, not just after in-editor edits.
+            if self.config.load().warm_analysis && self.docs.is_index_ready() {
+                let docs = Arc::clone(&self.docs);
+                drop(tokio::task::spawn_blocking(move || {
+                    let cancel = docs.begin_warm_sweep();
+                    docs.warm_analysis_sweep(&cancel);
+                }));
+            }
         })
         .await
     }

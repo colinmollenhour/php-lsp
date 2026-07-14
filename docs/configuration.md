@@ -13,6 +13,7 @@ All options are optional.
 | `diagnostics` | `object` | see below | Per-category diagnostic toggles. |
 | `features` | `object` | see below | Per-feature capability toggles. |
 | `maxIndexedFiles` | `number` | `50000` | Hard cap on the number of PHP files indexed during a workspace scan. Set lower to reduce memory on projects with very large vendor trees. |
+| `warmAnalysis` | `boolean` | `true` | Background-analyze the workspace after indexing (and re-warm after edits settle) so find-references and rename answer from warm analysis caches instead of paying a cold per-file analysis at request time. Set to `false` to trade slower references for a smaller resident footprint. |
 
 ### `diagnostics` object
 

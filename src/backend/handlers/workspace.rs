@@ -336,7 +336,7 @@ impl Backend {
             let open_files = self.open_files.clone();
             let client = self.client.clone();
             let psr4 = self.psr4.clone();
-            let (exclude_paths, include_paths, max_indexed_files, debug, cache_path) = {
+            let (exclude_paths, include_paths, max_indexed_files, debug, cache_path, warm_analysis) = {
                 let cfg = self.config.load();
                 let mut exclude = cfg.exclude_paths.clone();
                 if !cfg.index_vendor && !exclude.iter().any(|p| p == "vendor" || p == "vendor/") {
@@ -348,6 +348,7 @@ impl Backend {
                     cfg.max_indexed_files,
                     cfg.debug,
                     cfg.cache_path.clone(),
+                    cfg.warm_analysis,
                 )
             };
             tokio::spawn(async move {
@@ -473,6 +474,13 @@ impl Backend {
                 client.send_notification::<IndexReadyNotification>(()).await;
                 drop(tokio::task::spawn_blocking(move || {
                     salsa_docs.get_workspace_index_salsa();
+                    // Warm mir's `analyze_file` memos across the workspace so
+                    // the first references/rename on any symbol answers from
+                    // memo hits instead of a cold multi-second analysis.
+                    if warm_analysis {
+                        let cancel = salsa_docs.begin_warm_sweep();
+                        salsa_docs.warm_analysis_sweep(&cancel);
+                    }
                 }));
             });
         }

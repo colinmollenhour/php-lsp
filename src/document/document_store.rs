@@ -76,6 +76,10 @@ pub struct DocumentStore {
     /// fast typing preempts stale workspace re-analysis rather than queueing
     /// behind it.
     reanalyze_cancel: Mutex<mir_analyzer::IndexCancel>,
+    /// Cancel token for the in-flight analysis warm sweep
+    /// ([`Self::warm_analysis_sweep`]); a newer sweep cancels the previous one
+    /// via [`Self::begin_warm_sweep`].
+    warm_sweep_cancel: Mutex<mir_analyzer::IndexCancel>,
     /// Count of in-flight interactive reads (requests the user is waiting on).
     /// The workspace scan yields at file boundaries while this is non-zero, so
     /// its per-file salsa writes can't starve a request's snapshot into an
@@ -115,6 +119,7 @@ impl DocumentStore {
             index_ready: AtomicBool::new(false),
             write_revision: AtomicU64::new(0),
             reanalyze_cancel: Mutex::new(mir_analyzer::IndexCancel::new()),
+            warm_sweep_cancel: Mutex::new(mir_analyzer::IndexCancel::new()),
             interactive_reads: AtomicU64::new(0),
         }
     }
@@ -180,6 +185,59 @@ impl DocumentStore {
         guard.cancel();
         *guard = fresh.clone();
         fresh
+    }
+
+    /// Install a fresh cancel token for an analysis warm sweep, cancelling any
+    /// sweep previously in flight. Mirrors [`Self::begin_reanalyze`] but on a
+    /// separate slot: edit-triggered diagnostic sweeps and background warming
+    /// must not cancel each other.
+    pub fn begin_warm_sweep(&self) -> mir_analyzer::IndexCancel {
+        let fresh = mir_analyzer::IndexCancel::new();
+        let mut guard = self.warm_sweep_cancel.lock().unwrap();
+        guard.cancel();
+        *guard = fresh.clone();
+        fresh
+    }
+
+    /// Upper bound on files an analysis warm sweep will process. Each warmed
+    /// `analyze_file` memo costs ~50 KiB resident (measured on the Laravel
+    /// fixture), so an unbounded sweep on a very large workspace would trade
+    /// too much memory for latency; beyond the cap the references path simply
+    /// stays lazy for the excess files.
+    pub const WARM_SWEEP_MAX_FILES: usize = 20_000;
+
+    /// Drive every workspace file through mir's memoized `analyze_file` query
+    /// so later reference/rename requests are memo hits instead of cold
+    /// analyses (~20 ms per file on real code — a few hundred candidate files
+    /// makes an interactive request take seconds).
+    ///
+    /// Background-priority: processes files in small chunks, yielding to
+    /// interactive reads at each boundary, and stops at the next boundary once
+    /// `cancel` flips. Re-running after edits is cheap — unaffected files
+    /// revalidate via salsa without re-analysis. Blocking; call from
+    /// `spawn_blocking`.
+    pub fn warm_analysis_sweep(&self, cancel: &mir_analyzer::IndexCancel) {
+        const CHUNK: usize = 32;
+        let files: Vec<Arc<str>> = self
+            .lsp_ws_files
+            .iter()
+            .filter(|e| !self.deleted_uris.contains(e.key()))
+            .map(|e| Arc::from(e.key().as_str()))
+            .take(Self::WARM_SWEEP_MAX_FILES)
+            .collect();
+        let session = self.analysis_session(self.workspace_php_version());
+        for chunk in files.chunks(CHUNK) {
+            if cancel.is_cancelled() {
+                return;
+            }
+            self.yield_to_interactive_reads();
+            // A concurrent edit can land a salsa write mid-chunk and cancel the
+            // analysis snapshots. Warming is best-effort: skip the chunk — the
+            // edit schedules its own re-sweep, which re-covers these files.
+            let _ = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                session.reanalyze_files_cancellable(chunk, cancel)
+            }));
+        }
     }
 
     /// Mark the workspace reference index as fully built. Called by the scan
@@ -1414,6 +1472,60 @@ mod tests {
             count_before,
             "delete-reopen cycles must not create new salsa inputs (L1-B regression guard)"
         );
+    }
+
+    #[test]
+    fn warm_analysis_sweep_preserves_reference_results() {
+        let store = DocumentStore::new();
+        store.ingest(
+            uri("/svc.php"),
+            "<?php\nnamespace App;\nclass Svc { public function run(): void {} }",
+        );
+        store.ingest(
+            uri("/caller.php"),
+            "<?php\nnamespace App;\nclass Caller {\n    private Svc $s;\n    public function go(): void { $this->s->run(); }\n}",
+        );
+        let sym = mir_analyzer::Name::method("App\\Svc", "run");
+        let files: Vec<Arc<str>> = [uri("/svc.php"), uri("/caller.php")]
+            .iter()
+            .map(|u| Arc::from(u.as_str()))
+            .collect();
+        let cold = store.session_references_to(&sym, &files, None);
+        assert_eq!(cold.len(), 1, "caller.php references Svc::run once");
+
+        let cancel = store.begin_warm_sweep();
+        store.warm_analysis_sweep(&cancel);
+        let warm = store.session_references_to(&sym, &files, None);
+        assert_eq!(cold, warm, "sweep must not change reference results");
+
+        // An edit after the sweep is still picked up (memos revalidate).
+        store.ingest(
+            uri("/caller.php"),
+            "<?php\nnamespace App;\nclass Caller {\n    private Svc $s;\n    public function go(): void { $this->s->run(); $this->s->run(); }\n}",
+        );
+        let cancel = store.begin_warm_sweep();
+        store.warm_analysis_sweep(&cancel);
+        let after_edit = store.session_references_to(&sym, &files, None);
+        assert_eq!(after_edit.len(), 2, "re-sweep must see the new reference");
+    }
+
+    #[test]
+    fn warm_analysis_sweep_stops_on_cancel() {
+        let store = DocumentStore::new();
+        for i in 0..40 {
+            store.ingest(
+                uri(&format!("/f{i}.php")),
+                "<?php\nclass A { public function m(): int { return 1; } }",
+            );
+        }
+        let cancel = store.begin_warm_sweep();
+        cancel.cancel();
+        // Pre-cancelled token: returns without analyzing (must not hang/panic).
+        store.warm_analysis_sweep(&cancel);
+        // A newer sweep's token supersedes the old one.
+        let old = store.begin_warm_sweep();
+        let _new = store.begin_warm_sweep();
+        assert!(old.is_cancelled());
     }
 
     #[test]

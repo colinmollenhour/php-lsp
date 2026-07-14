@@ -231,6 +231,12 @@ pub struct LspConfig {
     /// fast machines / Neovim users; set higher for slow machines or large
     /// files to reduce thrashing.
     pub debounce_ms: u64,
+    /// Background-analyze the workspace after indexing (and re-warm after
+    /// edits settle) so find-references / rename answer from warm memos
+    /// instead of paying a cold per-file analysis at request time. Default
+    /// `true`; set `warmAnalysis: false` to trade slower references for a
+    /// smaller resident footprint.
+    pub warm_analysis: bool,
     /// Override the on-disk cache directory. When set, used verbatim (no
     /// schema-version or workspace-hash subdirectories appended). Primarily
     /// useful in tests and CI environments with non-standard cache locations.
@@ -251,6 +257,7 @@ impl Default for LspConfig {
             index_vendor: false,
             debug: false,
             debounce_ms: 100,
+            warm_analysis: true,
             cache_path: None,
         }
     }
@@ -336,6 +343,9 @@ impl LspConfig {
         }
         if let Some(n) = v.get("debounceMs").and_then(|x| x.as_u64()) {
             cfg.debounce_ms = n.max(1);
+        }
+        if let Some(b) = v.get("warmAnalysis").and_then(|x| x.as_bool()) {
+            cfg.warm_analysis = b;
         }
         if let Some(s) = v.get("cachePath").and_then(|x| x.as_str()) {
             cfg.cache_path = Some(std::path::PathBuf::from(s));

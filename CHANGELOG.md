@@ -2,6 +2,12 @@
 
 All notable changes to php-lsp are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Background analysis warm-up** (`warmAnalysis`, default `true`): after workspace indexing completes, the server analyzes every indexed file in the background — yielding to interactive requests — and re-warms after edits settle and after external file changes (e.g. `git checkout`). The first find-references or rename on a symbol answers from warm caches (sub-millisecond) instead of paying a cold per-file analysis at request time (~20 ms per candidate file, i.e. multi-second stalls on common symbols). Set `warmAnalysis: false` to trade slower references for a smaller resident footprint.
+
 ## [0.15.1] — 2026-07-12
 
 ### Fixed

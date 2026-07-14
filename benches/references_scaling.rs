@@ -168,6 +168,43 @@ fn main() {
         );
     }
 
+    println!("\n=== WARM SWEEP: background warm_analysis_sweep, then first query ===");
+    println!(
+        "{:>7}  {:>10} {:>12} {:>12}",
+        "files", "sweep_ms", "cold_ms", "warmed_ms"
+    );
+    for &n in &[500usize, 1000, 3000] {
+        // Cold: first query pays per-candidate analyze_file.
+        let (store, reachable) = build(n);
+        let files: Vec<Arc<str>> = arc_urls(
+            store
+                .candidate_urls_for(HOT_METHOD)
+                .into_iter()
+                .filter(|u| reachable.contains(u.as_str())),
+        );
+        let t = Instant::now();
+        std::hint::black_box(store.session_references_to(&sym, &files, None));
+        let cold_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+        // Warmed: the sweep runs in the background after indexing; the first
+        // user-visible query is then a memo hit.
+        let (store, reachable) = build(n);
+        let files: Vec<Arc<str>> = arc_urls(
+            store
+                .candidate_urls_for(HOT_METHOD)
+                .into_iter()
+                .filter(|u| reachable.contains(u.as_str())),
+        );
+        let t = Instant::now();
+        let cancel = store.begin_warm_sweep();
+        store.warm_analysis_sweep(&cancel);
+        let sweep_ms = t.elapsed().as_secs_f64() * 1000.0;
+        let t = Instant::now();
+        std::hint::black_box(store.session_references_to(&sym, &files, None));
+        let warmed_ms = t.elapsed().as_secs_f64() * 1000.0;
+        println!("{n:>7}  {sweep_ms:>10.1} {cold_ms:>12.3} {warmed_ms:>12.3}");
+    }
+
     println!("\n=== SESSION AXIS: repeated references after unrelated edits (N=1000) ===");
     let (store, reachable) = build(1000);
     let after: Vec<Arc<str>> = arc_urls(
