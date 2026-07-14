@@ -159,6 +159,11 @@ fn main() {
         "last/first = {ratio:.2}x  → {}",
         if ratio >= 1.30 { "DEGRADES" } else { "FLAT" }
     );
+    // CI gate: per-request cost climbing with warmed-set size means per-request
+    // mutation crept back into the read path.
+    if ratio >= 1.30 {
+        std::process::exit(1);
+    }
 
     // Visibility scoping: a private method's references can only live in its
     // declaring file, so the handler narrows the candidate set to that one file.

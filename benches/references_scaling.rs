@@ -170,9 +170,11 @@ fn main() {
 
     println!("\n=== WARM SWEEP: background warm_analysis_sweep, then first query ===");
     println!(
-        "{:>7}  {:>10} {:>12} {:>12}",
-        "files", "sweep_ms", "cold_ms", "warmed_ms"
+        "{:>7}  {:>10} {:>12} {:>12} {:>10}",
+        "files", "sweep_ms", "cold_ms", "warmed_ms", "noop_ms"
     );
+    let mut warm_gate_ok = true;
+    let mut noop_by_n: Vec<(usize, f64)> = Vec::new();
     for &n in &[500usize, 1000, 3000] {
         // Cold: first query pays per-candidate analyze_file.
         let (store, reachable) = build(n);
@@ -202,7 +204,35 @@ fn main() {
         let t = Instant::now();
         std::hint::black_box(store.session_references_to(&sym, &files, None));
         let warmed_ms = t.elapsed().as_secs_f64() * 1000.0;
-        println!("{n:>7}  {sweep_ms:>10.1} {cold_ms:>12.3} {warmed_ms:>12.3}");
+        // No-op re-sweep: nothing changed, so this is pure memo validation.
+        let t = Instant::now();
+        let cancel = store.begin_warm_sweep();
+        store.warm_analysis_sweep(&cancel);
+        let noop_ms = t.elapsed().as_secs_f64() * 1000.0;
+        noop_by_n.push((n, noop_ms));
+        println!("{n:>7}  {sweep_ms:>10.1} {cold_ms:>12.3} {warmed_ms:>12.3} {noop_ms:>10.3}");
+        // CI gate: a warmed first query regressing toward cold cost means the
+        // sweep no longer populates the memos the read path consumes.
+        if warmed_ms >= cold_ms * 0.10 {
+            eprintln!("GATE: warmed {warmed_ms:.3} ms >= 10% of cold {cold_ms:.3} ms at N={n}");
+            warm_gate_ok = false;
+        }
+    }
+    // CI gate: a no-op re-sweep must stay cheap and ~linear in file count —
+    // anything superlinear (or absolutely expensive) means revalidation has
+    // turned back into re-analysis and the edit-idle re-warm will burn CPU.
+    let noop_small = noop_by_n.first().map(|&(_, ms)| ms).unwrap_or(0.0);
+    let noop_large = noop_by_n.last().map(|&(_, ms)| ms).unwrap_or(0.0);
+    const NOOP_CEILING_MS: f64 = 250.0;
+    const NOOP_SLOPE_MAX: f64 = 10.0;
+    let noop_ok = noop_large < NOOP_CEILING_MS
+        && (noop_small <= 0.5 || noop_large / noop_small <= NOOP_SLOPE_MAX);
+    if !noop_ok {
+        eprintln!(
+            "GATE: no-op re-sweep {noop_large:.3} ms at N=3000 (ceiling {NOOP_CEILING_MS}), \
+             slope vs N=500 {:.1}x (max {NOOP_SLOPE_MAX})",
+            noop_large / noop_small
+        );
     }
 
     println!("\n=== SESSION AXIS: repeated references after unrelated edits (N=1000) ===");
@@ -245,4 +275,64 @@ fn main() {
             "FLAT"
         }
     );
+
+    let session_ok = long_session_gate(&sym);
+    if !warm_gate_ok || !noop_ok || !session_ok {
+        std::process::exit(1);
+    }
+}
+
+/// The degradation scenario that matters most: a long session of hub-file
+/// edits, each followed by a background re-warm and a references query. Query
+/// latency at iteration 50 must match iteration 1 — any upward trend means
+/// state accumulates somewhere on the edit→re-warm→query cycle.
+fn long_session_gate(sym: &Name) -> bool {
+    const N: usize = 1000;
+    const ITERS: usize = 50;
+    const WINDOW: usize = 10;
+    const RATIO_MAX: f64 = 1.5;
+
+    let (store, reachable) = build(N);
+    let files: Vec<Arc<str>> = arc_urls(
+        store
+            .candidate_urls_for(HOT_METHOD)
+            .into_iter()
+            .filter(|u| reachable.contains(u.as_str())),
+    );
+    let cancel = store.begin_warm_sweep();
+    store.warm_analysis_sweep(&cancel);
+
+    let (svc_url, _) = service_file();
+    let mut queries: Vec<f64> = Vec::with_capacity(ITERS);
+    println!("\n=== LONG SESSION GATE: {ITERS}x (hub edit -> re-warm -> query) at N={N} ===");
+    for iter in 0..ITERS {
+        // Edit the owner class itself — every candidate depends on it, so this
+        // is the worst-case per-edit invalidation.
+        store.ingest(
+            svc_url.clone(),
+            &format!(
+                "<?php\nnamespace App;\nclass {OWNER} {{\n    public function {HOT_METHOD}(): void {{ /* edit {iter} */ }}\n}}\n"
+            ),
+        );
+        let cancel = store.begin_warm_sweep();
+        store.warm_analysis_sweep(&cancel);
+        let t = Instant::now();
+        std::hint::black_box(store.session_references_to(sym, &files, None));
+        queries.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+    let median = |s: &[f64]| -> f64 {
+        let mut v = s.to_vec();
+        v.sort_by(|a, b| a.total_cmp(b));
+        v[v.len() / 2]
+    };
+    let early = median(&queries[..WINDOW]);
+    let late = median(&queries[ITERS - WINDOW..]);
+    let ratio = late / early;
+    let ok = ratio < RATIO_MAX;
+    println!(
+        "query median: first {WINDOW} = {early:.3} ms, last {WINDOW} = {late:.3} ms, \
+         late/early = {ratio:.2}x (max {RATIO_MAX}) → {}",
+        if ok { "FLAT" } else { "DEGRADES" }
+    );
+    ok
 }

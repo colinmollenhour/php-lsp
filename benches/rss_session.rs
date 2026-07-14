@@ -44,6 +44,10 @@ const RSS_SAMPLE_EVERY: usize = 5; // rounds
 const TAIL_START_ROUND: usize = 25;
 const TAIL_GROWTH_CEILING_MB: f64 = 120.0;
 /// Absolute sanity ceiling on end RSS growth from the post-index baseline.
+/// The baseline is captured *after* the analysis warm sweep completes (waited
+/// via debugStats), so the warm memo table (~80 MB on this fixture) is in the
+/// baseline, not counted as session growth; edit-idle re-warms during the run
+/// replace memos rather than adding them.
 const GROWTH_CEILING_MB: f64 = 400.0;
 const INDEX_READY_TIMEOUT_SECS: u64 = 300;
 const DIAG_TIMEOUT_SECS: u64 = 30;
@@ -153,13 +157,60 @@ impl Client {
         .await
         .is_ok()
     }
+
+    /// Like [`Self::request`] but omits `params` — required for handlers
+    /// declared without a params argument (`$/php-lsp/debugStats`).
+    async fn request_no_params(&mut self, method: &str) -> Value {
+        let id = self.next_id;
+        self.next_id += 1;
+        let msg = json!({"jsonrpc":"2.0","id":id,"method":method});
+        self.write.write_all(&frame(&msg)).await.unwrap();
+        let method_owned = method.to_string();
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let resp = read_msg(&mut self.read).await;
+                if resp.get("method").is_some() {
+                    if let Some(srv_id) = resp.get("id") {
+                        let ack = json!({"jsonrpc":"2.0","id":srv_id,"result":null});
+                        self.write.write_all(&frame(&ack)).await.unwrap();
+                    }
+                    continue;
+                }
+                if resp.get("id") == Some(&json!(id)) {
+                    return resp;
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out: {method_owned}"))
+    }
+
+    /// Poll `$/php-lsp/debugStats` until the post-index warm sweep completes,
+    /// so the RSS baseline deterministically includes the warm memo table
+    /// instead of racing it.
+    async fn wait_for_warm_sweep(&mut self) -> bool {
+        for _ in 0..600 {
+            let resp = self.request_no_params("$/php-lsp/debugStats").await;
+            if resp["result"]["warm_sweeps_completed"]
+                .as_u64()
+                .unwrap_or(0)
+                >= 1
+            {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    }
 }
 
 fn spawn_server() -> Client {
     let (client_stream, server_stream) = tokio::io::duplex(1 << 20);
     let (server_read, server_write) = tokio::io::split(server_stream);
     let (client_read, client_write) = tokio::io::split(client_stream);
-    let (service, socket) = LspService::new(Backend::new);
+    let (service, socket) = LspService::build(Backend::new)
+        .custom_method("$/php-lsp/debugStats", Backend::debug_stats)
+        .finish();
     tokio::spawn(Server::new(server_read, server_write, socket).serve(service));
     Client {
         write: client_write,
@@ -236,6 +287,7 @@ async fn run() {
     .await;
     c.notify("initialized", json!({})).await;
     assert!(c.wait_for_index_ready().await, "indexReady timeout");
+    assert!(c.wait_for_warm_sweep().await, "warm sweep timeout");
 
     let mut docs: Vec<(String, String)> = Vec::new();
     for path in &files {

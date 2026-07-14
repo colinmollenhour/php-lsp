@@ -33,6 +33,19 @@ fn target_text() -> String {
 }
 
 #[tokio::test]
+async fn warm_sweep_completes_after_index_ready() {
+    // The post-index analysis warm sweep must run to completion in the real
+    // server so first references answer from warm memos. Regression guard for
+    // the sweep silently never finishing (e.g. blocked on yields or cancelled).
+    let mut s = TestServer::with_fixture("references_stress").await;
+    s.wait_for_index_ready().await;
+    assert!(
+        s.wait_for_warm_sweeps(1).await,
+        "post-index warm sweep did not complete"
+    );
+}
+
+#[tokio::test]
 async fn references_public_method_does_not_parse_candidate_files() {
     // `Target::process` is public, so the candidate set is NOT visibility-
     // narrowed — all 31 files mention `process`. The method path still answers

@@ -80,6 +80,9 @@ pub struct DocumentStore {
     /// ([`Self::warm_analysis_sweep`]); a newer sweep cancels the previous one
     /// via [`Self::begin_warm_sweep`].
     warm_sweep_cancel: Mutex<mir_analyzer::IndexCancel>,
+    /// Warm sweeps that ran to completion (not cancelled). Observability only,
+    /// surfaced via `$/php-lsp/debugStats` so benches/tests can await warmth.
+    warm_sweeps_completed: AtomicU64,
     /// Count of in-flight interactive reads (requests the user is waiting on).
     /// The workspace scan yields at file boundaries while this is non-zero, so
     /// its per-file salsa writes can't starve a request's snapshot into an
@@ -120,6 +123,7 @@ impl DocumentStore {
             write_revision: AtomicU64::new(0),
             reanalyze_cancel: Mutex::new(mir_analyzer::IndexCancel::new()),
             warm_sweep_cancel: Mutex::new(mir_analyzer::IndexCancel::new()),
+            warm_sweeps_completed: AtomicU64::new(0),
             interactive_reads: AtomicU64::new(0),
         }
     }
@@ -238,6 +242,14 @@ impl DocumentStore {
                 session.reanalyze_files_cancellable(chunk, cancel)
             }));
         }
+        if !cancel.is_cancelled() {
+            self.warm_sweeps_completed.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Warm sweeps that ran to completion. See `$/php-lsp/debugStats`.
+    pub fn warm_sweeps_completed(&self) -> u64 {
+        self.warm_sweeps_completed.load(Ordering::Relaxed)
     }
 
     /// Mark the workspace reference index as fully built. Called by the scan

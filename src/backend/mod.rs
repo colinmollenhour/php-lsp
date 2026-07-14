@@ -24,6 +24,9 @@ pub struct DebugStats {
     /// Times mir's legacy `RefIndex` was locked. The session opts out of
     /// index maintenance, so this must stay flat across edits and reads.
     pub ref_index_locks: u64,
+    /// Analysis warm sweeps run to completion (not cancelled). Lets benches
+    /// and tests wait for the post-index sweep before baselining.
+    pub warm_sweeps_completed: u64,
 }
 
 use crate::document::ast::ParsedDoc;
@@ -78,6 +81,7 @@ impl Backend {
         Ok(DebugStats {
             parses: self.docs.parse_count(),
             ref_index_locks: self.docs.ref_index_lock_count(),
+            warm_sweeps_completed: self.docs.warm_sweeps_completed(),
         })
     }
 
