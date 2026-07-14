@@ -18,6 +18,15 @@ async fn references_on_unopened_uri_returns_empty() {
 async fn references_include_use_imports_across_files() {
     let mut server = TestServer::with_fixture("psr4-mini").await;
     server.wait_for_index_ready().await;
+    // `indexReady` kicks off the post-index warm-analysis sweep in the
+    // background (`handle_initialized` in workspace.rs); draining it here
+    // stops the sweep's live salsa snapshot from racing `open`'s synchronous
+    // `set_open_text` write below, which stalled `publishDiagnostics` on
+    // slower (Windows CI) runners. Same class of flake as 3dc3279.
+    assert!(
+        server.wait_for_warm_sweeps(1).await,
+        "post-index warm sweep did not complete"
+    );
     let (text, _, _) = server.locate("src/Model/User.php", "<?php", 0);
     server.open("src/Model/User.php", &text).await;
 
