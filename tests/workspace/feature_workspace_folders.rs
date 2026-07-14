@@ -190,6 +190,59 @@ async fn malformed_composer_json_does_not_crash_server() {
     .assert_eq(&out);
 }
 
+/// A malformed `composer.json` must degrade to "no PSR-4 map" rather than
+/// silently disabling undefined-class detection outright — a genuinely
+/// missing class in the same workspace must still be flagged. Without this,
+/// `malformed_composer_json_does_not_crash_server` above only proves the
+/// server survives, not that diagnostics still function.
+#[tokio::test]
+async fn malformed_composer_json_still_flags_undefined_class() {
+    let mut server = TestServer::with_fixture("broken-composer").await;
+    server.wait_for_index_ready().await;
+
+    server
+        .check_diagnostics(
+            r#"<?php
+namespace App;
+function _wrap(): void {
+    $x = new TrulyNonExistentClass9z();
+//           ^^^^^^^^^^^^^^^^^^^^^^^ error: TrulyNonExistentClass9z
+}
+"#,
+        )
+        .await;
+}
+
+/// A PSR-4 prefix whose base directory doesn't exist on disk
+/// (`missing-psr4-dir`'s `Ghost\` -> `src/Ghost/`) must not suppress
+/// undefined-class detection for that namespace — a reference to a
+/// nonexistent `Ghost\` class must still be flagged, while the sibling
+/// `Present\` mapping (whose directory does exist) keeps resolving normally.
+/// `nonexistent_psr4_dir_does_not_crash_server` above only proves the server
+/// survives; this proves the missing directory doesn't fail open.
+#[tokio::test]
+async fn nonexistent_psr4_dir_still_flags_undefined_class_in_that_namespace() {
+    let mut server = TestServer::with_fixture("missing-psr4-dir").await;
+    server.wait_for_index_ready().await;
+
+    server
+        .check_diagnostics(
+            r#"<?php
+namespace Consumer;
+
+use Ghost\SomeClass;
+use Present\Alive;
+
+function make(): void {
+    $a = new Alive();
+    $g = new SomeClass();
+//           ^^^^^^^^^ error: Ghost\SomeClass
+}
+"#,
+        )
+        .await;
+}
+
 // ── workspace/didCreateFiles / didDeleteFiles / didRenameFiles ────────────────
 
 #[tokio::test]

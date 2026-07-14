@@ -569,3 +569,614 @@ class Query {
     )
     .await;
 }
+
+// ── namespace fallback: functions fall back to global, classes never do ─────
+//
+// PHP resolves an unqualified function/constant call inside a namespace by
+// first looking for `CurrentNamespace\name`, then falling back to the global
+// namespace if that isn't declared. Unqualified *class* names get no such
+// fallback — they always resolve within the current namespace (or via `use`).
+// These two behaviors must be asymmetric; testing only one would not catch a
+// regression that accidentally applies (or removes) fallback for the other.
+
+/// A global-namespace function called unqualified from inside a different
+/// namespace, with no `use function` import, must not be flagged
+/// `UndefinedFunction` — PHP falls back to the global function at runtime.
+#[tokio::test]
+async fn unqualified_call_falls_back_to_global_function() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+namespace {
+    function global_only_helper(int $x): int { return $x * 2; }
+}
+
+namespace App {
+    function run(int $x): int {
+        return global_only_helper($x);
+    }
+}
+"#,
+    )
+    .await;
+}
+
+/// Contrast: a global-namespace *class* referenced unqualified from inside a
+/// different namespace, with no `use` import, must still be flagged
+/// `UndefinedClass` — classes do not fall back to the global namespace.
+#[tokio::test]
+async fn unqualified_class_does_not_fall_back_to_global() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"<?php
+namespace {
+    class GlobalOnlyThing {}
+}
+
+namespace App {
+    function make(): void {
+        $x = new GlobalOnlyThing();
+    //           ^^^^^^^^^^^^^^^ error: GlobalOnlyThing
+    }
+}
+"#,
+    )
+    .await;
+}
+
+/// A leading-backslash reference to a global function from inside a
+/// namespace is the explicit, unambiguous form of the fallback above and
+/// must not be flagged either.
+#[tokio::test]
+async fn fully_qualified_global_function_call_from_namespace_not_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+namespace {
+    function global_only_helper(int $x): int { return $x * 2; }
+}
+
+namespace App {
+    function run(int $x): int {
+        return \global_only_helper($x);
+    }
+}
+"#,
+    )
+    .await;
+}
+
+// ── composer.json discovered by walking up from a subdirectory root ────────
+
+/// When the workspace root is a subdirectory (e.g. the editor opened `src/`
+/// directly) and `composer.json` actually lives one level up, PSR-4
+/// resolution must still find it via `find_composer_root`'s parent-directory
+/// walk. No prior test rooted the server below the composer.json itself.
+#[tokio::test]
+async fn composer_json_found_by_walking_up_from_subdirectory_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Model")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Model/Entity.php"),
+        "<?php\nnamespace App\\Model;\nclass Entity {}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse App\\Model\\Entity;\nfunction handle(Entity $e): Entity { return $e; }\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    // Root the server at `src/`, one level *below* composer.json.
+    let mut s = TestServer::with_root(tmp.path().join("src")).await;
+    s.open("Service/Handler.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        Service/Handler.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+// ── vendor package autoloaded via `classmap` only (no PSR-4) ────────────────
+
+/// A vendor package that declares only `classmap` autoload (no `psr-4`) is
+/// resolved through `Psr4Map`'s classmap branch — populated from Composer's
+/// generated `vendor/composer/autoload_classmap.php`, not from
+/// `installed.json` directly. Every other vendor-package test in this suite
+/// uses `psr-4`; this is the only coverage of the classmap-only vendor shape
+/// at the protocol level.
+#[tokio::test]
+async fn vendor_classmap_only_package_class_not_flagged_as_undefined() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("vendor/composer")).unwrap();
+    std::fs::write(
+        tmp.path().join("vendor/composer/installed.json"),
+        r#"{"packages":[{"name":"acme/legacy","autoload":{"classmap":["src/"]}}]}"#,
+    )
+    .unwrap();
+    // Mirrors what `composer dump-autoload` actually generates — `resolve()`
+    // reads this file for classmap FQCN lookups, not `installed.json`.
+    std::fs::write(
+        tmp.path().join("vendor/composer/autoload_classmap.php"),
+        "<?php\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\nreturn array(\n    'Acme\\\\Legacy\\\\Widget' => $vendorDir . '/acme/legacy/src/Widget.php',\n);\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("vendor/acme/legacy/src")).unwrap();
+    std::fs::write(
+        tmp.path().join("vendor/acme/legacy/src/Widget.php"),
+        "<?php\nnamespace Acme\\Legacy;\nclass Widget {}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse Acme\\Legacy\\Widget;\nfunction handle(): Widget { return new Widget(); }\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready_secs(30).await;
+    s.open("src/Service/Handler.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Handler.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+// ── false positives: class refs in positions other than `new`/type-hint ────
+//
+// Every PSR-4-backed "not flagged" test above exercises `new Foo()` or a
+// parameter/return type hint. Class names also appear in `catch`,
+// `instanceof`, and `ClassName::` static-call position — if the resolver
+// only special-cases the first two, these are silently mis-flagged.
+
+/// A single imported exception class named in a `catch` clause must not be
+/// flagged `UndefinedClass`.
+#[tokio::test]
+async fn catch_clause_with_use_imported_class_not_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Exception")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Exception/NotFoundException.php"),
+        "<?php\nnamespace App\\Exception;\nclass NotFoundException extends \\Exception {}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse App\\Exception\\NotFoundException;\nfunction risky(): void {}\nfunction handle(): void {\n    try {\n        risky();\n    } catch (NotFoundException $e) {\n    }\n}\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Service/Handler.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Handler.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+/// A multi-catch (`catch (A | B $e)`) naming two use-imported exception
+/// classes must not flag either half of the union.
+#[tokio::test]
+async fn multi_catch_union_with_use_imported_classes_not_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Exception")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Exception/NotFoundException.php"),
+        "<?php\nnamespace App\\Exception;\nclass NotFoundException extends \\Exception {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("src/Exception/ForbiddenException.php"),
+        "<?php\nnamespace App\\Exception;\nclass ForbiddenException extends \\Exception {}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse App\\Exception\\NotFoundException;\nuse App\\Exception\\ForbiddenException;\nfunction risky(): void {}\nfunction handle(): void {\n    try {\n        risky();\n    } catch (NotFoundException | ForbiddenException $e) {\n    }\n}\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Service/Handler.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Handler.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+/// A class implementing two interfaces, both use-imported via a grouped
+/// import, must not flag either — every existing `implements` test names
+/// only a single interface.
+#[tokio::test]
+async fn implements_multiple_use_imported_interfaces_not_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Contract")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Contract/Runnable.php"),
+        "<?php\nnamespace App\\Contract;\ninterface Runnable { public function run(): void; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("src/Contract/Loggable.php"),
+        "<?php\nnamespace App\\Contract;\ninterface Loggable { public function log(): void; }\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse App\\Contract\\{Runnable, Loggable};\nclass Worker implements Runnable, Loggable {\n    public function run(): void {}\n    public function log(): void {}\n}\n";
+    std::fs::write(tmp.path().join("src/Service/Worker.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Service/Worker.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Worker.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+/// A cross-file `instanceof` check against a use-imported class must not be
+/// flagged. The only existing `instanceof` coverage
+/// (`same_namespace_bare_ref_not_flagged_as_undefined_class`) uses a bare
+/// same-namespace reference; this covers the `use`-imported, cross-file form.
+#[tokio::test]
+async fn instanceof_with_use_imported_class_not_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Model")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Model/Entity.php"),
+        "<?php\nnamespace App\\Model;\nclass Entity {}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse App\\Model\\Entity;\nfunction check(mixed $x): bool {\n    return $x instanceof Entity;\n}\n";
+    std::fs::write(tmp.path().join("src/Service/Checker.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Service/Checker.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Checker.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+/// A fully-qualified static method call (`\App\Model\Entity::create()`, no
+/// `new`) must resolve the class in call position, not just in `new`/type-hint
+/// position.
+#[tokio::test]
+async fn fqn_static_call_not_flagged_as_undefined_class() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Model")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Model/Entity.php"),
+        "<?php\nnamespace App\\Model;\nclass Entity {\n    public static function create(): self { return new self(); }\n}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nfunction handle(): void {\n    \\App\\Model\\Entity::create();\n}\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Service/Handler.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Handler.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+/// The `class_exists()`-guarded conditional-declaration polyfill pattern
+/// (common in Composer packages shimming a class only when missing) must not
+/// break resolution for the class's own body or its call sites — the class
+/// equivalent of `user_polyfill_does_not_break_builtin_restore_error_handler`.
+#[tokio::test]
+async fn class_exists_guarded_polyfill_not_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_diagnostics(
+        r#"//- /src/polyfill.php
+<?php
+if (!class_exists(JsonExtra::class)) {
+    interface JsonExtra {}
+}
+
+//- /src/main.php
+<?php
+function _wrap(JsonExtra $x): void {
+}
+"#,
+    )
+    .await;
+}
+
+// ── false positives: compound type hints ────────────────────────────────────
+//
+// Every use-imported type-hint test above names a single class. Union
+// (`Foo|Bar`) and intersection (`Foo&Bar`) types name more than one — if the
+// resolver only checks the first member of a compound type, the others are
+// silently mis-flagged.
+
+/// A union-type parameter naming two use-imported classes must not flag
+/// either member.
+#[tokio::test]
+async fn union_type_param_with_two_use_imported_classes_not_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Model")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Model/Foo.php"),
+        "<?php\nnamespace App\\Model;\nclass Foo {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("src/Model/Bar.php"),
+        "<?php\nnamespace App\\Model;\nclass Bar {}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse App\\Model\\Foo;\nuse App\\Model\\Bar;\nfunction handle(Foo|Bar $x): void {\n}\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Service/Handler.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Handler.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+/// An intersection-type parameter (PHP 8.1+) naming two use-imported
+/// interfaces must not flag either member.
+#[tokio::test]
+async fn intersection_type_param_with_two_use_imported_interfaces_not_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Contract")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Contract/Countable2.php"),
+        "<?php\nnamespace App\\Contract;\ninterface Countable2 { public function count(): int; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("src/Contract/Nameable.php"),
+        "<?php\nnamespace App\\Contract;\ninterface Nameable { public function name(): string; }\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse App\\Contract\\Countable2;\nuse App\\Contract\\Nameable;\nfunction handle(Countable2&Nameable $x): void {\n}\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Service/Handler.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Handler.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+/// A nullable (`?Foo`) parameter type naming a use-imported class must not be
+/// flagged — the `?` prefix must not defeat the type-name resolver.
+#[tokio::test]
+async fn nullable_type_param_with_use_imported_class_not_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Model")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Model/Entity.php"),
+        "<?php\nnamespace App\\Model;\nclass Entity {}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse App\\Model\\Entity;\nfunction handle(?Entity $e): void {\n}\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Service/Handler.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Handler.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+// ── false positives: PHP 8.1 first-class callable syntax ───────────────────
+
+/// `strlen(...)` (PHP 8.1 first-class callable syntax) referencing a known
+/// built-in function must not be flagged `UndefinedFunction` — a naive
+/// resolver keyed on "function name immediately followed by `(`" could treat
+/// the `...` placeholder as an unusual argument list and mis-handle the call.
+#[tokio::test]
+async fn first_class_callable_builtin_not_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+function _wrap(): void {
+    $fn = strlen(...);
+}
+"#,
+    )
+    .await;
+}
+
+/// Same as above but for a project-defined function, proving the first-class
+/// callable syntax doesn't only work for stub/built-in functions.
+#[tokio::test]
+async fn first_class_callable_user_function_not_flagged() {
+    let mut s = TestServer::new().await;
+    s.check_no_diagnostics(
+        r#"<?php
+function greet(string $name): string { return "hi $name"; }
+function _wrap(): void {
+    $fn = greet(...);
+}
+"#,
+    )
+    .await;
+}
+
+// ── vendor PSR-4 via Composer v1 (array-form) `installed.json` ─────────────
+
+/// Older Composer lockfiles (and some CI caches) write `installed.json` as a
+/// bare array rather than `{"packages": [...]}`. Every other vendor-PSR-4
+/// test in this suite uses the v2 object form; this is the only protocol
+/// coverage of the legacy array form.
+#[tokio::test]
+async fn vendor_psr4_via_composer_v1_installed_json_not_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("vendor/composer")).unwrap();
+    std::fs::write(
+        tmp.path().join("vendor/composer/installed.json"),
+        r#"[{"name":"acme/legacy","autoload":{"psr-4":{"Acme\\Legacy\\":"src/"}}}]"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("vendor/acme/legacy/src")).unwrap();
+    std::fs::write(
+        tmp.path().join("vendor/acme/legacy/src/Widget.php"),
+        "<?php\nnamespace Acme\\Legacy;\nclass Widget {}\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Service")).unwrap();
+    let src = "<?php\nnamespace App\\Service;\nuse Acme\\Legacy\\Widget;\nfunction handle(): Widget { return new Widget(); }\n";
+    std::fs::write(tmp.path().join("src/Service/Handler.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.wait_for_index_ready_secs(30).await;
+    s.open("src/Service/Handler.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Service/Handler.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
+
+// ── false positive: enum implementing a use-imported interface ─────────────
+
+/// An `enum` implementing a use-imported interface must not be flagged.
+/// Enums have their own collector/analyzer code path in mir (see the
+/// `BackedEnumCaseTypeMismatch` known-gap note in
+/// `feature_diagnostics_edge_cases.rs`), so interface resolution for classes
+/// isn't proof it also works for enums.
+#[tokio::test]
+async fn enum_implementing_use_imported_interface_not_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Contract")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/Contract/HasLabel.php"),
+        "<?php\nnamespace App\\Contract;\ninterface HasLabel { public function label(): string; }\n",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(tmp.path().join("src/Model")).unwrap();
+    let src = "<?php\nnamespace App\\Model;\nuse App\\Contract\\HasLabel;\nenum Status implements HasLabel {\n    case Active;\n    case Inactive;\n    public function label(): string {\n        return match ($this) {\n            self::Active => 'Active',\n            self::Inactive => 'Inactive',\n        };\n    }\n}\n";
+    std::fs::write(tmp.path().join("src/Model/Status.php"), src).unwrap();
+
+    let mut s = TestServer::with_root(tmp.path()).await;
+    s.open("src/Model/Status.php", src).await;
+
+    let resp = s.workspace_diagnostic().await;
+    let out = render_workspace_diagnostic(&resp, &s.uri(""));
+    expect![[r#"
+        src/Model/Status.php
+          <clean>"#]]
+    .assert_eq(&out);
+}
