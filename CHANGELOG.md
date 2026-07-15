@@ -2,6 +2,22 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.17.0] — 2026-07-15
+
+### Changed
+
+- **Find-references and go-to-implementation now answer from mir's delta-maintained inverted indexes** (reference posting lists and resolved subtype edges) instead of the opt-out imperative reference index and hand-rolled AST-based subtype/constructor walkers. Warm requests answer in 0.02–0.07 ms regardless of workspace size. Disk-cached postings and subtype edges now replay on workspace scan, before the analysis warm sweep runs, so a returning session starts index-warm.
+
+### Fixed
+
+- **Aliased `extends`/`implements` could be missed by go-to-implementation**: e.g. `use App\Base as X; class C extends X {}` is now resolved through the alias instead of only matching the bare name.
+- **Promoted constructor properties weren't recognized as reference declarations**: `public function __construct(private User $user)` now participates in find-references like any other property declaration.
+- **Class-constant references could resolve to the wrong owner**: the owning class is now resolved to its fully-qualified name instead of the bare short name before lookup.
+
+### Dependencies
+
+- **mir updated to 0.55.0**.
+
 ## [0.16.0] — 2026-07-14
 
 ### Added
