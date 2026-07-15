@@ -558,6 +558,15 @@ mod references {
             .join("tests/fixtures/symfony-demo");
         let mut server = TestServer::with_root(&fixture).await;
         server.wait_for_index_ready().await;
+        // `indexReady` fires once the raw scan finishes; the reference-index
+        // warm sweep runs after it in a detached background task. Without
+        // waiting for it too, this request can race that sweep's own
+        // analysis of the same files and lose a location (seen flaking on
+        // slower/more contended CI, most often windows-latest).
+        assert!(
+            server.wait_for_warm_sweeps(1).await,
+            "reference-index warm sweep did not complete"
+        );
 
         let path = "src/Entity/Post.php";
         let (text, line, character) = server.locate(path, "class Post", 0);
