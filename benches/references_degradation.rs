@@ -51,10 +51,11 @@ fn laravel_sources() -> Option<Vec<SourceFile>> {
     Some(files)
 }
 
-/// The production references read: a pure `references_to_in_files` over the
-/// candidate set. No mutation; warm files are `analyze_file` memo hits.
+/// The production references read: an `indexed_references_to` posting lookup
+/// over the candidate set. Warm files answer from the index; stale ones
+/// re-analyze once and recommit.
 fn references(session: &AnalysisSession, sym: &Name, files: &[Arc<str>]) {
-    std::hint::black_box(session.references_to_in_files(sym, files));
+    std::hint::black_box(session.indexed_references_to(sym, files, false, &|| false));
 }
 
 fn mean_ms(samples: &[Duration]) -> f64 {

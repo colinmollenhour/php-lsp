@@ -103,12 +103,12 @@ async fn references_protected_method_narrowed_to_hierarchy_stays_complete() {
 }
 
 #[tokio::test]
-async fn edits_and_reads_never_lock_the_reference_index() {
-    // The session opts out of mir's legacy RefIndex maintenance
-    // (`without_reference_index`): references answer from the memoized
-    // `analyze_file` path and diagnostics republish via the open-file set.
-    // The lock counter must stay flat across the full edit → republish →
-    // references cycle — any drift means index work crept back onto a hot path.
+async fn edits_and_reads_take_bounded_reference_index_locks() {
+    // References answer from mir's delta-maintained posting lists: an edit
+    // commits the changed file's postings (a handful of locks), and a read is
+    // a bounded per-key lookup. The counter must scale with the edit/read —
+    // never with candidate-file count (which would mean per-request index
+    // rebuilds crept back in).
     let mut s = TestServer::with_fixture("references_stress").await;
     s.wait_for_index_ready().await;
 
@@ -116,6 +116,8 @@ async fn edits_and_reads_never_lock_the_reference_index() {
     s.open("src/Target.php", &text).await;
     let (line, col) = pos_of(&text, "process");
 
+    // Warm query so the candidate set is committed before measuring.
+    let _ = s.references("src/Target.php", line, col, true).await;
     let before = s.debug_stats_ref_index_locks().await;
 
     // Edit path: a change triggers analysis + the dependent republish sweep.
@@ -131,11 +133,11 @@ async fn edits_and_reads_never_lock_the_reference_index() {
         .assert_eq(&render_locations(&resp, &s.uri("")));
 
     let after = s.debug_stats_ref_index_locks().await;
-    assert_eq!(
-        after - before,
-        0,
-        "RefIndex was locked {} time(s) on the edit/read path",
-        after - before
+    let taken = after - before;
+    assert!(
+        taken <= 64,
+        "RefIndex was locked {taken} time(s) on one edit/read cycle; \
+         expected a small bounded count, not per-candidate work"
     );
 }
 

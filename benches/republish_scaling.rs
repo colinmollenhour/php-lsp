@@ -56,12 +56,8 @@ struct Workspace {
 
 /// Build a session with `size` ingested dependents, `OPEN_FILES` of which are
 /// treated as the editor's open files.
-fn build(size: usize, maintain_ref_index: bool) -> Workspace {
-    let session = if maintain_ref_index {
-        AnalysisSession::new(PhpVersion::LATEST)
-    } else {
-        AnalysisSession::new(PhpVersion::LATEST).without_reference_index()
-    };
+fn build(size: usize) -> Workspace {
+    let session = AnalysisSession::new(PhpVersion::LATEST);
     session.ensure_all_stubs();
 
     let base: Arc<str> = Arc::from("bench://base.php");
@@ -120,7 +116,7 @@ fn main() {
     let mut sweep_max = 0f64;
     for &size in SIZES {
         // New path: re-analyze exactly the open files; no dependency graph.
-        let ws = build(size, false);
+        let ws = build(size);
         let (open_ingest, open_sweep) = measure_edits(&ws, || {
             let analyses = ws
                 .session
@@ -146,7 +142,7 @@ fn main() {
         };
 
         // Old path: compute + re-analyze the transitive dependents of base.
-        let ws_old = build(size, true);
+        let ws_old = build(size);
         let (dep_ingest, dep_sweep) = measure_edits(&ws_old, || {
             let analyses = ws_old.session.reanalyze_dependents(ws_old.base.as_ref());
             std::hint::black_box(analyses);

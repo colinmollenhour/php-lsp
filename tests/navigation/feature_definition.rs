@@ -1983,7 +1983,7 @@ function test(Base$0 $x): void {}
 "#,
         )
         .await;
-    expect!["Other/Child.php:3:0-3:0"].assert_eq(&out);
+    expect!["Other/Child.php:3:6-3:11"].assert_eq(&out);
 }
 
 /// `class Child extends \App\Base {}` (FQN-qualified with leading backslash) is found

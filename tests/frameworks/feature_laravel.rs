@@ -498,7 +498,10 @@ async fn laravel_references_method_includes_declaration() {
         Illuminate/Auth/AuthManager.php:211:58-211:63
         Illuminate/Auth/AuthManager.php:347:22-347:27
         Illuminate/Auth/AuthManager.php:60:59-60:64
-        Illuminate/Auth/AuthManager.php:69:20-69:25"#]]
+        Illuminate/Auth/AuthManager.php:69:20-69:25
+        Illuminate/Auth/Middleware/Authenticate.php:81:29-81:34
+        Illuminate/Auth/Middleware/AuthenticateWithBasicAuth.php:53:21-53:26
+        Illuminate/Contracts/Auth/Factory.php:12:20-12:25"#]]
     .assert_eq(&out);
 }
 
@@ -2766,7 +2769,7 @@ async fn laravel_find_implementations_interface_method() {
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_locations(&resp, &s.uri(""));
-    expect!["Illuminate/Auth/AuthManager.php:69:0-69:0"].assert_eq(&out);
+    expect!["Illuminate/Auth/AuthManager.php:69:20-69:25"].assert_eq(&out);
 }
 
 // ── Type Hierarchy ───────────────────────────────────────────────────────────
@@ -2872,7 +2875,7 @@ async fn laravel_find_implementations_interface_name() {
         .await;
     assert!(resp["error"].is_null(), "error: {resp:#}");
     let out = render_locations(&resp, &s.uri(""));
-    expect!["Illuminate/Auth/AuthManager.php:17:0-17:0"].assert_eq(&out);
+    expect!["Illuminate/Auth/AuthManager.php:17:6-17:17"].assert_eq(&out);
 }
 
 // ── Under-load stability ──────────────────────────────────────────────────────

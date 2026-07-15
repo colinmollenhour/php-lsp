@@ -475,6 +475,12 @@ impl Backend {
                 let sweep_open = open_files.urls();
                 drop(tokio::task::spawn_blocking(move || {
                     salsa_docs.get_workspace_index_salsa();
+                    // Replay disk-cached index postings first: files whose
+                    // content hash matches a previous run answer references /
+                    // implementations immediately, and the sweep below skips
+                    // their re-analysis via the freshness marks. No-op per
+                    // file on a first-ever run.
+                    salsa_docs.warm_start_indexes();
                     // Warm mir's `analyze_file` memos across the workspace so
                     // the first references/rename on any symbol answers from
                     // memo hits instead of a cold multi-second analysis. Files

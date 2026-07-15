@@ -21,8 +21,9 @@ use tower_lsp::lsp_types::*;
 pub struct DebugStats {
     /// Cumulative count of real `ParsedDoc` parses (cache misses).
     pub parses: u64,
-    /// Times mir's legacy `RefIndex` was locked. The session opts out of
-    /// index maintenance, so this must stay flat across edits and reads.
+    /// Times mir's reference index was locked. Reads are per-key posting
+    /// lookups and edits commit one file's postings, so this grows by a
+    /// small bounded amount per operation — never per candidate file.
     pub ref_index_locks: u64,
     /// Analysis warm sweeps run to completion (not cancelled). Lets benches
     /// and tests wait for the post-index sweep before baselining.
@@ -35,9 +36,6 @@ use crate::document::open_files::OpenFiles;
 use crate::lang::autoload::Psr4Map;
 use crate::lang::config::LspConfig;
 use crate::lang::phpstorm_meta::PhpStormMeta;
-use crate::text::fqn_short_name;
-
-use crate::navigation::references::find_constructor_references;
 
 use crate::analysis::diagnostics::merge_file_diagnostics;
 use crate::document::open_files::compute_open_file_diagnostics;
@@ -76,7 +74,7 @@ impl Backend {
 
     /// `$/php-lsp/debugStats` — internal observability counters, used by the
     /// stress tests to assert the read path doesn't parse the whole workspace
-    /// and that no edit/read ever touches mir's legacy reference index.
+    /// and that reference-index lock traffic stays bounded per operation.
     pub async fn debug_stats(&self) -> tower_lsp::jsonrpc::Result<DebugStats> {
         Ok(DebugStats {
             parses: self.docs.parse_count(),
@@ -145,47 +143,6 @@ impl Backend {
             .unwrap_or_default()
     }
 
-    /// Reference call sites for a class's `__construct`.
-    ///
-    /// The constructor's call sites are `new OwningClass(...)`, not
-    /// `->__construct()`, so name-only matching would return every class's
-    /// constructor declaration. We search for `new` expressions only, scoped to
-    /// the owning class.
-    ///
-    /// `class_name` is the FQN when the constructor is inside a namespace
-    /// (e.g. `"Shop\\Order"`). The AST walker searches for the *short* name
-    /// (`"Order"`) since that's what appears at call sites, while the FQN is
-    /// used only to scope the search and prevent collisions between two classes
-    /// with the same short name in different namespaces.
-    fn construct_references(
-        &self,
-        uri: &Url,
-        source: &str,
-        position: Position,
-        class_name: &str,
-        include_declaration: bool,
-    ) -> Vec<Location> {
-        let short_name = fqn_short_name(class_name).to_owned();
-        let class_fqn = class_name.contains('\\').then_some(class_name);
-        // Prefilter to files mentioning the short class name before parsing.
-        let candidate_docs = self.docs.candidate_docs_for(&short_name);
-        // `find_constructor_references` walks `new` expressions directly —
-        // bypasses the codebase/salsa index whose `ClassReference` key is too
-        // broad (covers type hints, `instanceof`, `extends`, `implements`).
-        let mut locations = find_constructor_references(&short_name, &candidate_docs, class_fqn);
-        // The cursor is already on the `__construct` name, so derive the span
-        // from the identifier under the cursor rather than re-searching via
-        // str_offset (which finds the first occurrence in the file and would
-        // point at the wrong constructor in files with more than one class).
-        if include_declaration && let Some(range) = crate::text::word_range_at(source, position) {
-            locations.push(Location {
-                uri: uri.clone(),
-                range,
-            });
-        }
-        locations
-    }
-
     /// Resolve the FQN of the symbol at the cursor so reference lookups can match
     /// by exact FQN instead of short name (fixes cross-namespace overmatch for
     /// Function/Class and unrelated-class overmatch for Method via the owning
@@ -220,13 +177,21 @@ impl Backend {
                 ))
             }
             Some(SymbolKind::Property) => {
-                // Only resolve the owning class when the cursor is on a property
-                // declaration — for access sites (`$obj->prop`) enclosing_class_at
-                // returns the accessing class, not the declaring class, so the session
-                // would be queried with the wrong key. Access sites fall back to the
-                // AST walker which finds all `->prop` occurrences.
+                // Resolve the owning class when the cursor is on a property
+                // declaration (including promoted constructor parameters) —
+                // for access sites (`$obj->prop`) the resolved usage symbol
+                // from `FileAnalysis::symbol_at` carries the owner instead.
                 let stmts = &doc.program().stmts;
-                crate::backend::helpers::cursor_is_on_property_decl(doc.source(), stmts, position)?;
+                if crate::backend::helpers::cursor_is_on_property_decl(
+                    doc.source(),
+                    stmts,
+                    position,
+                )
+                .is_none()
+                    && promoted_property_at_cursor(doc.source(), stmts, position).is_none()
+                {
+                    return None;
+                }
                 let short_owner =
                     crate::types::type_map::enclosing_class_at(doc.source(), doc, position)?;
                 Some(crate::navigation::moniker::resolve_fqn(
@@ -236,9 +201,16 @@ impl Backend {
                 ))
             }
             Some(SymbolKind::Constant) => {
-                if constant_owner.is_some() {
-                    // Class constant: the owning class short name as-is.
-                    constant_owner
+                if let Some(owner) = constant_owner {
+                    // Class constant: resolve the owning class to its FQCN —
+                    // mir's index keys are `cnst:{fqcn}::{NAME}`.
+                    if owner.contains('\\') {
+                        Some(owner.trim_start_matches('\\').to_string())
+                    } else {
+                        Some(crate::navigation::moniker::resolve_fqn(
+                            doc, &owner, &imports,
+                        ))
+                    }
                 } else {
                     // Global/namespace constant: compute FQN so cross-namespace
                     // references like `\Config\DB_HOST` can be found.

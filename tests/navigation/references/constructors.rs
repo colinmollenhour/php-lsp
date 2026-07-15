@@ -208,6 +208,7 @@ class Base {
 class Child extends Base {
     public function __construct(int $id, string $name) {
         parent::__con$0struct($id);
+        //      ^^^^^^^^^^^ ref
     }
 }
 new Child(1, 'Alice');
@@ -232,6 +233,7 @@ class Alpha {
 class Beta extends Alpha {
     public function __construct() {
         parent::__con$0struct();
+        //      ^^^^^^^^^^^ ref
     }
 }
 new Alpha();

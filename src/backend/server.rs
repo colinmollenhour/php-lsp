@@ -25,9 +25,6 @@ use crate::navigation::call_hierarchy::{
     incoming_calls, outgoing_calls_indexed, prepare_call_hierarchy_indexed,
 };
 use crate::navigation::declaration::{goto_declaration, goto_declaration_from_index};
-use crate::navigation::implementation::{
-    find_implementations, find_implementations_mir_backed, find_method_implementations_mir_backed,
-};
 use crate::navigation::moniker::moniker_at;
 use crate::navigation::type_definition::{
     goto_type_definition_exact, goto_type_definition_from_index_exact,
@@ -55,8 +52,8 @@ use crate::editing::selection_range::selection_ranges;
 use crate::editing::signature_help::signature_help;
 
 use super::helpers::{
-    cursor_is_on_property_decl, is_after_arrow, promoted_property_at_cursor, run_phpunit,
-    symbol_kind_at,
+    cursor_is_on_method_decl, cursor_is_on_property_decl, is_after_arrow,
+    promoted_property_at_cursor, run_phpunit, symbol_kind_at,
 };
 use super::{Backend, publish_with_dependents};
 
@@ -1212,75 +1209,73 @@ impl LanguageServer for Backend {
             let source = self.get_open_text(uri).unwrap_or_default();
             let imports = self.file_imports(uri);
             let raw_word = crate::text::word_at_position(&source, position).unwrap_or_default();
-            let wi = self.workspace_index_async().await;
+            if raw_word.is_empty() {
+                return Ok(None);
+            }
             // `word_at_position` includes `\` as a word character, so the cursor on
             // a use-statement import (`use A\B\Foo`) returns the full qualified name.
-            // Split to recover the short name and treat the rest as the FQN so the
-            // workspace index lookup (keyed by short name) still finds subtypes.
-            let (word, mut fqn_owned): (String, Option<String>) = if raw_word.contains('\\') {
+            let (word, fqn): (String, String) = if raw_word.contains('\\') {
                 let short = raw_word
                     .rsplit('\\')
                     .next()
                     .unwrap_or(&raw_word)
                     .to_string();
-                let full = raw_word.trim_start_matches('\\').to_string();
-                (short, Some(full))
+                (short, raw_word.trim_start_matches('\\').to_string())
             } else {
-                let fqn = imports.get(&raw_word).cloned();
-                (raw_word, fqn)
+                // Resolve via this file's imports + namespace; covers usages,
+                // aliases, and the type's own declaration (which resolves to
+                // `<current-namespace>\<word>`).
+                let resolved = match self.get_doc(uri) {
+                    Some(doc) => crate::navigation::moniker::resolve_fqn(&doc, &raw_word, &imports),
+                    None => raw_word.clone(),
+                };
+                (raw_word, resolved.trim_start_matches('\\').to_string())
             };
-            // The cursor may sit on the class/interface's own declaration name
-            // rather than a usage — there is no `use` import for a symbol to
-            // reference itself, so `imports` above finds nothing. Resolve the
-            // FQN from the workspace index instead, scoped to this file, so a
-            // same-named class declared elsewhere can't be mismatched onto it.
-            if fqn_owned.is_none() {
-                fqn_owned = wi
-                    .classes_by_name
-                    .get(&word)
-                    .and_then(|refs| {
-                        refs.iter()
-                            .filter_map(|r| wi.at(*r))
-                            .find(|(u, _)| *u == uri)
-                    })
-                    .map(|(_, cls)| cls.fqn.as_ref().to_string());
-            }
-            let fqn = fqn_owned.as_deref();
-            // First pass: open-file ParsedDocs give accurate character positions.
-            let open_docs = self.docs.docs_for(&self.open_urls());
-            let mut locs = find_implementations(&word, fqn, &open_docs);
-            // Second pass: mir-backed subtype graph (fixes aliased/FQN extends),
-            // falling back to the raw-name subtypes_of map when mir is cold.
-            if locs.is_empty() {
-                let fqn_for_mir = fqn.unwrap_or(&word).to_string();
-                let subtype_urls = self.docs.class_subtype_urls(&fqn_for_mir);
-                locs = find_implementations_mir_backed(&word, fqn, &wi, &subtype_urls);
-            }
-            // Third pass: treat word as a method name inside its declaring
-            // class/interface — returns concrete overrides in every subtype.
-            // Handles cursor on an interface method like `Factory::guard()`.
+
+            // A method declaration name can collide case-insensitively with a
+            // class name (`Guard` interface vs `guard()` method in one
+            // namespace); the cursor context decides which sense wins.
+            let on_method_decl = self.get_doc(uri).is_some_and(|doc| {
+                cursor_is_on_method_decl(doc.source(), &doc.program().stmts, position)
+            });
+
+            // Subtypes of the type under the cursor, from mir's maintained
+            // subtype edge index (aliased/FQN extends forms all resolve).
+            let mut locs: Vec<Location> = if on_method_decl {
+                Vec::new()
+            } else {
+                let docs = Arc::clone(&self.docs);
+                let fqn_task = fqn.clone();
+                tokio::task::spawn_blocking(move || docs.indexed_subtype_classes(&fqn_task))
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|site| subtype_site_to_location(&site.file, &site.range))
+                    .collect()
+            };
+
+            // Cursor on a method name inside its declaring class/interface:
+            // concrete overrides in every subtype.
             if locs.is_empty()
                 && let Some(doc) = self.get_doc(uri)
                 && let Some(enclosing) =
                     crate::types::type_map::enclosing_class_at(&source, &doc, position)
             {
-                // Resolve the enclosing class's FQN for mir's subtype graph.
-                let enclosing_fqn = wi
-                    .classes_by_name
-                    .get(&enclosing)
-                    .and_then(|refs| refs.first())
-                    .and_then(|r| wi.at(*r))
-                    .map(|(_, cls)| cls.fqn.as_ref().to_string());
-                let method_subtype_urls = enclosing_fqn
-                    .as_deref()
-                    .map(|f| self.docs.class_subtype_urls(f))
-                    .unwrap_or_default();
-                locs = find_method_implementations_mir_backed(
-                    &word,
-                    &enclosing,
-                    &wi,
-                    &method_subtype_urls,
-                );
+                let enclosing_fqn =
+                    crate::navigation::moniker::resolve_fqn(&doc, &enclosing, &imports)
+                        .trim_start_matches('\\')
+                        .to_string();
+                let docs = Arc::clone(&self.docs);
+                let method = word.clone();
+                let impls = tokio::task::spawn_blocking(move || {
+                    docs.indexed_method_implementations(&enclosing_fqn, &method)
+                })
+                .await
+                .unwrap_or_default();
+                locs = impls
+                    .into_iter()
+                    .filter_map(|(_, file, range)| subtype_site_to_location(&file, &range))
+                    .collect();
             }
             if locs.is_empty() {
                 Ok(None)
@@ -1727,4 +1722,24 @@ impl LanguageServer for Backend {
         })
         .await
     }
+}
+
+/// Convert a mir subtype/implementation hit — file path plus a name range in
+/// mir coordinates (1-based line, 0-based char columns) — to an LSP Location.
+fn subtype_site_to_location(file: &str, range: &mir_analyzer::Range) -> Option<Location> {
+    let uri = Url::parse(file).ok()?;
+    let line = range.start.line.saturating_sub(1);
+    Some(Location {
+        uri,
+        range: tower_lsp::lsp_types::Range {
+            start: tower_lsp::lsp_types::Position {
+                line,
+                character: range.start.column,
+            },
+            end: tower_lsp::lsp_types::Position {
+                line,
+                character: range.end.column,
+            },
+        },
+    })
 }

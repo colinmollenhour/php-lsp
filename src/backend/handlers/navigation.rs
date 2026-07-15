@@ -7,7 +7,9 @@ use crate::analysis::document_highlight::document_highlights;
 use crate::navigation::definition::{
     find_declaration_range, find_method_in_class_hierarchy, find_method_range_in_class,
 };
-use crate::navigation::references::{ReferenceQuery, SymbolKind};
+use crate::navigation::references::{
+    build_mir_symbol, dedup_ref_locations, session_tuple_to_location,
+};
 use crate::navigation::walk::collect_var_refs_in_scope;
 use crate::text::{fqn_short_name, utf16_code_units, word_at_position};
 use crate::types::type_map::{TypeMap, enclosing_class_at, enclosing_class_fqn_at};
@@ -246,8 +248,37 @@ impl Backend {
                     // declaration), exclude the cursor span from results — it points
                     // to the `parent::__construct()` text, not to the declaration.
                     let incl_decl = include_declaration && !on_call_site;
-                    let locations =
-                        self.construct_references(uri, &source, position, &class_name, incl_decl);
+                    // Instantiation sites (`new Short(...)`) always name the
+                    // class's short name; mir records them under
+                    // `meth:{fqcn}::__construct`.
+                    let fqn = if class_name.contains('\\') {
+                        class_name.trim_start_matches('\\').to_string()
+                    } else {
+                        let imports = self.file_imports(uri);
+                        crate::navigation::moniker::resolve_fqn(&doc, &class_name, &imports)
+                            .trim_start_matches('\\')
+                            .to_string()
+                    };
+                    let sym = mir_analyzer::Name::method(fqn.as_str(), "__construct");
+                    let short = fqn_short_name(&class_name).to_owned();
+                    let candidate_urls = self.docs.candidate_urls_for(&short);
+                    let files: Vec<Arc<str>> = candidate_urls
+                        .iter()
+                        .map(|u| Arc::from(u.as_str()))
+                        .collect();
+                    let docs = Arc::clone(&self.docs);
+                    let locations = tokio::task::spawn_blocking(move || {
+                        let (_interactive, cancel_rev) = docs.settled_write_rev_guard();
+                        let mut locs: Vec<Location> = docs
+                            .indexed_references(&sym, &files, incl_decl, Some(cancel_rev))
+                            .into_iter()
+                            .filter_map(session_tuple_to_location)
+                            .collect();
+                        dedup_ref_locations(&mut locs);
+                        locs
+                    })
+                    .await
+                    .unwrap_or_default();
                     return Ok((!locations.is_empty()).then_some(locations));
                 }
                 // Cannot determine the owning class — return empty rather than
@@ -311,75 +342,99 @@ impl Backend {
             // - any other $word the scope walker didn't find
 
             let doc_opt = self.get_doc(uri);
+
+            // Usage-site cursor: mir's per-file analysis already resolved the
+            // symbol under the cursor (receiver types, aliases, namespaces) —
+            // its `ReferenceKind` maps 1:1 onto the index key.
+            let usage_symbol: Option<mir_analyzer::Name> = {
+                let analysis = self.cached_analysis_async(uri).await;
+                analysis.as_deref().and_then(|a| {
+                    let doc = doc_opt.as_ref()?;
+                    let off = crate::text::word_range_at(&source, position)
+                        .map(|r| doc.view().byte_of_position(r.start))?;
+                    a.symbol_at(off).and_then(|s| s.kind.to_name())
+                })
+            };
+
+            // Declaration-site cursor (or no analysis): classify the cursor
+            // context and resolve the owner/target FQN.
             let (word, kind, constant_owner) =
                 resolve_reference_symbol(doc_opt.as_ref(), &source, position, word);
-            let target_fqn = self.resolve_reference_target_fqn(
-                uri,
-                doc_opt.as_ref(),
-                &word,
-                kind,
-                position,
-                constant_owner,
-            );
+            let symbol = match usage_symbol {
+                Some(sym) => sym,
+                None => {
+                    let target_fqn = self.resolve_reference_target_fqn(
+                        uri,
+                        doc_opt.as_ref(),
+                        &word,
+                        kind,
+                        position,
+                        constant_owner.clone(),
+                    );
+                    match build_mir_symbol(
+                        &word,
+                        kind,
+                        target_fqn.as_deref(),
+                        constant_owner.is_some(),
+                    ) {
+                        Some(sym) => sym,
+                        None => return Ok(None),
+                    }
+                }
+            };
 
             // Visibility scoping: a private/protected method can only be
             // referenced from its declaring class file (+ subtype files for
             // protected). When that scope is known, use it directly as the
             // candidate set — skipping the whole-workspace text sweep in
-            // `candidate_urls_for`, which otherwise scans every file's source
-            // only to discard all but the scope. Public methods and unresolved
-            // owners fall back to the text-filtered workspace scope.
-            let method_scope = if matches!(kind, Some(SymbolKind::Method)) {
-                target_fqn
-                    .as_deref()
-                    .and_then(|fqn| self.docs.method_reference_scope(fqn, &word))
+            // `candidate_urls_for`. Public symbols fall back to the
+            // text-filtered workspace scope, unioned over the cursor word and
+            // the symbol's short name (they differ under `use ... as` aliases).
+            let method_scope = if let mir_analyzer::Name::Method { class, name } = &symbol {
+                self.docs.method_reference_scope(class, name)
             } else {
                 None
             };
-            let candidate_urls =
-                method_scope.unwrap_or_else(|| self.docs.candidate_urls_for(&word));
-
-            let owner_short: Option<String> = if matches!(kind, Some(SymbolKind::Method)) {
-                target_fqn
-                    .as_deref()
-                    .map(|fqn| fqn_short_name(fqn.trim_start_matches('\\')).to_string())
-            } else {
-                None
-            };
-
-            let declaration_location = include_declaration.then(|| {
-                let range =
-                    crate::text::word_range_at(&source, position).unwrap_or_else(|| Range {
-                        start: position,
-                        end: Position {
-                            line: position.line,
-                            character: position.character + word.encode_utf16().count() as u32,
-                        },
-                    });
-                Location {
-                    uri: uri.clone(),
-                    range,
+            let candidate_urls = method_scope.unwrap_or_else(|| {
+                let mut urls = self.docs.candidate_urls_for(&word);
+                let short = match &symbol {
+                    mir_analyzer::Name::Class(f)
+                    | mir_analyzer::Name::Function(f)
+                    | mir_analyzer::Name::GlobalConstant(f) => {
+                        fqn_short_name(f.trim_start_matches('\\')).to_string()
+                    }
+                    mir_analyzer::Name::Method { name, .. }
+                    | mir_analyzer::Name::Property { name, .. }
+                    | mir_analyzer::Name::ClassConstant { name, .. } => name.to_string(),
+                };
+                if short != word.as_str() {
+                    let mut extra = self.docs.candidate_urls_for(&short);
+                    urls.append(&mut extra);
+                    urls.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+                    urls.dedup();
                 }
+                urls
             });
+            let files: Vec<Arc<str>> = candidate_urls
+                .iter()
+                .map(|u| Arc::from(u.as_str()))
+                .collect();
 
+            // Declaration coverage comes from mir's definitions index (the
+            // `include_declaration` flag below) — never from the raw cursor
+            // span, which on a `use` import line is not a reference at all.
             let docs = Arc::clone(&self.docs);
             let locations = tokio::task::spawn_blocking(move || {
                 // Pause the background scan and snapshot a settled revision so
                 // only a genuine user edit cancels the search.
                 let (_interactive, cancel_rev) = docs.settled_write_rev_guard();
-                let query = ReferenceQuery {
-                    word: &word,
-                    kind,
-                    target_fqn: target_fqn.as_deref(),
-                    owner_short: owner_short.as_deref(),
-                };
-                query.collect(
-                    &docs,
-                    &candidate_urls,
-                    include_declaration,
-                    declaration_location,
-                    Some(cancel_rev),
-                )
+                let mut locs: Vec<Location> = docs
+                    .indexed_references(&symbol, &files, include_declaration, Some(cancel_rev))
+                    .into_iter()
+                    .filter_map(session_tuple_to_location)
+                    .collect();
+                dedup_ref_locations(&mut locs);
+                locs
             })
             .await
             .unwrap_or_default();

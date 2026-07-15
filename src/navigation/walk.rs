@@ -1023,56 +1023,6 @@ impl<'arena, 'src> Visitor<'arena, 'src> for GlobalConstRefsVisitor<'_> {
 
 // ── Class-reference walker ────────────────────────────────────────────────────
 
-/// Collect spans for `new ClassName(...)` expressions only — excludes type hints,
-/// `instanceof`, `extends`, `implements`, and static calls.
-///
-/// `class_fqn` — when `Some`, FQN-qualified identifiers in the source (those
-/// containing `\`) are compared against the FQN rather than just the short name,
-/// preventing false positives when two classes share a short name across namespaces.
-pub fn new_refs_in_stmts(
-    stmts: &[Stmt<'_, '_>],
-    class_name: &str,
-    class_fqn: Option<&str>,
-    out: &mut Vec<Span>,
-) {
-    let mut v = NewRefsVisitor {
-        class_name,
-        class_fqn,
-        out: Vec::new(),
-    };
-    for stmt in stmts {
-        let _ = v.visit_stmt(stmt);
-    }
-    out.append(&mut v.out);
-}
-
-struct NewRefsVisitor<'a> {
-    class_name: &'a str,
-    class_fqn: Option<&'a str>,
-    out: Vec<Span>,
-}
-
-impl<'arena, 'src> Visitor<'arena, 'src> for NewRefsVisitor<'_> {
-    fn visit_expr(&mut self, expr: &Expr<'arena, 'src>) -> ControlFlow<()> {
-        if let ExprKind::New(n) = &expr.kind
-            && let ExprKind::Identifier(id) = &n.class.kind
-        {
-            let matches = if id.contains('\\')
-                && let Some(fqn) = self.class_fqn
-            {
-                // Fully-qualified identifier: compare by FQN for exact namespace match.
-                id.trim_start_matches('\\') == fqn.trim_start_matches('\\')
-            } else {
-                fqn_short_name(id) == self.class_name
-            };
-            if matches {
-                self.out.push(n.class.span);
-            }
-        }
-        walk_expr(self, expr)
-    }
-}
-
 /// Collect every class-typed name reference (extends, implements, new,
 /// instanceof, type hints, static method/property/const access, catch types).
 /// Each entry is the source-spelling of the reference (`Foo`, `Sub\Foo`, or

@@ -11,11 +11,10 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use super::walk::{
     all_class_ref_names_in_stmts, class_refs_in_stmts, constant_refs_in_stmts,
-    function_refs_in_stmts, global_constant_refs_in_stmts, method_refs_in_stmts, new_refs_in_stmts,
+    function_refs_in_stmts, global_constant_refs_in_stmts, method_refs_in_stmts,
     property_refs_in_stmts, refs_in_stmts, refs_in_stmts_with_use, use_import_refs_in_stmts,
 };
 use crate::document::ast::{ParsedDoc, str_offset_in_range};
-use crate::document::document_store::DocumentStore;
 use crate::text::{fqn_short_name, utf16_code_units};
 
 /// What kind of symbol the cursor is on.  Used to dispatch to the
@@ -119,60 +118,8 @@ pub fn use_import_locations(word: &str, all_docs: &[(Url, Arc<ParsedDoc>)]) -> V
         .collect()
 }
 
-/// Find only `new ClassName(...)` instantiation sites across all docs.
-///
-/// Used by the `__construct` references handler — `SymbolKind::Class` (the normal
-/// class-kind path) is too broad because mir's `ClassReference` key covers type
-/// hints, `instanceof`, `extends`, and `implements` in addition to `new` calls.
-/// This function walks the AST using `new_refs_in_stmts` which only emits spans
-/// for `ExprKind::New` nodes, giving the caller exactly the call sites.
-///
-/// `class_fqn` is the fully-qualified name (e.g. `"Alpha\\Widget"`) used to
-/// filter files where the short name resolves to a different class. Pass `None`
-/// for global-namespace classes.
-pub fn find_constructor_references(
-    short_name: &str,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
-    class_fqn: Option<&str>,
-) -> Vec<Location> {
-    all_docs
-        .par_iter()
-        .flat_map_iter(|(uri, doc)| {
-            // Cheap memchr gate before import AST walk.
-            if !doc.view().source().contains(short_name)
-                && !class_fqn
-                    .is_some_and(|f| doc.view().source().contains(f.trim_start_matches('\\')))
-            {
-                return Vec::new();
-            }
-            // Namespace filter: skip if the file's imports can't resolve the
-            // short name to the target FQN and the FQN doesn't appear literally.
-            if let Some(fqn) = class_fqn
-                && !doc_can_reference_target(doc, short_name, fqn)
-                && !doc.view().source().contains(fqn.trim_start_matches('\\'))
-            {
-                return Vec::new();
-            }
-            let mut spans = Vec::new();
-            new_refs_in_stmts(&doc.program().stmts, short_name, class_fqn, &mut spans);
-            let sv = doc.view();
-            spans
-                .into_iter()
-                .map(|span| {
-                    let start = sv.position_of(span.start);
-                    let end = sv.position_of(span.end);
-                    Location {
-                        uri: uri.clone(),
-                        range: Range { start, end },
-                    }
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-
 /// Convert a session reference tuple `(file_uri, line, col_start, col_end)` —
-/// as produced by `DocumentStore::session_references_to` — into an LSP
+/// as produced by `DocumentStore::indexed_references` — into an LSP
 /// `Location`. Returns `None` when the file URI fails to parse.
 pub(crate) fn session_tuple_to_location(
     (file, line, col_start, col_end): (Arc<str>, u32, u32, u32),
@@ -211,14 +158,6 @@ pub(crate) fn dedup_ref_locations(locations: &mut Vec<Location>) {
     let mut seen = HashSet::new();
     locations.retain(|loc| seen.insert(ref_location_key(loc)));
 }
-
-// NOTE: a mir-codebase fast path for references (find_references_codebase)
-// previously lived here, fully stubbed: every symbol kind fell through to the
-// AST walker, and nothing called it. Removed. A real fast path for Class kind
-// would need mir's ClassReference index to be exhaustive (mir v0.41.0 covers
-// type hints, `instanceof`, `extends`, `implements`, `new` calls, and static-
-// call class tokens), but the AST walker is authoritative and already augmented
-// with session refs for Class and Function — there is no coverage gap to fill.
 
 fn find_references_inner(
     word: &str,
@@ -789,159 +728,50 @@ fn collect_declaration_spans(
     }
 }
 
-/// Build a `mir_analyzer::Name` from `(word, kind, target_fqn)`.
-/// Returns `None` when kind is None or the required FQN piece is missing.
+/// Build the typed `mir_analyzer::Name` for a declaration-site cursor from
+/// the classified `(word, kind)` plus resolved owner/target FQNs. Usage-site
+/// cursors don't come through here — `FileAnalysis::symbol_at` +
+/// `ReferenceKind::to_name` already carry the resolved symbol.
+///
+/// `target_fqn` is the symbol's own FQN for Function/Class, the owning FQCN
+/// for Method/Property, and for Constant either the owning FQCN (class
+/// constant, `class_constant = true`) or the constant's FQN (global).
+/// A missing FQN falls back to `word` for Function/Class/Constant (global
+/// namespace); Method/Property require the owner and return `None` without it.
 pub fn build_mir_symbol(
     word: &str,
     kind: Option<SymbolKind>,
     target_fqn: Option<&str>,
+    class_constant: bool,
 ) -> Option<mir_analyzer::Name> {
+    let norm = |s: &str| -> Arc<str> { Arc::from(s.trim_start_matches('\\')) };
     match kind {
-        Some(SymbolKind::Function) => {
-            target_fqn.map(|fqn| mir_analyzer::Name::Function(Arc::from(fqn)))
+        Some(SymbolKind::Function) => Some(mir_analyzer::Name::Function(norm(
+            target_fqn.unwrap_or(word),
+        ))),
+        Some(SymbolKind::Class) => {
+            Some(mir_analyzer::Name::Class(norm(target_fqn.unwrap_or(word))))
         }
-        Some(SymbolKind::Class) => target_fqn.map(|fqn| mir_analyzer::Name::Class(Arc::from(fqn))),
-        Some(SymbolKind::Method) => target_fqn.map(|owning| mir_analyzer::Name::Method {
-            class: Arc::from(owning),
+        // An unresolvable owner (call/access on an untyped receiver, outside
+        // any class) becomes an empty class: mir answers those from its
+        // name-keyed fallback postings.
+        Some(SymbolKind::Method) => Some(mir_analyzer::Name::Method {
+            class: norm(target_fqn.unwrap_or("")),
             // PHP method dispatch is case-insensitive; normalize here.
             name: Arc::from(word.to_ascii_lowercase()),
         }),
-        Some(SymbolKind::Property) => target_fqn.map(|owning| mir_analyzer::Name::Property {
-            class: Arc::from(owning),
+        Some(SymbolKind::Property) => Some(mir_analyzer::Name::Property {
+            class: norm(target_fqn.unwrap_or("")),
             name: Arc::from(word),
         }),
-        Some(SymbolKind::Constant) | None => None,
-    }
-}
-
-/// Unified reference collector used by `textDocument/references`.
-///
-/// Decides which path(s) to take — mir's type-aware session index (fast,
-/// exact for methods), the AST walker (comprehensive), or both — and merges
-/// the results. All call sites previously duplicated this merge logic by hand.
-pub struct ReferenceQuery<'a> {
-    pub word: &'a str,
-    pub kind: Option<SymbolKind>,
-    pub target_fqn: Option<&'a str>,
-    /// Short name of the owning class for method queries (e.g. `"Widget"` from
-    /// `"App\\Widget"`). Used to post-filter mir results to files that textually
-    /// mention the class, preventing false positives from same-name methods on
-    /// unrelated classes.
-    pub owner_short: Option<&'a str>,
-}
-
-impl<'a> ReferenceQuery<'a> {
-    /// Collect reference locations. `candidate_urls` should already be filtered
-    /// to files that mention `self.word` and narrowed by visibility (from
-    /// `DocumentStore::candidate_urls_for` + scope narrowing in the handler).
-    ///
-    /// The method path hands the URLs straight to mir's memoized `analyze_file`
-    /// query and never parses a `ParsedDoc`. The AST-walker path (non-method
-    /// kinds, or a method that mir couldn't resolve) parses the candidates
-    /// lazily — only the files that actually reach the walker pay the parse.
-    ///
-    /// `declaration_location` is the cursor span; it is appended to Method-path
-    /// results when `include_declaration` is `true`.
-    pub fn collect(
-        &self,
-        docs: &DocumentStore,
-        candidate_urls: &[Url],
-        include_declaration: bool,
-        declaration_location: Option<Location>,
-        cancel_rev: Option<u64>,
-    ) -> Vec<Location> {
-        let candidate_files = || -> Vec<Arc<str>> {
-            candidate_urls
-                .iter()
-                .map(|u| Arc::from(u.as_str()))
-                .collect()
-        };
-
-        // --- Method path: prefer mir's type-aware session index -----------
-        // Needs only the URL list; building `ParsedDoc`s here would parse the
-        // entire text-matching workspace just to discard it.
-        if matches!(self.kind, Some(SymbolKind::Method))
-            && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
-        {
-            // Reachability pre-filter (rust-analyzer's `SearchScope` idea for the
-            // public-method case): a resolvable `Owner::method` reference requires
-            // the file to name `Owner` somewhere (type hint, `use`, `new`, return
-            // type), so a file that text-matches the *method* name but never
-            // mentions the *owner* class cannot resolve to it. Prune those BEFORE
-            // `analyze_file` runs over the candidate set — not after — so a common
-            // method name shared across unrelated classes no longer analyzes the
-            // whole workspace. Files whose source isn't cached are kept
-            // (conservative); this is exactly the predicate the old post-filter
-            // applied to results, moved ahead of the expensive analysis.
-            let method_candidates: Vec<Arc<str>> = match self.owner_short {
-                Some(short) => candidate_urls
-                    .iter()
-                    .filter(|u| {
-                        docs.source_text(u)
-                            .as_ref()
-                            .map(|src| src.contains(short))
-                            .unwrap_or(true)
-                    })
-                    .map(|u| Arc::from(u.as_str()))
-                    .collect(),
-                None => candidate_files(),
-            };
-            let locs: Vec<Location> = docs
-                .session_references_to(&sym, &method_candidates, cancel_rev)
-                .into_iter()
-                .filter_map(session_tuple_to_location)
-                .collect();
-
-            if !locs.is_empty() {
-                let mut combined = locs;
-                if include_declaration {
-                    if let Some(decl) = declaration_location {
-                        combined.push(decl);
-                    }
-                    dedup_ref_locations(&mut combined);
-                }
-                return combined;
+        Some(SymbolKind::Constant) => Some(if class_constant {
+            mir_analyzer::Name::ClassConstant {
+                class: norm(target_fqn?),
+                name: Arc::from(word),
             }
-        }
-        // mir session had no results — fall through to AST walker.
-
-        // --- AST walker path (all non-Method kinds, or Method fallback) ---
-        // Parse the candidates lazily: only the kinds that reach the walker pay.
-        let candidate_docs: Vec<(Url, Arc<ParsedDoc>)> = candidate_urls
-            .iter()
-            .filter_map(|u| docs.get_doc_salsa(u).map(|d| (u.clone(), d)))
-            .collect();
-
-        let mut locations = match self.target_fqn {
-            Some(t) => find_references_with_target(
-                self.word,
-                &candidate_docs,
-                include_declaration,
-                self.kind,
-                t,
-            ),
-            None => find_references(self.word, &candidate_docs, include_declaration, self.kind),
-        };
-
-        // For Function and Class kinds, augment with session refs that the
-        // AST walker may miss (cross-file dynamic dispatch, generated code).
-        if !matches!(
-            self.kind,
-            Some(SymbolKind::Method) | Some(SymbolKind::Property)
-        ) && let Some(sym) = build_mir_symbol(self.word, self.kind, self.target_fqn)
-        {
-            let extra = docs.session_references_to(&sym, &candidate_files(), cancel_rev);
-            if !extra.is_empty() {
-                let mut seen: HashSet<(String, u32, u32, u32)> =
-                    locations.iter().map(ref_location_key).collect();
-                for loc in extra.into_iter().filter_map(session_tuple_to_location) {
-                    if seen.insert(ref_location_key(&loc)) {
-                        locations.push(loc);
-                    }
-                }
-            }
-        }
-
-        locations
+        } else {
+            mir_analyzer::Name::GlobalConstant(norm(target_fqn.unwrap_or(word)))
+        }),
+        None => None,
     }
 }

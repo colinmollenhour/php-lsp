@@ -393,13 +393,11 @@ impl DocumentStore {
         // lazy-resolve `UndefinedClass` candidates without us having to mirror
         // every vendor file upfront.
         let resolver: Arc<dyn mir_analyzer::ClassResolver> = self.psr4.load_full();
-        // References are read exclusively through the memoized
-        // `references_to_in_files` path, so mir's legacy imperative RefIndex
-        // is dead weight here: opting out removes its lock from every edit
-        // and read (asserted flat via `$/php-lsp/debugStats`).
-        let mut builder = mir_analyzer::AnalysisSession::new(php_version)
-            .with_class_resolver(resolver)
-            .without_reference_index();
+        // References/implementations are answered from mir's delta-maintained
+        // inverted indexes (posting lists + subtype edges), which the session
+        // keeps in step with every edit path.
+        let mut builder =
+            mir_analyzer::AnalysisSession::new(php_version).with_class_resolver(resolver);
         if let Some(dir) = self.session_cache_dir.get() {
             builder = builder.with_cache_dir(dir);
         }
@@ -845,11 +843,10 @@ impl DocumentStore {
         self.caches.evict_analysis_all();
     }
 
-    /// Session-backed reference lookup scoped to `files`. Returns `(file, line,
-    /// col)` locations for every occurrence of `symbol` originating in those
-    /// files, computed from the memoized `analyze_file` query — no ingest, no
-    /// shared-index mutation, so repeated lookups don't degrade across a
-    /// session. `files` should be the text-pre-filtered candidate set.
+    /// Inverted-index reference lookup scoped to `files` (the text-pre-filtered
+    /// candidate set): a posting-list read for committed-fresh files plus an
+    /// on-demand analyze+commit for stale/uncommitted candidates, so warm
+    /// requests are O(results) instead of O(candidates).
     ///
     /// Returns LSP-style 0-based line/column.
     ///
@@ -858,18 +855,19 @@ impl DocumentStore {
     /// past `rev` — preventing unbounded retries against a newly-invalidated db.
     /// Pass `None` to retain the original indefinite-retry behaviour (fast ops
     /// like single-file reads where a stale result is not a concern).
-    pub fn session_references_to(
+    pub fn indexed_references(
         &self,
         symbol: &mir_analyzer::Name,
         files: &[Arc<str>],
+        include_declaration: bool,
         cancel_rev: Option<u64>,
     ) -> Vec<(Arc<str>, u32, u32, u32)> {
         let php_version = self.workspace_php_version();
-        // Staleness probe threaded into mir: polled at Phase-1 file boundaries
-        // and between Phase-2 retry attempts, so a request invalidated by a
+        // Staleness probe threaded into mir: polled at phase boundaries and
+        // between cancellation retries, so a request invalidated by a
         // concurrent edit aborts *inside* mir's retry loop instead of spinning
         // there indefinitely (mir catches `Cancelled` internally, so an outer
-        // catch alone never fires for Phase 2).
+        // catch alone never fires for the parallel phase).
         let stale =
             || cancel_rev.is_some_and(|rev| self.write_revision.load(Ordering::Acquire) != rev);
         // Retry: concurrent db writes (background indexing) cancel snapshot
@@ -878,7 +876,7 @@ impl DocumentStore {
         let raw = loop {
             let session = self.analysis_session(php_version);
             match salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
-                session.references_to_in_files_cancellable(symbol, files, &stale)
+                session.indexed_references_to(symbol, files, include_declaration, &stale)
             })) {
                 Ok(Some(refs)) => break refs,
                 // mir aborted via the staleness probe — or a Phase-1 unwind
@@ -906,6 +904,72 @@ impl DocumentStore {
                 (file, line, col_start, col_end)
             })
             .collect()
+    }
+
+    /// Replay disk-cached reference postings and subtype edges for the whole
+    /// mirrored workspace (mir's `warm_start_files`) — a no-op per file
+    /// without a content-hash-matching cache entry from a previous run. Call
+    /// once after the scan mirrors texts, before the analysis warm sweep, so
+    /// a returning session starts index-warm.
+    pub fn warm_start_indexes(&self) {
+        let files: Vec<(Arc<str>, Arc<str>)> = self
+            .lsp_ws_files
+            .iter()
+            .filter(|e| !self.deleted_uris.contains(e.key()))
+            .filter_map(|e| {
+                let text = self.caches.text_cache.get(e.key())?;
+                Some((Arc::<str>::from(e.key().as_str()), Arc::clone(&text)))
+            })
+            .collect();
+        if files.is_empty() {
+            return;
+        }
+        let session = self.analysis_session(self.workspace_php_version());
+        session.warm_start_files(&files);
+    }
+
+    /// Every active workspace file as a mir path (`Arc<str>` of the URI).
+    /// The candidate scope handed to mir's subtype queries.
+    fn workspace_file_paths(&self) -> Vec<Arc<str>> {
+        self.lsp_ws_files
+            .iter()
+            .filter(|e| !self.deleted_uris.contains(e.key()))
+            .map(|e| Arc::<str>::from(e.key().as_str()))
+            .collect()
+    }
+
+    /// Transitive subtypes of `class_fqn` from mir's maintained subtype edge
+    /// index (extends/implements semantics), with declaration sites.
+    pub fn indexed_subtype_classes(&self, class_fqn: &str) -> Vec<mir_analyzer::SubtypeClassSite> {
+        let files = self.workspace_file_paths();
+        let session = self.analysis_session(self.workspace_php_version());
+        let _interactive = self.interactive_read_guard();
+        loop {
+            if let Ok(sites) = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                session.indexed_subtype_classes(class_fqn, &files, false)
+            })) {
+                break sites;
+            }
+        }
+    }
+
+    /// Concrete implementations of `class_fqn::method` across its subtypes:
+    /// `(subtype fqcn, file, name range)` from mir's subtype edge index.
+    pub fn indexed_method_implementations(
+        &self,
+        class_fqn: &str,
+        method: &str,
+    ) -> Vec<(Arc<str>, Arc<str>, mir_analyzer::Range)> {
+        let files = self.workspace_file_paths();
+        let session = self.analysis_session(self.workspace_php_version());
+        let _interactive = self.interactive_read_guard();
+        loop {
+            if let Ok(sites) = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                session.indexed_method_implementations(class_fqn, method, &files)
+            })) {
+                break sites;
+            }
+        }
     }
 
     /// The complete set of files a `private` method's references can occur in,
@@ -1014,9 +1078,9 @@ impl DocumentStore {
         self.caches.parse_count()
     }
 
-    /// Times mir's legacy `RefIndex` was locked on the current session.
-    /// The session opts out of index maintenance
-    /// (`without_reference_index`), so edits and reads must keep this flat.
+    /// Times mir's `RefIndex` was locked on the current session. Reads are
+    /// per-key posting lookups and edits commit one file's postings, so this
+    /// grows by a small bounded amount per operation — never per candidate.
     /// Surfaced via `$/php-lsp/debugStats` for the stress-test guard.
     pub fn ref_index_lock_count(&self) -> u64 {
         self.analysis_session(self.workspace_php_version())
@@ -1586,12 +1650,12 @@ mod tests {
             .iter()
             .map(|u| Arc::from(u.as_str()))
             .collect();
-        let cold = store.session_references_to(&sym, &files, None);
+        let cold = store.indexed_references(&sym, &files, false, None);
         assert_eq!(cold.len(), 1, "caller.php references Svc::run once");
 
         let cancel = store.begin_warm_sweep();
         store.warm_analysis_sweep(&[], &cancel);
-        let warm = store.session_references_to(&sym, &files, None);
+        let warm = store.indexed_references(&sym, &files, false, None);
         assert_eq!(cold, warm, "sweep must not change reference results");
 
         // An edit after the sweep is still picked up (memos revalidate).
@@ -1601,7 +1665,7 @@ mod tests {
         );
         let cancel = store.begin_warm_sweep();
         store.warm_analysis_sweep(&[], &cancel);
-        let after_edit = store.session_references_to(&sym, &files, None);
+        let after_edit = store.indexed_references(&sym, &files, false, None);
         assert_eq!(after_edit.len(), 2, "re-sweep must see the new reference");
     }
 
