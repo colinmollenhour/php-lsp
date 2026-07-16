@@ -942,9 +942,9 @@ dependencies = [
 
 [[package]]
 name = "memchr"
-version = "2.8.2"
+version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
+checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "memoffset"
@@ -1022,8 +1022,8 @@ dependencies = [
 
 [[package]]
 name = "mir-analyzer"
-version = "0.56.0"
-source = "git+https://github.com/jorgsowa/mir#72e5a9c7d991fe48129d21339f10a7b42a6952f6"
+version = "0.57.0"
+source = "git+https://github.com/jorgsowa/mir#8b212891ef3c3276c3ca428f0c40c8eaf4f6ef7b"
 dependencies = [
  "bincode 1.3.3",
  "blake3",
@@ -1048,8 +1048,8 @@ dependencies = [
 
 [[package]]
 name = "mir-codebase"
-version = "0.56.0"
-source = "git+https://github.com/jorgsowa/mir#72e5a9c7d991fe48129d21339f10a7b42a6952f6"
+version = "0.57.0"
+source = "git+https://github.com/jorgsowa/mir#8b212891ef3c3276c3ca428f0c40c8eaf4f6ef7b"
 dependencies = [
  "dashmap 6.2.1",
  "indexmap",
@@ -1060,8 +1060,8 @@ dependencies = [
 
 [[package]]
 name = "mir-issues"
-version = "0.56.0"
-source = "git+https://github.com/jorgsowa/mir#72e5a9c7d991fe48129d21339f10a7b42a6952f6"
+version = "0.57.0"
+source = "git+https://github.com/jorgsowa/mir#8b212891ef3c3276c3ca428f0c40c8eaf4f6ef7b"
 dependencies = [
  "mir-types",
  "serde",
@@ -1069,8 +1069,8 @@ dependencies = [
 
 [[package]]
 name = "mir-types"
-version = "0.56.0"
-source = "git+https://github.com/jorgsowa/mir#72e5a9c7d991fe48129d21339f10a7b42a6952f6"
+version = "0.57.0"
+source = "git+https://github.com/jorgsowa/mir#8b212891ef3c3276c3ca428f0c40c8eaf4f6ef7b"
 dependencies = [
  "dashmap 6.2.1",
  "indexmap",
@@ -1166,9 +1166,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "php-ast"
-version = "0.18.1"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abe285cbc896a2078199f16cd30698d50e15f7693c466877fbea5b8b3b959752"
+checksum = "eac0c65d2ef871f0751d929a50a5d403d5e9beebfd370dcae8383d72ab97d212"
 dependencies = [
  "bumpalo",
  "serde",
@@ -1176,9 +1176,9 @@ dependencies = [
 
 [[package]]
 name = "php-lexer"
-version = "0.18.1"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4531e03c81c0e29096a9476d329d16877e75641acfab52a5e90b5d0e5aa27b4c"
+checksum = "c7a56c316c092338f0c56cdf8389a196231b8188e64e7b442b8b41c52aa2e9c9"
 dependencies = [
  "memchr",
  "php-ast",
@@ -1222,9 +1222,9 @@ dependencies = [
 
 [[package]]
 name = "php-rs-parser"
-version = "0.18.1"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0433a922a1faf30b47f5c8450480caeeef766baa76ce856d09f4dd53c2a8ea10"
+checksum = "fea28e08c487585fe0ca8ed467c2acec2855dedd996d9552fd9a32fff9195718"
 dependencies = [
  "bumpalo",
  "memchr",
@@ -1811,9 +1811,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.52.3"
+version = "1.52.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
+checksum = "317fafbbe3f02fc663dad00ea6186197de963cd4190e86a26d8d0fae095539af"
 dependencies = [
  "bytes",
  "libc",
