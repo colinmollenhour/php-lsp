@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use tower_lsp::lsp_types::{Position, Url};
 
 use php_lsp::ast::ParsedDoc;
-use php_lsp::call_hierarchy::{incoming_calls, outgoing_calls, prepare_call_hierarchy};
+use php_lsp::call_hierarchy::{outgoing_calls, prepare_call_hierarchy};
 use php_lsp::completion::{CompletionCtx, filtered_completions_at};
 use php_lsp::definition::goto_definition;
 use php_lsp::file_index::FileIndex;
@@ -788,9 +788,6 @@ fn bench_call_hierarchy(c: &mut Criterion) {
         b.iter(|| black_box(prepare_call_hierarchy("UserService", &other_docs)));
     });
     if let Some(ref item) = item_service {
-        group.bench_function("incoming/cross_file", |b| {
-            b.iter(|| black_box(incoming_calls(item, &other_docs)));
-        });
         group.bench_function("outgoing/cross_file", |b| {
             b.iter(|| black_box(outgoing_calls(item, &other_docs)));
         });
@@ -810,9 +807,6 @@ fn bench_call_hierarchy(c: &mut Criterion) {
             "expected `camel` (Str::camel) to resolve in the Laravel fixture"
         );
         if let Some(item) = method_item {
-            group.bench_function("incoming/laravel_framework", |b| {
-                b.iter(|| black_box(incoming_calls(&item, &docs)));
-            });
             group.bench_function("outgoing/laravel_framework", |b| {
                 b.iter(|| black_box(outgoing_calls(&item, &docs)));
             });

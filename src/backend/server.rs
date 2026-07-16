@@ -22,7 +22,7 @@ use crate::navigation::symbols::{
 use crate::text::word_at_position;
 
 use crate::navigation::call_hierarchy::{
-    incoming_calls, outgoing_calls_indexed, prepare_call_hierarchy_indexed,
+    incoming_calls_indexed, outgoing_calls_indexed, prepare_call_hierarchy_indexed,
 };
 use crate::navigation::declaration::{goto_declaration, goto_declaration_from_index};
 use crate::navigation::moniker::moniker_at;
@@ -1103,14 +1103,16 @@ impl LanguageServer for Backend {
         params: CallHierarchyIncomingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
         guard_async_result("incoming_calls", async move {
-            // Genuinely needs every doc (call sites are body-level, not indexed);
-            // run the workspace scan on the blocking pool.
+            // Call sites come from mir's posting lists; only the documents
+            // containing them are parsed to resolve the enclosing caller.
             let docs = Arc::clone(&self.docs);
             let item_uri = params.item.uri.to_string();
             let item = params.item;
             let calls = match tokio::task::spawn_blocking(move || {
-                let all_docs = docs.all_docs_for_scan();
-                incoming_calls(&item, &all_docs)
+                // Pause the background scan and snapshot a settled revision so
+                // only a genuine user edit cancels the lookup.
+                let (_interactive, cancel_rev) = docs.settled_write_rev_guard();
+                incoming_calls_indexed(&item, &docs, Some(cancel_rev))
             })
             .await
             {

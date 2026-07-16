@@ -13,7 +13,6 @@
 /// lists and subtype edges) plus the salsa workspace index — never from a
 /// per-request AST walk over the workspace.
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use serde_json::json;
@@ -71,35 +70,8 @@ struct LensEnv<'a> {
 }
 
 impl LensEnv<'_> {
-    /// Candidate file scope for a posting lookup. After the analysis warm
-    /// sweep has committed every file's postings the freshness pass is a
-    /// cheap per-file check, so the whole workspace is passed directly;
-    /// before that, the text pre-filter bounds the on-demand analysis a
-    /// cold query would otherwise pay across the full workspace.
-    fn candidate_files(&self, word: &str) -> Vec<Arc<str>> {
-        if self.store.warm_sweeps_completed() > 0 {
-            self.store.workspace_file_paths()
-        } else {
-            self.store
-                .candidate_urls_for(word)
-                .iter()
-                .map(|u| Arc::from(u.as_str()))
-                .collect()
-        }
-    }
-
     fn reference_locations(&self, symbol: &mir_analyzer::Name, word: &str) -> Vec<Location> {
-        // Visibility scoping: a private/protected method's references can
-        // only occur in its declaring file (+ subtype files) — mirror the
-        // references handler and skip the workspace-wide scope entirely.
-        let files = if let mir_analyzer::Name::Method { class, name } = symbol {
-            self.store
-                .method_reference_scope(class, name)
-                .map(|urls| urls.iter().map(|u| Arc::from(u.as_str())).collect())
-        } else {
-            None
-        };
-        let files = files.unwrap_or_else(|| self.candidate_files(word));
+        let files = self.store.reference_candidate_files(symbol, word);
         let mut locations: Vec<Location> = self
             .store
             .indexed_references(symbol, &files, false, self.cancel_rev)

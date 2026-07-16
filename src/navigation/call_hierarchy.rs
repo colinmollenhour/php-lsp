@@ -10,7 +10,6 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::document::ast::{ParsedDoc, SourceView, span_to_range};
-use crate::navigation::references::find_references;
 
 /// Find the declaration matching `name` and return a `CallHierarchyItem`.
 pub fn prepare_call_hierarchy(
@@ -90,20 +89,55 @@ pub fn outgoing_calls_indexed(
     result
 }
 
-/// Find all callers of `item.name` and return them grouped by enclosing function.
-pub fn incoming_calls(
+/// Find all callers of `item` and return them grouped by enclosing function.
+///
+/// Call sites come from mir's reference posting lists (`meth:`/`methname:`/
+/// `fn:` keys via `indexed_references`), resolved against the item's own
+/// declaring document; only the documents that actually contain call sites
+/// are parsed to find the enclosing caller.
+pub fn incoming_calls_indexed(
     item: &CallHierarchyItem,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
+    store: &crate::document::document_store::DocumentStore,
+    cancel_rev: Option<u64>,
 ) -> Vec<CallHierarchyIncomingCall> {
-    let call_sites = find_references(&item.name, all_docs, false, None);
-    // Build O(1) URI → doc map to avoid scanning all_docs for each call site.
-    let doc_map: HashMap<&Url, &Arc<ParsedDoc>> = all_docs.iter().map(|(u, d)| (u, d)).collect();
+    let Some(item_doc) = store.get_doc_salsa(&item.uri) else {
+        return Vec::new();
+    };
+    let imports = crate::navigation::references::collect_file_imports(&item_doc);
+    let resolve = |name: &str| -> String {
+        crate::navigation::moniker::resolve_fqn(&item_doc, name, &imports)
+            .trim_start_matches('\\')
+            .to_string()
+    };
+    // `detail` carries the declaring class-like's short name for methods; an
+    // unresolvable owner becomes the empty class, which mir answers from its
+    // name-keyed fallback postings.
+    let symbol = if item.kind == SymbolKind::METHOD {
+        let owner = item.detail.as_deref().map(&resolve).unwrap_or_default();
+        mir_analyzer::Name::method(owner.as_str(), &item.name)
+    } else {
+        mir_analyzer::Name::function(resolve(&item.name))
+    };
+
+    let files = store.reference_candidate_files(&symbol, &item.name);
+    let mut call_sites: Vec<tower_lsp::lsp_types::Location> = store
+        .indexed_references(&symbol, &files, false, cancel_rev)
+        .into_iter()
+        .filter_map(crate::navigation::references::session_tuple_to_location)
+        .collect();
+    crate::navigation::references::dedup_ref_locations(&mut call_sites);
+
     let mut result: Vec<CallHierarchyIncomingCall> = Vec::new();
     // Track (caller_name, caller_uri) → index in `result` for O(1) dedup.
     let mut index: HashMap<(String, Url), usize> = HashMap::new();
+    // Parse only the documents call sites landed in, each at most once.
+    let mut doc_cache: HashMap<Url, Option<Arc<ParsedDoc>>> = HashMap::new();
 
     for loc in call_sites {
-        let caller = doc_map.get(&loc.uri).and_then(|doc| {
+        let doc = doc_cache
+            .entry(loc.uri.clone())
+            .or_insert_with(|| store.get_doc_salsa(&loc.uri));
+        let caller = doc.as_ref().and_then(|doc| {
             enclosing_function(doc.view(), &doc.program().stmts, loc.range.start, &loc.uri)
         });
 

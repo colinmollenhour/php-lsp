@@ -928,6 +928,33 @@ impl DocumentStore {
         session.warm_start_files(&files);
     }
 
+    /// Candidate file scope for a posting lookup on `symbol` (whose cursor /
+    /// declaration word is `word`). Private/protected methods narrow to their
+    /// visibility scope. After the analysis warm sweep has committed every
+    /// file's postings the freshness pass is a cheap per-file check, so the
+    /// whole workspace is passed directly; before that, the text pre-filter
+    /// bounds the on-demand analysis a cold query would otherwise pay across
+    /// the full workspace.
+    pub(crate) fn reference_candidate_files(
+        &self,
+        symbol: &mir_analyzer::Name,
+        word: &str,
+    ) -> Vec<Arc<str>> {
+        if let mir_analyzer::Name::Method { class, name } = symbol
+            && let Some(urls) = self.method_reference_scope(class, name)
+        {
+            return urls.iter().map(|u| Arc::from(u.as_str())).collect();
+        }
+        if self.warm_sweeps_completed() > 0 {
+            self.workspace_file_paths()
+        } else {
+            self.candidate_urls_for(word)
+                .iter()
+                .map(|u| Arc::from(u.as_str()))
+                .collect()
+        }
+    }
+
     /// Every active workspace file as a mir path (`Arc<str>` of the URI).
     /// The candidate scope handed to mir's subtype queries.
     pub(crate) fn workspace_file_paths(&self) -> Vec<Arc<str>> {
