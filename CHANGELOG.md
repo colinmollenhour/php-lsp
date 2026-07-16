@@ -2,6 +2,27 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.18.0] — 2026-07-16
+
+### Added
+
+- **Reference postings now persist across server restarts**: the background warm sweep flushes analyzed files' reference postings to the on-disk cache, so a second server launch replays the reference index from disk and answers find-references index-warm with no analysis sweep — previously only subtype edges survived a restart this way.
+
+### Changed
+
+- **Call-hierarchy incoming calls and code-lens counts now answer from mir's posting-list indexes** instead of AST word-walkers: `incoming_calls` resolves the item's FQN and reads `meth:`/`methname:`/`fn:` postings directly, and code-lens reference/implementation/trait-usage counts read the same posting lists and subtype-edge index, with hierarchy clauses (`extends`/`implements`/`use Trait`) now counting as references too.
+- **Rename and file-rename now answer from the same indexes**: call/access sites, `use`-import lines, and declaration tokens are resolved from mir's postings instead of the AST walker.
+- **The background warm sweep no longer caps at 16,384 files** — postings survive analysis-memo eviction, so the cap only protected sweep duration, not query latency; the whole workspace is swept instead, with memory still bounded by mir's analysis LRU.
+
+### Fixed
+
+- **A warm sweep could report itself complete while silently skipping a chunk of files** whose analysis was cancelled by a transient concurrent write, occasionally leaving the reference index momentarily incomplete under contention. The sweep now retries a cancelled chunk until it settles before counting itself done.
+
+### Dependencies
+
+- **mir updated to 0.57.0** (from 0.55.0).
+- **php-rs-parser and php-ast updated to 0.18.2** (from 0.18.1).
+
 ## [0.17.0] — 2026-07-15
 
 ### Changed
