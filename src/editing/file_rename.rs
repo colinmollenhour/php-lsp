@@ -1,66 +1,9 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
-use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
-
-use crate::document::ast::ParsedDoc;
 use crate::text::byte_to_utf16;
 
-/// Build a `WorkspaceEdit` that updates every `use` import referencing `old_fqn`
-/// to `new_fqn` across all indexed documents.
-pub fn use_edits_for_rename(
-    old_fqn: &str,
-    new_fqn: &str,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
-) -> WorkspaceEdit {
-    if old_fqn == new_fqn {
-        return WorkspaceEdit::default();
-    }
-
-    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-
-    for (uri, doc) in all_docs {
-        let edits = use_edits_in_source(doc.source(), old_fqn, new_fqn);
-        if !edits.is_empty() {
-            changes.insert(uri.clone(), edits);
-        }
-    }
-
-    WorkspaceEdit {
-        changes: if changes.is_empty() {
-            None
-        } else {
-            Some(changes)
-        },
-        ..Default::default()
-    }
-}
-
-/// Build a `WorkspaceEdit` that removes every `use` import referencing `fqn`
-/// across all indexed documents.  Called by `workspace/willDeleteFiles` so that
-/// deleting a PHP file automatically cleans up dangling imports.
-pub fn use_edits_for_delete(fqn: &str, all_docs: &[(Url, Arc<ParsedDoc>)]) -> WorkspaceEdit {
-    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-
-    for (uri, doc) in all_docs {
-        let edits = delete_use_in_source(doc.source(), fqn);
-        if !edits.is_empty() {
-            changes.insert(uri.clone(), edits);
-        }
-    }
-
-    WorkspaceEdit {
-        changes: if changes.is_empty() {
-            None
-        } else {
-            Some(changes)
-        },
-        ..Default::default()
-    }
-}
-
 /// Return `TextEdit`s that delete the entire `use FQN;` line from `source`.
-fn delete_use_in_source(source: &str, fqn: &str) -> Vec<TextEdit> {
+pub fn delete_use_in_source(source: &str, fqn: &str) -> Vec<TextEdit> {
     let mut edits = Vec::new();
     let clean = fqn.trim_start_matches('\\');
 
@@ -121,7 +64,7 @@ fn delete_use_in_source(source: &str, fqn: &str) -> Vec<TextEdit> {
 /// - `use OldFqn;`
 /// - `use \OldFqn;`
 /// - `use OldFqn as Alias;`
-fn use_edits_in_source(source: &str, old_fqn: &str, new_fqn: &str) -> Vec<TextEdit> {
+pub fn use_edits_in_source(source: &str, old_fqn: &str, new_fqn: &str) -> Vec<TextEdit> {
     let mut edits = Vec::new();
     let old = old_fqn.trim_start_matches('\\');
     let new_clean = new_fqn.trim_start_matches('\\');

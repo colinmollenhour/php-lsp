@@ -250,60 +250,6 @@ fn find_use_insert_line_empty_file() {
     assert_eq!(find_use_insert_line(""), 0);
 }
 
-// is_after_arrow tests
-#[test]
-fn is_after_arrow_with_method_call() {
-    let src = "<?php\n$obj->method();\n";
-    // Position after `->m` i.e. on `method` — character 6 (after `$obj->`)
-    let pos = Position {
-        line: 1,
-        character: 6,
-    };
-    assert!(is_after_arrow(src, pos));
-}
-
-#[test]
-fn is_after_arrow_without_arrow() {
-    let src = "<?php\n$obj->method();\n";
-    // Position on `$obj` — not after arrow
-    let pos = Position {
-        line: 1,
-        character: 1,
-    };
-    assert!(!is_after_arrow(src, pos));
-}
-
-#[test]
-fn is_after_arrow_on_standalone_identifier() {
-    let src = "<?php\nfunction greet() {}\n";
-    let pos = Position {
-        line: 1,
-        character: 10,
-    };
-    assert!(!is_after_arrow(src, pos));
-}
-
-#[test]
-fn is_after_arrow_out_of_bounds_line() {
-    let src = "<?php\n$x = 1;\n";
-    let pos = Position {
-        line: 99,
-        character: 0,
-    };
-    assert!(!is_after_arrow(src, pos));
-}
-
-#[test]
-fn is_after_arrow_at_start_of_property() {
-    let src = "<?php\n$this->name;\n";
-    // `name` starts at character 7 (after `$this->`)
-    let pos = Position {
-        line: 1,
-        character: 7,
-    };
-    assert!(is_after_arrow(src, pos));
-}
-
 // php_file_op tests
 #[test]
 fn php_file_op_matches_php_files() {

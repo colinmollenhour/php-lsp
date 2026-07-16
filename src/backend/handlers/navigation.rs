@@ -444,6 +444,234 @@ impl Backend {
         .await
     }
 
+    /// Rename via mir's inverted indexes: resolve the symbol under the cursor
+    /// exactly like the references handler, collect its posting-list sites
+    /// *plus* the declaration name token (`include_declaration`) and — for
+    /// importable symbols — the `use:` import lines, then narrow each span to
+    /// the renamed token (qualified names and import items cover the whole
+    /// written path).
+    ///
+    /// Variables never reach this: their rename is scope-bound to one
+    /// document and stays on the AST scope walker.
+    pub(crate) async fn indexed_rename(
+        &self,
+        uri: &Url,
+        position: Position,
+        new_name: &str,
+    ) -> Option<WorkspaceEdit> {
+        let source = self.get_open_text(uri).unwrap_or_default();
+        let word = word_at_position(&source, position)?;
+        let doc_opt = self.get_doc(uri);
+
+        // Usage-site cursor: mir's per-file analysis already resolved the
+        // symbol (receiver types, aliases, namespaces).
+        let usage_symbol: Option<mir_analyzer::Name> = {
+            let analysis = self.cached_analysis_async(uri).await;
+            analysis.as_deref().and_then(|a| {
+                let doc = doc_opt.as_ref()?;
+                let off = crate::text::word_range_at(&source, position)
+                    .map(|r| doc.view().byte_of_position(r.start))?;
+                a.symbol_at(off).and_then(|s| s.kind.to_name())
+            })
+        };
+
+        // Declaration-site cursor (or no analysis): classify the cursor
+        // context and resolve the owner/target FQN.
+        let (word, kind, constant_owner) =
+            resolve_reference_symbol(doc_opt.as_ref(), &source, position, word);
+        let symbol = match usage_symbol {
+            Some(sym) => sym,
+            None => {
+                let target_fqn = self.resolve_reference_target_fqn(
+                    uri,
+                    doc_opt.as_ref(),
+                    &word,
+                    kind,
+                    position,
+                    constant_owner.clone(),
+                );
+                build_mir_symbol(&word, kind, target_fqn.as_deref(), constant_owner.is_some())?
+            }
+        };
+
+        // Candidate scope: same shape as the references handler — visibility
+        // narrowing for methods, else the text-filtered workspace scope
+        // unioned over the cursor word and the symbol's short name.
+        let method_scope = if let mir_analyzer::Name::Method { class, name } = &symbol {
+            self.docs.method_reference_scope(class, name)
+        } else {
+            None
+        };
+        let candidate_urls = method_scope.unwrap_or_else(|| {
+            let mut urls = self.docs.candidate_urls_for(&word);
+            let short = match &symbol {
+                mir_analyzer::Name::Class(f)
+                | mir_analyzer::Name::Function(f)
+                | mir_analyzer::Name::GlobalConstant(f) => {
+                    fqn_short_name(f.trim_start_matches('\\')).to_string()
+                }
+                mir_analyzer::Name::Method { name, .. }
+                | mir_analyzer::Name::Property { name, .. }
+                | mir_analyzer::Name::ClassConstant { name, .. } => name.to_string(),
+            };
+            if short != word.as_str() {
+                let mut extra = self.docs.candidate_urls_for(&short);
+                urls.append(&mut extra);
+                urls.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+                urls.dedup();
+            }
+            urls
+        });
+        let files: Vec<Arc<str>> = candidate_urls
+            .iter()
+            .map(|u| Arc::from(u.as_str()))
+            .collect();
+
+        // `use` imports are recorded under separate `use:` keys so plain
+        // find-references stays blind to them; a rename must edit them too.
+        let wants_use_imports = matches!(
+            symbol,
+            mir_analyzer::Name::Class(_)
+                | mir_analyzer::Name::Function(_)
+                | mir_analyzer::Name::GlobalConstant(_)
+        );
+        // Class/function declaration tokens come from the salsa workspace
+        // index, which matches names case-sensitively — mir's declaration
+        // lookup follows PHP's case-insensitive dispatch and would return a
+        // declaration differing only in case. Member declarations stay on
+        // mir's hierarchy-aware lookup.
+        let mir_include_decl = !matches!(
+            symbol,
+            mir_analyzer::Name::Class(_) | mir_analyzer::Name::Function(_)
+        );
+        let docs = Arc::clone(&self.docs);
+        let sym = symbol.clone();
+        let mut locations = tokio::task::spawn_blocking(move || {
+            let (_interactive, cancel_rev) = docs.settled_write_rev_guard();
+            let mut locs: Vec<Location> = docs
+                .indexed_references(&sym, &files, mir_include_decl, Some(cancel_rev))
+                .into_iter()
+                .filter_map(session_tuple_to_location)
+                .collect();
+            if wants_use_imports {
+                // The freshness pass above committed the candidates, so this
+                // read-only lookup observes their current `use:` postings.
+                locs.extend(
+                    docs.indexed_use_imports(&sym, &files)
+                        .into_iter()
+                        .filter_map(session_tuple_to_location),
+                );
+            }
+            dedup_ref_locations(&mut locs);
+            locs
+        })
+        .await
+        .unwrap_or_default();
+
+        if !mir_include_decl {
+            locations.extend(self.workspace_decl_locations(&symbol, &word));
+            dedup_ref_locations(&mut locations);
+        }
+
+        let mut changes: std::collections::HashMap<Url, Vec<TextEdit>> =
+            std::collections::HashMap::new();
+        let mut doc_cache: std::collections::HashMap<
+            Url,
+            Option<Arc<crate::document::ast::ParsedDoc>>,
+        > = std::collections::HashMap::new();
+        for loc in locations {
+            let ndoc = doc_cache
+                .entry(loc.uri.clone())
+                .or_insert_with(|| self.docs.get_doc_salsa(&loc.uri));
+            let Some(doc) = ndoc else { continue };
+            let Some(range) =
+                crate::editing::rename::narrow_range_to_word(doc.source(), loc.range, &word)
+            else {
+                continue;
+            };
+            changes.entry(loc.uri).or_default().push(TextEdit {
+                range,
+                new_text: new_name.to_string(),
+            });
+        }
+        for edits in changes.values_mut() {
+            edits.sort_by_key(|e| (e.range.start.line, e.range.start.character));
+            edits.dedup_by(|a, b| a.range == b.range);
+        }
+        Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        })
+    }
+
+    /// Declaration name tokens for a class or function symbol from the salsa
+    /// workspace index — case-sensitive by `word` (the declared name as the
+    /// user wrote it). Prefers declarations whose FQN matches the symbol;
+    /// falls back to same-named declarations when none does.
+    fn workspace_decl_locations(&self, symbol: &mir_analyzer::Name, word: &str) -> Vec<Location> {
+        let ws = self.docs.get_workspace_index_salsa();
+        let name_range = |line: u32, ch: u32| tower_lsp::lsp_types::Range {
+            start: Position {
+                line,
+                character: ch,
+            },
+            end: Position {
+                line,
+                character: ch + utf16_code_units(word),
+            },
+        };
+        let mut exact = Vec::new();
+        let mut by_name = Vec::new();
+        match symbol {
+            mir_analyzer::Name::Class(fqn) => {
+                let target = fqn.trim_start_matches('\\');
+                for r in ws
+                    .classes_by_name
+                    .get(word)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[])
+                {
+                    let Some((uri, cls)) = ws.at(*r) else {
+                        continue;
+                    };
+                    if cls.name.as_ref() != word {
+                        continue;
+                    }
+                    let loc = Location {
+                        uri: uri.clone(),
+                        range: name_range(cls.start_line, cls.name_char),
+                    };
+                    if cls.fqn.trim_start_matches('\\') == target {
+                        exact.push(loc);
+                    } else {
+                        by_name.push(loc);
+                    }
+                }
+            }
+            mir_analyzer::Name::Function(fqn) => {
+                let target = fqn.trim_start_matches('\\');
+                for (uri, idx) in &ws.files {
+                    for f in &idx.functions {
+                        if f.name.as_ref() != word {
+                            continue;
+                        }
+                        let loc = Location {
+                            uri: uri.clone(),
+                            range: name_range(f.start_line, f.name_char),
+                        };
+                        if f.fqn.trim_start_matches('\\') == target {
+                            exact.push(loc);
+                        } else {
+                            by_name.push(loc);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        if exact.is_empty() { by_name } else { exact }
+    }
+
     pub(crate) async fn handle_linked_editing_range(
         &self,
         params: LinkedEditingRangeParams,

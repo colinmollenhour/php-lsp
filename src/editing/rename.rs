@@ -1,77 +1,75 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
 
 use crate::document::ast::ParsedDoc;
-use crate::navigation::references::{SymbolKind, find_references_with_use};
-use crate::navigation::walk::{collect_var_refs_in_scope, property_refs_in_stmts};
+use crate::navigation::walk::collect_var_refs_in_scope;
 use crate::text::utf16_code_units;
 
-/// Compute a WorkspaceEdit that renames every occurrence of `word` to `new_name`
-/// across all open documents (including the declaration site).
+/// Narrow `range` to the last whole-word, case-sensitive occurrence of
+/// `word` inside it — or reject the location entirely.
 ///
-/// Equivalent to `rename_with_kind(word, new_name, all_docs, None, target_fqn)` —
-/// kept as a stable, kind-agnostic entry point for callers (e.g. benchmarks) that
-/// don't classify the symbol. Prefer `rename_with_kind` when the caller knows the
-/// symbol is a class: it merges in `use`-import edits that this path can miss.
-pub fn rename(
-    word: &str,
-    new_name: &str,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
-    target_fqn: Option<&str>,
-) -> WorkspaceEdit {
-    rename_with_kind(word, new_name, all_docs, None, target_fqn)
-}
-
-/// Like `rename`, but takes the caller's classified `SymbolKind` (from
-/// `symbol_kind_at`/`resolve_reference_symbol`) so a class rename can merge two
-/// span sources that each cover only half the picture:
-/// - the class-kind walker (`Some(SymbolKind::Class)`, via `class_refs_in_stmts`)
-///   is type-hint aware — it catches type hints, `extends`/`implements`,
-///   `instanceof`, `new`, and static-call class tokens — but never looks at `use`
-///   statements;
-/// - the general word walker used for every other rename catches `use` imports
-///   (and declarations/`new` sites, which are `ExprKind::Identifier` nodes) but has
-///   no `visit_type_hint` override, so it's blind to type hints.
-///
-/// Without merging both, renaming a class silently leaves type-hint occurrences
-/// (`function greet(User $user)`) referring to a class that no longer exists.
-pub fn rename_with_kind(
-    word: &str,
-    new_name: &str,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
-    kind: Option<SymbolKind>,
-    target_fqn: Option<&str>,
-) -> WorkspaceEdit {
-    use crate::navigation::references::{
-        dedup_ref_locations, find_references_with_target, use_import_locations,
-    };
-
-    let locations = match (kind, target_fqn) {
-        (Some(SymbolKind::Class), Some(fqn)) => {
-            let mut locs =
-                find_references_with_target(word, all_docs, true, Some(SymbolKind::Class), fqn);
-            locs.extend(use_import_locations(word, all_docs));
-            dedup_ref_locations(&mut locs);
-            locs
+/// mir's posting spans cover the full written name — a qualified usage
+/// (`\App\Widget`), a `use` import item (`App\Widget as W`), or a property
+/// declaration (`$count`) — while a rename must replace only the renamed
+/// token: the final path segment, or the alias when that is what's being
+/// renamed. `None` means the span doesn't contain the word at all (an
+/// aliased usage site, or a name differing only in case — mir resolves
+/// per PHP's case-insensitive semantics, but rename edits follow the
+/// case-sensitive editor convention) and must not be edited.
+pub fn narrow_range_to_word(source: &str, range: Range, word: &str) -> Option<Range> {
+    if word.is_empty() || range.start.line != range.end.line {
+        return None;
+    }
+    let line = source.lines().nth(range.start.line as usize)?;
+    // UTF-16 column → byte offset within the line.
+    let byte_at_col = |col: u32| -> Option<usize> {
+        let mut u16s: u32 = 0;
+        if col == 0 {
+            return Some(0);
         }
-        (_, Some(fqn)) => find_references_with_target(word, all_docs, true, None, fqn),
-        (_, None) => find_references_with_use(word, all_docs, true),
+        for (i, ch) in line.char_indices() {
+            if u16s == col {
+                return Some(i);
+            }
+            u16s += ch.len_utf16() as u32;
+        }
+        (u16s >= col).then_some(line.len())
     };
-
-    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-    for loc in locations {
-        changes.entry(loc.uri).or_default().push(TextEdit {
-            range: loc.range,
-            new_text: new_name.to_string(),
-        });
+    let start_b = byte_at_col(range.start.character)?;
+    let end_b = byte_at_col(range.end.character)?;
+    let slice = line.get(start_b..end_b)?;
+    if slice == word {
+        return Some(range);
     }
 
-    WorkspaceEdit {
-        changes: Some(changes),
-        ..Default::default()
+    let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+    let mut found: Option<usize> = None;
+    let mut search = 0usize;
+    while let Some(pos) = slice[search..].find(word) {
+        let abs = search + pos;
+        let before_ok = abs == 0 || !slice[..abs].chars().next_back().is_some_and(is_word_char);
+        let after = abs + word.len();
+        let after_ok =
+            after >= slice.len() || !slice[after..].chars().next().is_some_and(is_word_char);
+        if before_ok && after_ok {
+            found = Some(abs);
+        }
+        search = after.max(abs + 1);
     }
+    let off = found?;
+
+    let new_start = range.start.character + utf16_code_units(&slice[..off]);
+    Some(Range {
+        start: Position {
+            line: range.start.line,
+            character: new_start,
+        },
+        end: Position {
+            line: range.start.line,
+            character: new_start + utf16_code_units(word),
+        },
+    })
 }
 
 /// Returns the range of the word at `position` if it's a renameable symbol.
@@ -287,53 +285,6 @@ pub fn rename_variable(
         changes.insert(uri.clone(), edits);
     }
 
-    WorkspaceEdit {
-        changes: if changes.is_empty() {
-            None
-        } else {
-            Some(changes)
-        },
-        ..Default::default()
-    }
-}
-
-/// Rename a property (`->prop` / `?->prop` / class declaration) across all indexed
-/// documents.  Unlike variable rename, properties are not scope-bound and may appear
-/// in many files.
-pub fn rename_property(
-    prop_name: &str,
-    new_name: &str,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
-) -> WorkspaceEdit {
-    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-    for (uri, doc) in all_docs {
-        let sv = doc.view();
-        let mut spans = Vec::new();
-        property_refs_in_stmts(
-            sv.source(),
-            &doc.program().stmts,
-            prop_name,
-            None,
-            &mut spans,
-        );
-        if !spans.is_empty() {
-            let mut seen = std::collections::HashSet::new();
-            let mut edits: Vec<TextEdit> = spans
-                .into_iter()
-                .filter_map(|span| {
-                    let start = sv.position_of(span.start);
-                    let end = sv.position_of(span.end);
-                    seen.insert((start.line, start.character))
-                        .then_some(TextEdit {
-                            range: Range { start, end },
-                            new_text: new_name.to_string(),
-                        })
-                })
-                .collect();
-            edits.sort_by_key(|e| (e.range.start.line, e.range.start.character));
-            changes.insert(uri.clone(), edits);
-        }
-    }
     WorkspaceEdit {
         changes: if changes.is_empty() {
             None

@@ -47,13 +47,12 @@ use crate::editing::document_link::document_links;
 use crate::editing::folding::folding_ranges;
 use crate::editing::formatting::{format_document, format_range};
 use crate::editing::on_type_format::on_type_format;
-use crate::editing::rename::{prepare_rename, rename_property, rename_variable, rename_with_kind};
+use crate::editing::rename::{prepare_rename, rename_variable};
 use crate::editing::selection_range::selection_ranges;
 use crate::editing::signature_help::signature_help;
 
 use super::helpers::{
-    cursor_is_on_method_decl, cursor_is_on_property_decl, is_after_arrow,
-    promoted_property_at_cursor, run_phpunit, symbol_kind_at,
+    cursor_is_on_method_decl, cursor_is_on_property_decl, promoted_property_at_cursor, run_phpunit,
 };
 use super::{Backend, publish_with_dependents};
 
@@ -694,50 +693,26 @@ impl LanguageServer for Backend {
                 };
                 // Cursor on a property declaration (`public int $x`) or a promoted
                 // constructor parameter (`private string $x`) — both act as property
-                // declarations and must use the cross-file property rename path.
-                let prop_name = cursor_is_on_property_decl(&source, &doc.program().stmts, position)
-                    .or_else(|| {
-                        promoted_property_at_cursor(&source, &doc.program().stmts, position)
-                    });
-                if let Some(prop_name) = prop_name {
-                    let all_docs = self.docs.all_docs_for_scan();
-                    return Ok(Some(rename_property(
-                        &prop_name,
+                // declarations and take the cross-file indexed path below. Plain
+                // variables stay on the single-document scope walker.
+                let on_property_decl =
+                    cursor_is_on_property_decl(&source, &doc.program().stmts, position).is_some()
+                        || promoted_property_at_cursor(&source, &doc.program().stmts, position)
+                            .is_some();
+                if !on_property_decl {
+                    return Ok(Some(rename_variable(
+                        &word,
                         &params.new_name,
-                        &all_docs,
+                        uri,
+                        &doc,
+                        position,
                     )));
                 }
-                Ok(Some(rename_variable(
-                    &word,
-                    &params.new_name,
-                    uri,
-                    &doc,
-                    position,
-                )))
-            } else if is_after_arrow(&source, position) {
-                let all_docs = self.docs.all_docs_for_scan();
-                Ok(Some(rename_property(&word, &params.new_name, &all_docs)))
-            } else {
-                let all_docs = self.docs.all_docs_for_scan();
-                let doc_opt = self.get_doc(uri);
-                let target_fqn: Option<String> = doc_opt.as_ref().map(|doc| {
-                    let imports = self.file_imports(uri);
-                    crate::navigation::moniker::resolve_fqn(doc, &word, &imports)
-                });
-                // Class renames need `symbol_kind_at`'s cursor context (not just
-                // FQN resolution, which also succeeds for functions/constants) so
-                // `rename_with_kind` knows to merge `use`-import edits with the
-                // type-hint-aware class walker. Every other kind keeps the
-                // existing general-walker behavior unchanged.
-                let kind = symbol_kind_at(&source, position, &word);
-                Ok(Some(rename_with_kind(
-                    &word,
-                    &params.new_name,
-                    &all_docs,
-                    kind,
-                    target_fqn.as_deref(),
-                )))
             }
+            // Everything else — classes, functions, methods, properties,
+            // constants — renames from mir's posting lists (declaration
+            // token and `use` import lines included).
+            Ok(self.indexed_rename(uri, position, &params.new_name).await)
         })
         .await
     }

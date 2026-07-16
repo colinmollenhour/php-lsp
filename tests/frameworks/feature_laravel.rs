@@ -2731,12 +2731,18 @@ async fn laravel_rename_class_declaration() {
         .await;
     assert!(resp["error"].is_null(), "rename returned error: {resp:#}");
     let out = canonicalize_workspace_edit(&resp["result"], &s.uri(""));
+    // Application.php's `\Illuminate\Auth\AuthManager::class` alias entry is a
+    // fully-qualified reference the old text walker missed; the posting-based
+    // rename narrows the edit to the final `AuthManager` segment.
     expect![[r#"
         // Illuminate/Auth/AuthManager.php
         17:6-17:17 → "AuthManagerV2"
 
         // Illuminate/Auth/AuthServiceProvider.php
-        36:55-36:66 → "AuthManagerV2""#]]
+        36:55-36:66 → "AuthManagerV2"
+
+        // Illuminate/Foundation/Application.php
+        1639:40-1639:51 → "AuthManagerV2""#]]
     .assert_eq(&out);
 }
 

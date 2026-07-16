@@ -7,12 +7,11 @@ use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
 use tower_lsp::lsp_types::*;
 
 use crate::analysis::semantic_tokens::legend;
-use crate::editing::file_rename::{use_edits_for_delete, use_edits_for_rename};
+use crate::editing::file_rename::{delete_use_in_source, use_edits_in_source};
 use crate::index::workspace_scan::{scan_workspace, send_refresh_requests};
 use crate::lang::autoload::Psr4Map;
 use crate::lang::config::LspConfig;
 use crate::lang::phpstorm_meta::PhpStormMeta;
-use crate::navigation::references::{SymbolKind, find_references_with_target};
 use crate::text::fqn_short_name;
 
 use super::super::helpers::php_file_op;
@@ -507,7 +506,6 @@ impl Backend {
         params: RenameFilesParams,
     ) -> Result<Option<WorkspaceEdit>> {
         let psr4 = self.psr4.load();
-        let all_docs = self.docs.all_docs_for_scan();
         let mut merged_changes: std::collections::HashMap<Url, Vec<TextEdit>> =
             std::collections::HashMap::new();
 
@@ -530,33 +528,66 @@ impl Backend {
                 continue;
             };
 
-            let edit = use_edits_for_rename(&old_fqn, &new_fqn, &all_docs);
-            if let Some(changes) = edit.changes {
-                for (uri, edits) in changes {
-                    merged_changes.entry(uri).or_default().extend(edits);
+            // `use` lines rewrite the full import path (the namespace may
+            // change, not just the class name). Text-level per candidate —
+            // a `use` line necessarily contains the FQN's final segment, so
+            // the text prefilter can't miss one; no parse of the workspace.
+            let old_short = fqn_short_name(&old_fqn).to_string();
+            let new_short = fqn_short_name(&new_fqn).to_string();
+            if old_fqn != new_fqn {
+                for uri in self.docs.candidate_urls_for(&old_short) {
+                    let Some(doc) = self.docs.get_doc_salsa(&uri) else {
+                        continue;
+                    };
+                    let edits = use_edits_in_source(doc.source(), &old_fqn, &new_fqn);
+                    if !edits.is_empty() {
+                        merged_changes.entry(uri).or_default().extend(edits);
+                    }
                 }
             }
 
-            // Also rename the declaration itself (never touched by `use_edits_for_rename`) plus type-hint-like refs; Class-kind lookup never emits `use` spans, so this can't overlap the edits above.
-            let old_short = fqn_short_name(&old_fqn);
-            let new_short = fqn_short_name(&new_fqn);
+            // Also rename the declaration itself plus reference sites (type
+            // hints, `new`, static calls, hierarchy clauses) from mir's
+            // posting lists; `use` lines live under separate `use:` keys, so
+            // this can't overlap the edits above.
             if old_short != new_short {
-                let locations = find_references_with_target(
-                    old_short,
-                    &all_docs,
-                    true,
-                    Some(SymbolKind::Class),
-                    &old_fqn,
-                );
-                for loc in locations {
+                let symbol =
+                    mir_analyzer::Name::class(old_fqn.trim_start_matches('\\').to_string());
+                let files: Vec<std::sync::Arc<str>> =
+                    self.docs.reference_candidate_files(&symbol, &old_short);
+                let docs = std::sync::Arc::clone(&self.docs);
+                let locations = tokio::task::spawn_blocking(move || {
+                    let (_interactive, cancel_rev) = docs.settled_write_rev_guard();
+                    docs.indexed_references(&symbol, &files, true, Some(cancel_rev))
+                })
+                .await
+                .unwrap_or_default();
+                for loc in locations
+                    .into_iter()
+                    .filter_map(crate::navigation::references::session_tuple_to_location)
+                {
+                    let Some(doc) = self.docs.get_doc_salsa(&loc.uri) else {
+                        continue;
+                    };
+                    let Some(range) = crate::editing::rename::narrow_range_to_word(
+                        doc.source(),
+                        loc.range,
+                        &old_short,
+                    ) else {
+                        continue;
+                    };
                     merged_changes.entry(loc.uri).or_default().push(TextEdit {
-                        range: loc.range,
-                        new_text: new_short.to_string(),
+                        range,
+                        new_text: new_short.clone(),
                     });
                 }
             }
         }
 
+        for edits in merged_changes.values_mut() {
+            edits.sort_by_key(|e| (e.range.start.line, e.range.start.character));
+            edits.dedup_by(|a, b| a.range == b.range);
+        }
         Ok(if merged_changes.is_empty() {
             None
         } else {
@@ -660,7 +691,6 @@ impl Backend {
         params: DeleteFilesParams,
     ) -> Result<Option<WorkspaceEdit>> {
         let psr4 = self.psr4.load();
-        let all_docs = self.docs.all_docs_for_scan();
         let mut merged_changes: std::collections::HashMap<Url, Vec<TextEdit>> =
             std::collections::HashMap::new();
 
@@ -673,9 +703,14 @@ impl Backend {
                 continue;
             };
 
-            let edit = use_edits_for_delete(&fqn, &all_docs);
-            if let Some(changes) = edit.changes {
-                for (uri, edits) in changes {
+            // A `use` line necessarily contains the FQN's final segment, so
+            // the text prefilter bounds the scan without a workspace parse.
+            for uri in self.docs.candidate_urls_for(fqn_short_name(&fqn)) {
+                let Some(doc) = self.docs.get_doc_salsa(&uri) else {
+                    continue;
+                };
+                let edits = delete_use_in_source(doc.source(), &fqn);
+                if !edits.is_empty() {
                     merged_changes.entry(uri).or_default().extend(edits);
                 }
             }

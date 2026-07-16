@@ -12,8 +12,6 @@ use php_lsp::completion::{CompletionCtx, filtered_completions_at};
 use php_lsp::definition::goto_definition;
 use php_lsp::file_index::FileIndex;
 use php_lsp::hover::hover_info_with_maps;
-use php_lsp::references::{SymbolKind, find_references, find_references_with_target};
-use php_lsp::rename::rename;
 use php_lsp::symbol_map::SymbolMap;
 use php_lsp::symbols::{document_symbols, workspace_symbols_from_index};
 
@@ -276,64 +274,6 @@ fn bench_completion(c: &mut Criterion) {
     });
 }
 
-fn bench_references(c: &mut Criterion) {
-    let other_docs = cross_file_docs();
-
-    // Build a 10-entry context by cycling the 5 cross-file docs.
-    let ten_docs: OtherDocs = (0..10)
-        .map(|i| {
-            let (_, parsed) = &other_docs[i % other_docs.len()];
-            let url = Url::parse(&format!("file:///bench/extra_{i}.php")).unwrap();
-            (url, Arc::clone(parsed))
-        })
-        .collect();
-
-    let mut group = c.benchmark_group("references");
-
-    // Single-file: search for `getTitle` (a method defined and called in medium_class.php).
-    let medium_uri = Url::parse("file:///bench/medium.php").unwrap();
-    let medium_doc = Arc::new(ParsedDoc::parse(MEDIUM.to_owned()));
-    let single_doc = vec![(medium_uri, medium_doc)];
-    group.bench_function("single_file_method", |b| {
-        b.iter(|| {
-            black_box(find_references(
-                "getTitle",
-                &single_doc,
-                false,
-                Some(SymbolKind::Method),
-            ))
-        });
-    });
-
-    // Cross-file: search for `UserService` (a class referenced across controller + service).
-    group.bench_function("cross_file_class", |b| {
-        b.iter(|| {
-            black_box(find_references(
-                "UserService",
-                &other_docs,
-                false,
-                Some(SymbolKind::Class),
-            ))
-        });
-    });
-
-    // Scale: same query over 1 / 5 / 10 files.
-    for &n in &[1usize, 5, 10] {
-        group.bench_with_input(BenchmarkId::new("scale", n), &ten_docs[..n], |b, docs| {
-            b.iter(|| {
-                black_box(find_references(
-                    "UserService",
-                    docs,
-                    false,
-                    Some(SymbolKind::Class),
-                ))
-            });
-        });
-    }
-
-    group.finish();
-}
-
 // ── Laravel-scale benches ─────────────────────────────────────────────────────
 //
 // These load the Laravel fixture (via `scripts/setup_laravel_fixture.sh`) and
@@ -357,60 +297,6 @@ fn laravel_docs() -> Option<OtherDocs> {
         })
         .collect();
     Some(docs)
-}
-
-fn bench_references_laravel(c: &mut Criterion) {
-    let Some(docs) = laravel_docs() else {
-        eprintln!(
-            "Laravel fixture not found — run `scripts/setup_laravel_fixture.sh` to enable references/laravel_framework"
-        );
-        return;
-    };
-    eprintln!("Laravel fixture: {} PHP files (references)", docs.len());
-
-    let mut group = c.benchmark_group("references");
-    group.sample_size(10);
-    // `Str` is widely referenced across Illuminate — a realistic hot symbol.
-    group.bench_function("laravel_framework", |b| {
-        b.iter(|| {
-            black_box(find_references(
-                "Str",
-                &docs,
-                false,
-                Some(SymbolKind::Class),
-            ))
-        });
-    });
-    // Method-kind query on a public method of an open (non-final) hierarchy:
-    // `save` on `Illuminate\Database\Eloquent\Model`. The mir codebase fast path
-    // does not apply here (public + non-final), so this exercises the AST walker
-    // + substring pre-filter path.
-    group.bench_function("laravel_framework_method_save", |b| {
-        b.iter(|| {
-            black_box(find_references(
-                "save",
-                &docs,
-                false,
-                Some(SymbolKind::Method),
-            ))
-        });
-    });
-    // Production-realistic: search for `Str` with its fully-qualified name so
-    // doc_can_reference_target filters out files that don't import
-    // Illuminate\Support\Str. Mirrors what backend.rs does via
-    // find_references_with_target after resolving the FQN at the cursor.
-    group.bench_function("laravel_framework_with_fqn", |b| {
-        b.iter(|| {
-            black_box(find_references_with_target(
-                "Str",
-                &docs,
-                false,
-                Some(SymbolKind::Class),
-                "Illuminate\\Support\\Str",
-            ))
-        });
-    });
-    group.finish();
 }
 
 fn bench_completion_laravel(c: &mut Criterion) {
@@ -578,35 +464,6 @@ fn bench_completion_laravel(c: &mut Criterion) {
         });
     });
 
-    group.finish();
-}
-
-fn bench_rename(c: &mut Criterion) {
-    let other_docs = cross_file_docs();
-
-    let mut group = c.benchmark_group("rename");
-    // Cross-file: rename UserService → UserServiceRenamed across the small
-    // fixture set (controller + service + repository + …).
-    group.bench_function("cross_file_class", |b| {
-        b.iter(|| {
-            black_box(rename(
-                "UserService",
-                "UserServiceRenamed",
-                &other_docs,
-                None,
-            ))
-        });
-    });
-
-    if let Some(docs) = laravel_docs() {
-        eprintln!("Laravel fixture: {} PHP files (rename)", docs.len());
-        group.sample_size(10);
-        group.bench_function("laravel_framework", |b| {
-            b.iter(|| black_box(rename("Str", "StrRenamed", &docs, None)));
-        });
-    } else {
-        eprintln!("Laravel fixture not found — skipping rename/laravel_framework");
-    }
     group.finish();
 }
 
@@ -945,10 +802,7 @@ criterion_group!(
     bench_semantic_tokens,
     bench_inlay_hints,
     bench_completion,
-    bench_references,
-    bench_references_laravel,
     bench_completion_laravel,
-    bench_rename,
     bench_workspace_symbol,
     bench_document_symbol,
     bench_call_hierarchy,

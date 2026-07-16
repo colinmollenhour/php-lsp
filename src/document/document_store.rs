@@ -909,6 +909,34 @@ impl DocumentStore {
             .collect()
     }
 
+    /// `use`-import lines referencing `symbol`, from mir's `use:` postings.
+    /// Read-only lookup with no freshness pass — run [`Self::indexed_references`]
+    /// over the same `files` first so uncommitted candidates are analyzed.
+    /// Returns `(file_uri, line, col_start, col_end)` tuples like
+    /// [`Self::indexed_references`]; the range covers the whole import item.
+    pub fn indexed_use_imports(
+        &self,
+        symbol: &mir_analyzer::Name,
+        files: &[Arc<str>],
+    ) -> Vec<(Arc<str>, u32, u32, u32)> {
+        let session = self.analysis_session(self.workspace_php_version());
+        let _interactive = self.interactive_read_guard();
+        let raw = loop {
+            if let Ok(locs) = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                session.indexed_use_import_locations(symbol, files)
+            })) {
+                break locs;
+            }
+        };
+        raw.into_iter()
+            .map(|(file, range)| {
+                // mir uses 1-based lines; 0-based columns.
+                let line = range.start.line.saturating_sub(1);
+                (file, line, range.start.column, range.end.column)
+            })
+            .collect()
+    }
+
     /// Replay disk-cached reference postings and subtype edges for the whole
     /// mirrored workspace (mir's `warm_start_files`) — a no-op per file
     /// without a content-hash-matching cache entry from a previous run. Call

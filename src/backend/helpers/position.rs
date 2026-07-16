@@ -4,33 +4,6 @@ use tower_lsp::lsp_types::{Position, Range};
 
 use crate::navigation::references::SymbolKind;
 
-/// Returns `true` when the identifier at `position` is immediately preceded by `->`,
-/// indicating it is a property or method name in an instance access expression.
-pub(crate) fn is_after_arrow(source: &str, position: Position) -> bool {
-    let line = match source.lines().nth(position.line as usize) {
-        Some(l) => l,
-        None => return false,
-    };
-    let chars: Vec<char> = line.chars().collect();
-    let col = position.character as usize;
-    // Find the char index of the cursor (UTF-16 → char index).
-    let mut utf16_col = 0usize;
-    let mut char_idx = 0usize;
-    for ch in &chars {
-        if utf16_col >= col {
-            break;
-        }
-        utf16_col += ch.len_utf16();
-        char_idx += 1;
-    }
-    // Walk left past word chars to the start of the identifier.
-    let is_word = |c: char| c.is_alphanumeric() || c == '_';
-    while char_idx > 0 && is_word(chars[char_idx - 1]) {
-        char_idx -= 1;
-    }
-    char_idx >= 2 && chars[char_idx - 1] == '>' && chars[char_idx - 2] == '-'
-}
-
 /// Classify the symbol at `position` so `find_references` can use the right walker.
 ///
 /// Heuristics (in priority order):
