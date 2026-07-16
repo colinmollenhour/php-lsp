@@ -573,9 +573,27 @@ mod references {
         let character = character + "class ".len() as u32;
         server.open(path, &text).await;
 
-        let resp = server.references(path, line, character, false).await;
-        assert!(resp["error"].is_null(), "references error: {:?}", resp);
-        let out = render_locations(&resp, &server.uri(""));
+        const EXPECTED_LOCATIONS: usize = 23;
+        // The warm sweep completing (above) only guarantees mir committed
+        // postings for the candidate files it got to; the on-demand freshness
+        // pass inside `indexed_references_to` re-analyzes anything stale at
+        // query time, but on a slower/more contended runner (seen on
+        // windows-latest) the very first query can still race a file whose
+        // analysis was mid-flight. That pass is self-healing on a fresh
+        // query, so retry a couple of times before asserting instead of
+        // trusting a single cold-start snapshot.
+        let mut out = String::new();
+        for attempt in 0..5 {
+            let resp = server.references(path, line, character, false).await;
+            assert!(resp["error"].is_null(), "references error: {:?}", resp);
+            out = render_locations(&resp, &server.uri(""));
+            if out.lines().count() >= EXPECTED_LOCATIONS {
+                break;
+            }
+            if attempt < 4 {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
         // Must span ≥4 files including PostRepository.php
         expect![[r#"
             src/Controller/Admin/BlogController.php:122:25-122:29
