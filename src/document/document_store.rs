@@ -216,15 +216,6 @@ impl DocumentStore {
         fresh
     }
 
-    /// Upper bound on files an analysis warm sweep will process. Each warmed
-    /// `analyze_file` memo costs ~50 KiB resident (measured on the Laravel
-    /// fixture), so an unbounded sweep on a very large workspace would trade
-    /// too much memory for latency; beyond the cap the references path simply
-    /// stays lazy for the excess files. Matches mir's `analyze_file`
-    /// `lru = 16384` — sweeping more than the memo table holds would evict
-    /// the sweep's own tail.
-    pub const WARM_SWEEP_MAX_FILES: usize = 16_384;
-
     /// Drive every workspace file through mir's memoized `analyze_file` query
     /// so later reference/rename requests are memo hits instead of cold
     /// analyses (~20 ms per file on real code — a few hundred candidate files
@@ -268,7 +259,6 @@ impl DocumentStore {
                     .map(|e| Arc::<str>::from(e.key().as_str()))
                     .filter(|f| !front_set.contains(f.as_ref())),
             )
-            .take(Self::WARM_SWEEP_MAX_FILES)
             .collect();
         drop(front_set);
         let session = self.analysis_session(self.workspace_php_version());
