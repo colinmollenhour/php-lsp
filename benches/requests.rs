@@ -12,7 +12,6 @@ use php_lsp::completion::{CompletionCtx, filtered_completions_at};
 use php_lsp::definition::goto_definition;
 use php_lsp::file_index::FileIndex;
 use php_lsp::hover::hover_info_with_maps;
-use php_lsp::implementation::find_implementations;
 use php_lsp::references::{SymbolKind, find_references, find_references_with_target};
 use php_lsp::rename::rename;
 use php_lsp::symbol_map::SymbolMap;
@@ -763,28 +762,6 @@ fn bench_workspace_symbol(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_implementation(c: &mut Criterion) {
-    let other_docs = cross_file_docs();
-
-    let mut group = c.benchmark_group("implementation");
-    // Cross-file: find classes that extend / implement `UserService`.
-    group.bench_function("cross_file_class", |b| {
-        b.iter(|| black_box(find_implementations("UserService", None, &other_docs)));
-    });
-
-    if let Some(docs) = laravel_docs() {
-        eprintln!("Laravel fixture: {} PHP files (implementation)", docs.len());
-        group.sample_size(10);
-        // A widely-implemented Illuminate contract.
-        group.bench_function("laravel_framework", |b| {
-            b.iter(|| black_box(find_implementations("Arrayable", None, &docs)));
-        });
-    } else {
-        eprintln!("Laravel fixture not found — skipping implementation/laravel_framework");
-    }
-    group.finish();
-}
-
 fn bench_document_symbol(c: &mut Criterion) {
     let medium_doc = Arc::new(ParsedDoc::parse(MEDIUM.to_owned()));
     let ctrl_doc = Arc::new(ParsedDoc::parse(CONTROLLER.to_owned()));
@@ -979,7 +956,6 @@ criterion_group!(
     bench_completion_laravel,
     bench_rename,
     bench_workspace_symbol,
-    bench_implementation,
     bench_document_symbol,
     bench_call_hierarchy,
     bench_workspace_parse,

@@ -1246,7 +1246,7 @@ impl LanguageServer for Backend {
             } else {
                 let docs = Arc::clone(&self.docs);
                 let fqn_task = fqn.clone();
-                tokio::task::spawn_blocking(move || docs.indexed_subtype_classes(&fqn_task))
+                tokio::task::spawn_blocking(move || docs.indexed_subtype_classes(&fqn_task, false))
                     .await
                     .unwrap_or_default()
                     .into_iter()
@@ -1463,22 +1463,28 @@ impl LanguageServer for Backend {
                 Some(d) => d,
                 None => return Ok(None),
             };
-            // Reference-count lenses scan every doc per declaration; run the
-            // whole computation on the blocking pool. A write during computation
-            // (write_rev advances) cancels the sweep early — stale lens counts
-            // are useless and the editor will request fresh ones after the edit.
+            // Lens counts come from mir's inverted indexes; still run on the
+            // blocking pool (index freshness passes may analyze on demand).
+            // A write during computation (write_rev advances) cancels early —
+            // stale lens counts are useless and the editor will request fresh
+            // ones after the edit.
             let docs = Arc::clone(&self.docs);
             let docs_cancel = Arc::clone(&self.docs);
             let uri_owned = uri.clone();
             let uri_str = uri.to_string();
+            let imports = self.file_imports(uri);
             let lenses = match tokio::task::spawn_blocking(move || {
                 // Pause the background scan and snapshot a settled revision so
                 // only a genuine user edit cancels the sweep.
                 let (_interactive, cancel_rev) = docs.settled_write_rev_guard();
-                let all_docs = docs.all_docs_for_scan();
-                code_lenses(&uri_owned, &doc, &all_docs, move || {
-                    docs_cancel.write_rev() != cancel_rev
-                })
+                code_lenses(
+                    &uri_owned,
+                    &doc,
+                    &docs,
+                    &imports,
+                    Some(cancel_rev),
+                    move || docs_cancel.write_rev() != cancel_rev,
+                )
             })
             .await
             {

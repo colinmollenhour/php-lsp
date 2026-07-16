@@ -930,7 +930,7 @@ impl DocumentStore {
 
     /// Every active workspace file as a mir path (`Arc<str>` of the URI).
     /// The candidate scope handed to mir's subtype queries.
-    fn workspace_file_paths(&self) -> Vec<Arc<str>> {
+    pub(crate) fn workspace_file_paths(&self) -> Vec<Arc<str>> {
         self.lsp_ws_files
             .iter()
             .filter(|e| !self.deleted_uris.contains(e.key()))
@@ -939,14 +939,20 @@ impl DocumentStore {
     }
 
     /// Transitive subtypes of `class_fqn` from mir's maintained subtype edge
-    /// index (extends/implements semantics), with declaration sites.
-    pub fn indexed_subtype_classes(&self, class_fqn: &str) -> Vec<mir_analyzer::SubtypeClassSite> {
+    /// index, with declaration sites. `include_trait_users` also counts
+    /// `use Trait;` composition as a subtype edge (trait-usage lenses); leave
+    /// it off for goto-implementation semantics (extends/implements only).
+    pub fn indexed_subtype_classes(
+        &self,
+        class_fqn: &str,
+        include_trait_users: bool,
+    ) -> Vec<mir_analyzer::SubtypeClassSite> {
         let files = self.workspace_file_paths();
         let session = self.analysis_session(self.workspace_php_version());
         let _interactive = self.interactive_read_guard();
         loop {
             if let Ok(sites) = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
-                session.indexed_subtype_classes(class_fqn, &files, false)
+                session.indexed_subtype_classes(class_fqn, &files, include_trait_users)
             })) {
                 break sites;
             }

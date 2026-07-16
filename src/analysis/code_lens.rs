@@ -8,49 +8,192 @@
 ///      counting classes that extend/implement/use them.
 ///   4. **overrides ClassName::method** — above methods that override a parent
 ///      class method of the same name.
+///
+/// Counts and locations come from mir's inverted indexes (reference posting
+/// lists and subtype edges) plus the salsa workspace index — never from a
+/// per-request AST walk over the workspace.
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use php_ast::{ClassMemberKind, EnumMemberKind, NamespaceBody, Stmt, StmtKind};
 use serde_json::json;
-use tower_lsp::lsp_types::{CodeLens, Command, Url};
+use tower_lsp::lsp_types::{CodeLens, Command, Location, Url};
 
 use crate::document::ast::{ParsedDoc, SourceView};
-use crate::navigation::implementation::find_implementations;
-use crate::navigation::references::{SymbolKind, find_references};
-use crate::types::type_map::parent_class_name;
+use crate::document::document_store::DocumentStore;
+use crate::navigation::moniker::resolve_fqn;
+use crate::navigation::references::{dedup_ref_locations, session_tuple_to_location};
+use crate::text::fqn_short_name;
 
-/// Build all code lenses for `uri`/`doc`, using `all_docs` for reference counts.
+/// Build all code lenses for `uri`/`doc`, answering counts from the store's
+/// mir-backed indexes.
 ///
-/// `should_cancel` is polled between top-level declarations; when it returns
-/// `true` the function returns an empty `Vec` immediately. Pass `|| false` for
-/// requests that do not need cooperative cancellation.
+/// `cancel_rev` is threaded into mir's index queries so a concurrent edit
+/// aborts them at phase boundaries. `should_cancel` is polled between
+/// top-level declarations; when it returns `true` the function returns an
+/// empty `Vec` immediately. Pass `|| false` for requests that do not need
+/// cooperative cancellation.
 pub fn code_lenses(
     uri: &Url,
     doc: &ParsedDoc,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
+    store: &DocumentStore,
+    imports: &HashMap<String, String>,
+    cancel_rev: Option<u64>,
     should_cancel: impl Fn() -> bool,
 ) -> Vec<CodeLens> {
+    let env = LensEnv {
+        uri,
+        doc,
+        store,
+        imports,
+        cancel_rev,
+    };
     let sv = doc.view();
     let mut lenses = Vec::new();
     collect_lenses(
         &doc.program().stmts,
         sv,
-        uri,
-        all_docs,
+        "",
+        &env,
         &mut lenses,
         &should_cancel,
     );
     lenses
 }
 
+/// Shared lookup context for one code-lens request.
+struct LensEnv<'a> {
+    uri: &'a Url,
+    doc: &'a ParsedDoc,
+    store: &'a DocumentStore,
+    imports: &'a HashMap<String, String>,
+    cancel_rev: Option<u64>,
+}
+
+impl LensEnv<'_> {
+    /// Candidate file scope for a posting lookup. After the analysis warm
+    /// sweep has committed every file's postings the freshness pass is a
+    /// cheap per-file check, so the whole workspace is passed directly;
+    /// before that, the text pre-filter bounds the on-demand analysis a
+    /// cold query would otherwise pay across the full workspace.
+    fn candidate_files(&self, word: &str) -> Vec<Arc<str>> {
+        if self.store.warm_sweeps_completed() > 0 {
+            self.store.workspace_file_paths()
+        } else {
+            self.store
+                .candidate_urls_for(word)
+                .iter()
+                .map(|u| Arc::from(u.as_str()))
+                .collect()
+        }
+    }
+
+    fn reference_locations(&self, symbol: &mir_analyzer::Name, word: &str) -> Vec<Location> {
+        // Visibility scoping: a private/protected method's references can
+        // only occur in its declaring file (+ subtype files) — mirror the
+        // references handler and skip the workspace-wide scope entirely.
+        let files = if let mir_analyzer::Name::Method { class, name } = symbol {
+            self.store
+                .method_reference_scope(class, name)
+                .map(|urls| urls.iter().map(|u| Arc::from(u.as_str())).collect())
+        } else {
+            None
+        };
+        let files = files.unwrap_or_else(|| self.candidate_files(word));
+        let mut locations: Vec<Location> = self
+            .store
+            .indexed_references(symbol, &files, false, self.cancel_rev)
+            .into_iter()
+            .filter_map(session_tuple_to_location)
+            .collect();
+        dedup_ref_locations(&mut locations);
+        locations
+    }
+
+    fn ref_count_lens(
+        &self,
+        range: tower_lsp::lsp_types::Range,
+        symbol: mir_analyzer::Name,
+        word: &str,
+    ) -> CodeLens {
+        let locations = self.reference_locations(&symbol, word);
+        let label = match locations.len() {
+            0 => "0 references".to_string(),
+            1 => "1 reference".to_string(),
+            n => format!("{n} references"),
+        };
+        lens(range, self.uri, label, locations)
+    }
+
+    fn impl_count_lens(
+        &self,
+        range: tower_lsp::lsp_types::Range,
+        fqn: &str,
+        include_trait_users: bool,
+    ) -> CodeLens {
+        let locations: Vec<Location> = self
+            .store
+            .indexed_subtype_classes(fqn, include_trait_users)
+            .into_iter()
+            .filter_map(|site| subtype_site_to_location(&site.file, &site.range))
+            .collect();
+        let label = match locations.len() {
+            0 => "0 implementations".to_string(),
+            1 => "1 implementation".to_string(),
+            n => format!("{n} implementations"),
+        };
+        lens(range, self.uri, label, locations)
+    }
+
+    /// Declaration location of `method` on the class/trait `parent_fqn`,
+    /// from the salsa workspace index. Prefers the exact-FQN class entry;
+    /// falls back to any same-short-name class declaring the method.
+    fn parent_method_location(&self, parent_fqn: &str, method: &str) -> Option<Location> {
+        let ws = self.store.get_workspace_index_salsa();
+        let parent_fqn = parent_fqn.trim_start_matches('\\');
+        let candidates = ws.classes_by_name.get(fqn_short_name(parent_fqn))?;
+        let method_loc = |r: &crate::db::workspace_index::ClassRef| {
+            let (uri, cls) = ws.at(*r)?;
+            let m = cls.methods.iter().find(|m| m.name.as_ref() == method)?;
+            let start = tower_lsp::lsp_types::Position {
+                line: m.start_line,
+                character: m.name_char,
+            };
+            let end = tower_lsp::lsp_types::Position {
+                line: m.start_line,
+                character: m.name_char + m.name.encode_utf16().count() as u32,
+            };
+            Some((
+                cls.fqn.trim_start_matches('\\').to_string(),
+                Location {
+                    uri: uri.clone(),
+                    range: tower_lsp::lsp_types::Range { start, end },
+                },
+            ))
+        };
+        let mut fallback = None;
+        for r in candidates {
+            if let Some((fqn, loc)) = method_loc(r) {
+                if fqn == parent_fqn {
+                    return Some(loc);
+                }
+                fallback.get_or_insert(loc);
+            }
+        }
+        fallback
+    }
+}
+
 fn collect_lenses(
     stmts: &[Stmt<'_, '_>],
     sv: SourceView<'_>,
-    uri: &Url,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
+    enclosing_ns: &str,
+    env: &LensEnv<'_>,
     out: &mut Vec<CodeLens>,
     should_cancel: &impl Fn() -> bool,
 ) {
+    // `namespace App;` (unbraced) applies to every following statement.
+    let mut ns: String = enclosing_ns.to_string();
     for stmt in stmts {
         if should_cancel() {
             out.clear();
@@ -60,47 +203,47 @@ fn collect_lenses(
             StmtKind::Function(f) => {
                 let name = f.name.as_str().unwrap_or_default();
                 let range = sv.name_range(name);
-                out.push(ref_count_lens(range, name, uri, all_docs, None));
+                out.push(env.ref_count_lens(
+                    range,
+                    mir_analyzer::Name::function(fqn_in(&ns, name)),
+                    name,
+                ));
             }
             StmtKind::Class(c) => {
                 if let Some(class_name) = c.name {
                     let class_name_str = class_name.as_str().unwrap_or_default();
+                    let class_fqn = fqn_in(&ns, class_name_str);
                     let class_range = sv.name_range(class_name_str);
-                    out.push(ref_count_lens(
+                    out.push(env.ref_count_lens(
                         class_range,
+                        mir_analyzer::Name::class(class_fqn.clone()),
                         class_name_str,
-                        uri,
-                        all_docs,
-                        None,
                     ));
 
                     // Implementations count for abstract classes (classes extending this).
                     if c.modifiers.is_abstract {
-                        let impls = find_implementations(class_name_str, None, all_docs);
-                        out.push(impl_count_lens(class_range, uri, impls));
+                        out.push(env.impl_count_lens(class_range, &class_fqn, false));
                     }
 
                     // Direct supertypes — extends parent + used traits — checked once
                     // per class for overrides lookups on each method.
-                    let parents = collect_direct_supertypes(c, all_docs);
+                    let parents = collect_direct_supertypes(c, env.doc, env.imports);
 
                     for member in c.body.members.iter() {
                         match &member.kind {
                             ClassMemberKind::Method(m) => {
                                 let method_name = m.name.as_str().unwrap_or_default();
                                 let method_range = sv.name_range(method_name);
-                                out.push(ref_count_lens(
+                                out.push(env.ref_count_lens(
                                     method_range,
+                                    mir_analyzer::Name::method(class_fqn.as_str(), method_name),
                                     method_name,
-                                    uri,
-                                    all_docs,
-                                    None,
                                 ));
 
                                 if is_test_method(sv.source(), m) {
                                     out.push(run_test_lens(
                                         method_range,
-                                        uri,
+                                        env.uri,
                                         class_name_str,
                                         method_name,
                                     ));
@@ -108,14 +251,14 @@ fn collect_lenses(
 
                                 // Overrides lens: emit for each direct supertype (parent class
                                 // or used trait) that declares a method with the same name.
-                                for parent_name in &parents {
+                                for parent_fqn in &parents {
                                     if let Some(parent_loc) =
-                                        parent_method_location(parent_name, method_name, all_docs)
+                                        env.parent_method_location(parent_fqn, method_name)
                                     {
                                         out.push(overrides_lens(
                                             method_range,
-                                            uri,
-                                            parent_name,
+                                            env.uri,
+                                            fqn_short_name(parent_fqn),
                                             method_name,
                                             parent_loc,
                                         ));
@@ -128,12 +271,10 @@ fn collect_lenses(
                                         if p.visibility.is_some() {
                                             let param_name = p.name.as_str().unwrap_or_default();
                                             let prop_range = sv.name_range(param_name);
-                                            out.push(ref_count_lens(
+                                            out.push(env.ref_count_lens(
                                                 prop_range,
+                                                property_name(&class_fqn, param_name),
                                                 param_name,
-                                                uri,
-                                                all_docs,
-                                                Some(SymbolKind::Property),
                                             ));
                                         }
                                     }
@@ -142,12 +283,10 @@ fn collect_lenses(
                             ClassMemberKind::Property(p) => {
                                 let prop_name = p.name.as_str().unwrap_or_default();
                                 let prop_range = sv.name_range(prop_name);
-                                out.push(ref_count_lens(
+                                out.push(env.ref_count_lens(
                                     prop_range,
+                                    property_name(&class_fqn, prop_name),
                                     prop_name,
-                                    uri,
-                                    all_docs,
-                                    Some(SymbolKind::Property),
                                 ));
                             }
                             _ => {}
@@ -157,41 +296,41 @@ fn collect_lenses(
             }
             StmtKind::Interface(i) => {
                 let name = i.name.as_str().unwrap_or_default();
+                let fqn = fqn_in(&ns, name);
                 let range = sv.name_range(name);
-                out.push(ref_count_lens(range, name, uri, all_docs, None));
+                out.push(env.ref_count_lens(range, mir_analyzer::Name::class(fqn.clone()), name));
                 // Implementations count lens.
-                let impls = find_implementations(name, None, all_docs);
-                out.push(impl_count_lens(range, uri, impls));
+                out.push(env.impl_count_lens(range, &fqn, false));
             }
             StmtKind::Trait(t) => {
                 let trait_name = t.name.as_str().unwrap_or_default();
+                let trait_fqn = fqn_in(&ns, trait_name);
                 let range = sv.name_range(trait_name);
-                out.push(ref_count_lens(range, trait_name, uri, all_docs, None));
-                // Usages: classes that `use` this trait.
-                let usages = trait_usage_locations(trait_name, all_docs);
-                out.push(impl_count_lens(range, uri, usages));
+                out.push(env.ref_count_lens(
+                    range,
+                    mir_analyzer::Name::class(trait_fqn.clone()),
+                    trait_name,
+                ));
+                // Usages: classes that `use` this trait (trait edges included).
+                out.push(env.impl_count_lens(range, &trait_fqn, true));
                 for member in t.body.members.iter() {
                     match &member.kind {
                         ClassMemberKind::Method(m) => {
                             let method_name = m.name.as_str().unwrap_or_default();
                             let method_range = sv.name_range(method_name);
-                            out.push(ref_count_lens(
+                            out.push(env.ref_count_lens(
                                 method_range,
+                                mir_analyzer::Name::method(trait_fqn.as_str(), method_name),
                                 method_name,
-                                uri,
-                                all_docs,
-                                None,
                             ));
                         }
                         ClassMemberKind::Property(p) => {
                             let prop_name = p.name.as_str().unwrap_or_default();
                             let prop_range = sv.name_range(prop_name);
-                            out.push(ref_count_lens(
+                            out.push(env.ref_count_lens(
                                 prop_range,
+                                property_name(&trait_fqn, prop_name),
                                 prop_name,
-                                uri,
-                                all_docs,
-                                Some(SymbolKind::Property),
                             ));
                         }
                         _ => {}
@@ -200,33 +339,50 @@ fn collect_lenses(
             }
             StmtKind::Enum(e) => {
                 let enum_name = e.name.as_str().unwrap_or_default();
+                let enum_fqn = fqn_in(&ns, enum_name);
                 let range = sv.name_range(enum_name);
-                out.push(ref_count_lens(range, enum_name, uri, all_docs, None));
+                out.push(env.ref_count_lens(
+                    range,
+                    mir_analyzer::Name::class(enum_fqn.clone()),
+                    enum_name,
+                ));
                 for member in e.body.members.iter() {
                     match &member.kind {
                         EnumMemberKind::Method(m) => {
                             let method_name = m.name.as_str().unwrap_or_default();
                             let method_range = sv.name_range(method_name);
-                            out.push(ref_count_lens(
+                            out.push(env.ref_count_lens(
                                 method_range,
+                                mir_analyzer::Name::method(enum_fqn.as_str(), method_name),
                                 method_name,
-                                uri,
-                                all_docs,
-                                None,
                             ));
                         }
                         EnumMemberKind::Case(c) => {
                             let case_name = c.name.as_str().unwrap_or_default();
                             let case_range = sv.name_range(case_name);
-                            out.push(ref_count_lens(case_range, case_name, uri, all_docs, None));
+                            out.push(env.ref_count_lens(
+                                case_range,
+                                mir_analyzer::Name::class_constant(enum_fqn.as_str(), case_name),
+                                case_name,
+                            ));
                         }
                         _ => {}
                     }
                 }
             }
-            StmtKind::Namespace(ns) => {
-                if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_lenses(&inner.stmts, sv, uri, all_docs, out, should_cancel);
+            StmtKind::Namespace(nsd) => {
+                let ns_name = nsd
+                    .name
+                    .as_ref()
+                    .map(|n| n.to_string_repr().into_owned())
+                    .unwrap_or_default();
+                match &nsd.body {
+                    NamespaceBody::Braced(inner) => {
+                        collect_lenses(&inner.stmts, sv, &ns_name, env, out, should_cancel);
+                    }
+                    NamespaceBody::Simple => {
+                        ns = ns_name;
+                    }
                 }
             }
             _ => {}
@@ -234,46 +390,47 @@ fn collect_lenses(
     }
 }
 
-fn ref_count_lens(
-    range: tower_lsp::lsp_types::Range,
-    name: &str,
-    uri: &Url,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
-    kind: Option<SymbolKind>,
-) -> CodeLens {
-    let locations = find_references(name, all_docs, false, kind);
-    let count = locations.len();
-    let label = match count {
-        0 => "0 references".to_string(),
-        1 => "1 reference".to_string(),
-        n => format!("{n} references"),
-    };
-    CodeLens {
-        range,
-        command: Some(Command {
-            title: label,
-            command: "editor.action.showReferences".to_string(),
-            arguments: Some(vec![json!(uri), json!(range.start), json!(locations)]),
-        }),
-        data: None,
+fn fqn_in(ns: &str, name: &str) -> String {
+    if ns.is_empty() {
+        name.to_string()
+    } else {
+        format!("{ns}\\{name}")
     }
 }
 
-fn impl_count_lens(
+fn property_name(class_fqn: &str, prop: &str) -> mir_analyzer::Name {
+    mir_analyzer::Name::property(class_fqn, prop)
+}
+
+fn subtype_site_to_location(file: &str, range: &mir_analyzer::Range) -> Option<Location> {
+    let uri = Url::parse(file).ok()?;
+    // mir uses 1-based lines; 0-based columns.
+    let line = range.start.line.saturating_sub(1);
+    Some(Location {
+        uri,
+        range: tower_lsp::lsp_types::Range {
+            start: tower_lsp::lsp_types::Position {
+                line,
+                character: range.start.column,
+            },
+            end: tower_lsp::lsp_types::Position {
+                line,
+                character: range.end.column,
+            },
+        },
+    })
+}
+
+fn lens(
     range: tower_lsp::lsp_types::Range,
     uri: &Url,
-    locations: Vec<tower_lsp::lsp_types::Location>,
+    title: String,
+    locations: Vec<Location>,
 ) -> CodeLens {
-    let count = locations.len();
-    let label = match count {
-        0 => "0 implementations".to_string(),
-        1 => "1 implementation".to_string(),
-        n => format!("{n} implementations"),
-    };
     CodeLens {
         range,
         command: Some(Command {
-            title: label,
+            title,
             command: "editor.action.showReferences".to_string(),
             arguments: Some(vec![json!(uri), json!(range.start), json!(locations)]),
         }),
@@ -286,7 +443,7 @@ fn overrides_lens(
     uri: &Url,
     parent_class: &str,
     method_name: &str,
-    parent_location: tower_lsp::lsp_types::Location,
+    parent_location: Location,
 ) -> CodeLens {
     CodeLens {
         range,
@@ -323,143 +480,35 @@ fn run_test_lens(
     }
 }
 
-/// Count how many classes across `all_docs` use `trait_name` via a `use` statement.
-fn trait_usage_locations(
-    trait_name: &str,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
-) -> Vec<tower_lsp::lsp_types::Location> {
-    let mut out = Vec::new();
-    for (uri, doc) in all_docs {
-        let sv = doc.view();
-        collect_trait_usages_in_stmts(trait_name, &doc.program().stmts, sv, uri, &mut out);
-    }
-    out
-}
-
-fn collect_trait_usages_in_stmts(
-    trait_name: &str,
-    stmts: &[php_ast::Stmt<'_, '_>],
-    sv: SourceView<'_>,
-    uri: &Url,
-    out: &mut Vec<tower_lsp::lsp_types::Location>,
-) {
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Class(c) => {
-                let uses_trait = c.body.members.iter().any(|m| {
-                    if let ClassMemberKind::TraitUse(t) = &m.kind {
-                        t.traits
-                            .iter()
-                            .any(|name| name.to_string_repr().as_ref() == trait_name)
-                    } else {
-                        false
-                    }
-                });
-                if uses_trait && let Some(class_name) = c.name {
-                    out.push(tower_lsp::lsp_types::Location {
-                        uri: uri.clone(),
-                        range: sv.name_range_in_span(class_name.or_error(), stmt.span),
-                    });
-                }
-            }
-            StmtKind::Namespace(ns) => {
-                if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_trait_usages_in_stmts(trait_name, &inner.stmts, sv, uri, out);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Direct supertypes of `c` — the extended parent class (resolved to its
-/// canonical short name) plus every trait listed in `use` clauses. Order is
-/// stable: extends first, then traits in source order. Duplicates are removed.
+/// Direct supertypes of `c` as FQNs — the extended parent class plus every
+/// trait listed in `use` clauses, resolved through this file's imports and
+/// namespace. Order is stable: extends first, then traits in source order.
+/// Duplicates are removed.
 fn collect_direct_supertypes(
     c: &php_ast::ClassDecl<'_, '_>,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
+    doc: &ParsedDoc,
+    imports: &HashMap<String, String>,
 ) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    let mut resolve = |name: std::borrow::Cow<'_, str>| {
+        let fqn = resolve_fqn(doc, &name, imports)
+            .trim_start_matches('\\')
+            .to_string();
+        if !out.contains(&fqn) {
+            out.push(fqn);
+        }
+    };
     if let Some(extends) = &c.extends {
-        let parent_short = extends.to_string_repr().into_owned();
-        let resolved = all_docs
-            .iter()
-            .find_map(|(_, doc)| parent_class_name(doc, &parent_short))
-            .unwrap_or(parent_short);
-        out.push(resolved);
+        resolve(extends.to_string_repr());
     }
     for member in c.body.members.iter() {
         if let ClassMemberKind::TraitUse(t) = &member.kind {
             for name in t.traits.iter() {
-                let s = name.to_string_repr().into_owned();
-                if !out.contains(&s) {
-                    out.push(s);
-                }
+                resolve(name.to_string_repr());
             }
         }
     }
     out
-}
-
-/// Find the declaration location of `method_name` on a class or trait named
-/// `parent_name`, if any.
-fn parent_method_location(
-    parent_name: &str,
-    method_name: &str,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
-) -> Option<tower_lsp::lsp_types::Location> {
-    for (uri, doc) in all_docs {
-        let sv = doc.view();
-        if let Some(range) =
-            find_method_name_range(&doc.program().stmts, parent_name, method_name, sv)
-        {
-            return Some(tower_lsp::lsp_types::Location {
-                uri: uri.clone(),
-                range,
-            });
-        }
-    }
-    None
-}
-
-fn find_method_name_range(
-    stmts: &[php_ast::Stmt<'_, '_>],
-    parent_name: &str,
-    method_name: &str,
-    sv: SourceView<'_>,
-) -> Option<tower_lsp::lsp_types::Range> {
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Class(c) if c.name.as_ref().and_then(|n| n.as_str()) == Some(parent_name) => {
-                for member in c.body.members.iter() {
-                    if let ClassMemberKind::Method(m) = &member.kind
-                        && m.name == method_name
-                    {
-                        return Some(sv.name_range(m.name.as_str().unwrap_or_default()));
-                    }
-                }
-            }
-            StmtKind::Trait(t) if t.name == parent_name => {
-                for member in t.body.members.iter() {
-                    if let ClassMemberKind::Method(m) = &member.kind
-                        && m.name == method_name
-                    {
-                        return Some(sv.name_range(m.name.as_str().unwrap_or_default()));
-                    }
-                }
-            }
-            StmtKind::Namespace(ns) => {
-                if let NamespaceBody::Braced(inner) = &ns.body
-                    && let Some(r) =
-                        find_method_name_range(&inner.stmts, parent_name, method_name, sv)
-                {
-                    return Some(r);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// A method is a test if its name starts with `test` (PHPUnit convention),
@@ -501,9 +550,9 @@ mod tests {
         let source = "<?php\nclass Foo { public function bar(): void {} }\n";
         let doc = std::sync::Arc::new(ParsedDoc::parse(source));
         let uri = tower_lsp::lsp_types::Url::parse("file:///test.php").unwrap();
-        let all_docs: Vec<(tower_lsp::lsp_types::Url, std::sync::Arc<ParsedDoc>)> = vec![];
+        let store = DocumentStore::new();
 
-        let lenses = code_lenses(&uri, &doc, &all_docs, || true);
+        let lenses = code_lenses(&uri, &doc, &store, &HashMap::new(), None, || true);
         assert!(lenses.is_empty(), "cancelled sweep must return empty");
     }
 }

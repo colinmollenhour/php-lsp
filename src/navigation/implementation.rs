@@ -1,12 +1,6 @@
-/// `textDocument/implementation` — find all classes that implement an interface
-/// or extend a class with the given name.
-use std::sync::Arc;
-
-use php_ast::{ExprKind, NamespaceBody, Stmt, StmtKind};
-use tower_lsp::lsp_types::{Location, Url};
-
-use crate::document::ast::{ParsedDoc, SourceView};
-
+/// `textDocument/implementation` — name-matching helpers shared by the
+/// type-hierarchy walkers. Implementation lookups themselves are answered
+/// from mir's subtype edge index (`DocumentStore::indexed_subtype_classes`).
 /// Returns `true` when the name written in an `extends`/`implements` clause
 /// (given as its `to_string_repr()` string) refers to the symbol we are
 /// searching for.
@@ -28,98 +22,6 @@ pub(crate) fn name_matches(repr: &str, word: &str, fqn: Option<&str>) -> bool {
     repr == word
         || fqn.is_some_and(|f| repr.trim_start_matches('\\') == f)
         || (fqn.is_none() && !word.contains('\\') && repr.trim_start_matches('\\') == word)
-}
-
-/// Return all `Location`s where a class declares `extends Name` or
-/// `implements Name`.
-///
-/// `fqn` is the fully-qualified name of the symbol (e.g. `"App\\Animal"`),
-/// resolved from the calling file's `use` imports. When provided, extends/
-/// implements clauses that spell out the FQN form (`\App\Animal` or
-/// `App\Animal`) are also matched, in addition to the bare `word`.
-pub fn find_implementations(
-    word: &str,
-    fqn: Option<&str>,
-    all_docs: &[(Url, Arc<ParsedDoc>)],
-) -> Vec<Location> {
-    let mut locations = Vec::new();
-    for (uri, doc) in all_docs {
-        let sv = doc.view();
-        collect_implementations(&doc.program().stmts, word, fqn, sv, uri, &mut locations);
-    }
-    locations
-}
-
-fn collect_implementations(
-    stmts: &[Stmt<'_, '_>],
-    word: &str,
-    fqn: Option<&str>,
-    sv: SourceView<'_>,
-    uri: &Url,
-    out: &mut Vec<Location>,
-) {
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Class(c) => {
-                let extends_match = c
-                    .extends
-                    .as_ref()
-                    .map(|e| name_matches(e.to_string_repr().as_ref(), word, fqn))
-                    .unwrap_or(false);
-
-                let implements_match = c
-                    .implements
-                    .iter()
-                    .any(|iface| name_matches(iface.to_string_repr().as_ref(), word, fqn));
-
-                if extends_match || implements_match {
-                    let range = if let Some(class_name) = c.name {
-                        sv.name_range_in_span(class_name.or_error(), stmt.span)
-                    } else {
-                        // Anonymous class (`new class {}`): point to the `class` keyword.
-                        sv.name_range_in_span("class", stmt.span)
-                    };
-                    out.push(Location {
-                        uri: uri.clone(),
-                        range,
-                    });
-                }
-            }
-            StmtKind::Enum(e) => {
-                let implements_match = e
-                    .implements
-                    .iter()
-                    .any(|iface| name_matches(iface.to_string_repr().as_ref(), word, fqn));
-                if implements_match {
-                    out.push(Location {
-                        uri: uri.clone(),
-                        range: sv.name_range_in_span(e.name.or_error(), stmt.span),
-                    });
-                }
-            }
-            StmtKind::Interface(i) => {
-                let extends_match = i
-                    .extends
-                    .iter()
-                    .any(|base| name_matches(base.to_string_repr().as_ref(), word, fqn));
-                if extends_match {
-                    out.push(Location {
-                        uri: uri.clone(),
-                        range: sv.name_range_in_span(i.name.or_error(), stmt.span),
-                    });
-                }
-            }
-            StmtKind::Expression(expr) => {
-                collect_anon_class_in_expr(expr, word, fqn, sv, stmt.span, uri, out);
-            }
-            StmtKind::Namespace(ns) => {
-                if let NamespaceBody::Braced(inner) = &ns.body {
-                    collect_implementations(&inner.stmts, word, fqn, sv, uri, out);
-                }
-            }
-            _ => {}
-        }
-    }
 }
 
 /// Returns `true` when `name` is a use-import alias in `use_imports` that
@@ -169,45 +71,5 @@ pub(crate) fn resolves_to_fqn(
     match idx.namespace.as_deref() {
         Some(ns) => format!("{ns}\\{written}") == target_fqn,
         None => written == target_fqn,
-    }
-}
-
-/// Recurse into an expression to find `new class {}` anonymous class declarations
-/// that implement or extend the target interface/class.
-fn collect_anon_class_in_expr(
-    expr: &php_ast::Expr<'_, '_>,
-    word: &str,
-    fqn: Option<&str>,
-    sv: SourceView<'_>,
-    stmt_span: php_ast::Span,
-    uri: &Url,
-    out: &mut Vec<Location>,
-) {
-    match &expr.kind {
-        ExprKind::AnonymousClass(c) => {
-            let extends_match = c
-                .extends
-                .as_ref()
-                .map(|e| name_matches(e.to_string_repr().as_ref(), word, fqn))
-                .unwrap_or(false);
-            let implements_match = c
-                .implements
-                .iter()
-                .any(|iface| name_matches(iface.to_string_repr().as_ref(), word, fqn));
-            if extends_match || implements_match {
-                // Emit the `class` keyword within the expression span as the location.
-                out.push(Location {
-                    uri: uri.clone(),
-                    range: sv.name_range_in_span("class", stmt_span),
-                });
-            }
-        }
-        ExprKind::New(n) => {
-            collect_anon_class_in_expr(n.class, word, fqn, sv, stmt_span, uri, out);
-        }
-        ExprKind::Assign(a) => {
-            collect_anon_class_in_expr(a.value, word, fqn, sv, stmt_span, uri, out);
-        }
-        _ => {}
     }
 }

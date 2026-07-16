@@ -126,9 +126,11 @@ class Cat implements Animal {}
 "#,
         )
         .await;
+    // The two `implements Animal` clauses count as references to the
+    // interface — same posting-list semantics as find-references.
     expect![[r#"
-        L1:10-L1:16: 0 references [editor.action.showReferences]
         L1:10-L1:16: 2 implementations [editor.action.showReferences]
+        L1:10-L1:16: 2 references [editor.action.showReferences]
         L2:6-L2:9: 0 references [editor.action.showReferences]
         L3:6-L3:9: 0 references [editor.action.showReferences]"#]]
     .assert_eq(&out);
@@ -146,8 +148,8 @@ class Circle extends Shape {}
         )
         .await;
     expect![[r#"
-        L1:15-L1:20: 0 references [editor.action.showReferences]
         L1:15-L1:20: 1 implementation [editor.action.showReferences]
+        L1:15-L1:20: 1 reference [editor.action.showReferences]
         L2:6-L2:12: 0 references [editor.action.showReferences]"#]]
     .assert_eq(&out);
 }
@@ -167,8 +169,8 @@ class B { use Loggable; }
         )
         .await;
     expect![[r#"
-        L1:6-L1:14: 0 references [editor.action.showReferences]
         L1:6-L1:14: 2 implementations [editor.action.showReferences]
+        L1:6-L1:14: 2 references [editor.action.showReferences]
         L2:20-L2:23: 0 references [editor.action.showReferences]
         L4:6-L4:7: 0 references [editor.action.showReferences]
         L5:6-L5:7: 0 references [editor.action.showReferences]"#]]
@@ -191,7 +193,7 @@ class Child extends Base {
         )
         .await;
     expect![[r#"
-        L1:6-L1:10: 0 references [editor.action.showReferences]
+        L1:6-L1:10: 1 reference [editor.action.showReferences]
         L2:20-L2:25: 0 references [editor.action.showReferences]
         L4:6-L4:11: 0 references [editor.action.showReferences]
         L5:20-L5:25: 0 references [editor.action.showReferences]
@@ -258,8 +260,8 @@ class Service {
         )
         .await;
     expect![[r#"
-        L1:6-L1:14: 0 references [editor.action.showReferences]
         L1:6-L1:14: 1 implementation [editor.action.showReferences]
+        L1:6-L1:14: 1 reference [editor.action.showReferences]
         L2:20-L2:23: 0 references [editor.action.showReferences]
         L4:6-L4:13: 0 references [editor.action.showReferences]
         L6:20-L6:23: 0 references [editor.action.showReferences]
