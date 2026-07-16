@@ -262,19 +262,39 @@ impl DocumentStore {
             .collect();
         drop(front_set);
         let session = self.analysis_session(self.workspace_php_version());
+        let mut all_chunks_settled = true;
         for chunk in files.chunks(CHUNK) {
             if cancel.is_cancelled() {
                 return;
             }
             self.yield_to_interactive_reads();
-            // A concurrent edit can land a salsa write mid-chunk and cancel the
-            // analysis snapshots. Warming is best-effort: skip the chunk — the
-            // edit schedules its own re-sweep, which re-covers these files.
-            let _ = salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
-                session.reanalyze_files_cancellable(chunk, cancel)
-            }));
+            // A concurrent write (e.g. another file being ingested) can land
+            // mid-chunk and cancel the analysis snapshot. Retry the same
+            // chunk immediately — `cancel` (not just the transient snapshot
+            // cancellation) is the authoritative stop signal, so a retry loop
+            // here only spins while an unrelated writer keeps landing, and
+            // exits promptly once `cancel` itself flips (a real edit
+            // superseding this sweep). Without the retry, a chunk silently
+            // skipped here has no guaranteed follow-up: `warm_sweeps_completed`
+            // must not count this sweep as covering files it never actually
+            // analyzed, or a caller polling that counter (e.g. a test waiting
+            // for the reference index to be fully warm) can observe "done"
+            // while some files' postings were never written.
+            loop {
+                if cancel.is_cancelled() {
+                    all_chunks_settled = false;
+                    break;
+                }
+                if salsa::Cancelled::catch(std::panic::AssertUnwindSafe(|| {
+                    session.reanalyze_files_cancellable(chunk, cancel)
+                }))
+                .is_ok()
+                {
+                    break;
+                }
+            }
         }
-        if !cancel.is_cancelled() {
+        if !cancel.is_cancelled() && all_chunks_settled {
             // The sweep staged each analyzed file's reference postings into
             // mir's AnalysisCache; persist them so the next launch's
             // `warm_start_indexes` replays references index-warm. Flush
