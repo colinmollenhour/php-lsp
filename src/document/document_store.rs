@@ -285,8 +285,21 @@ impl DocumentStore {
             }));
         }
         if !cancel.is_cancelled() {
+            // The sweep staged each analyzed file's reference postings into
+            // mir's AnalysisCache; persist them so the next launch's
+            // `warm_start_indexes` replays references index-warm. Flush
+            // before publishing completion — observers of the counter may
+            // rely on the postings being on disk.
+            session.flush_analysis_cache();
             self.warm_sweeps_completed.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Persist mir's staged analysis-cache entries (reference postings) to
+    /// disk. No-op when nothing changed since the last flush.
+    pub fn flush_analysis_cache(&self) {
+        self.analysis_session(self.workspace_php_version())
+            .flush_analysis_cache();
     }
 
     /// Warm sweeps that ran to completion. See `$/php-lsp/debugStats`.

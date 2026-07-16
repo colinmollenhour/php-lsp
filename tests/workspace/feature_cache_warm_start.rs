@@ -224,3 +224,69 @@ async fn did_save_cache_is_found_by_subsequent_scan() {
         expect![[r#"Class       User @ src/Model/User.php:3"#]].assert_eq(&syms);
     }
 }
+
+/// Reference postings persist across launches. The first server's analysis
+/// warm sweep stages each analyzed file's postings into mir's session
+/// `AnalysisCache` and flushes it on completion — before mir 0.56.0 only the
+/// CLI batch pipeline ever wrote these entries, so `cache.bin` proves the
+/// LSP-path write hook ran. A second server on the same cache dir (warm
+/// sweep disabled so nothing re-derives postings in the background) then
+/// answers a cross-file references query from the replayed index.
+#[tokio::test]
+async fn warm_start_replays_reference_postings_from_first_session() {
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let cache_dir = tempfile::tempdir().expect("cache tempdir");
+    let widget = "<?php\nclass Widget {\n    public function spin(): void {}\n}\n";
+    let caller = "<?php\n$w = new Widget();\n$w->spin();\n";
+    std::fs::write(workspace.path().join("widget.php"), widget).expect("write widget.php");
+    std::fs::write(workspace.path().join("caller.php"), caller).expect("write caller.php");
+
+    // Pin the PHP version: mir's cache epoch folds it in, and the direct
+    // cache read below must open with the same byte the server used.
+    let opts = |warm_analysis: bool| {
+        json!({
+            "cachePath": cache_dir.path().to_str().unwrap(),
+            "diagnostics": {"enabled": false},
+            "phpVersion": "8.3",
+            "warmAnalysis": warm_analysis,
+        })
+    };
+
+    // ── First launch: warm sweep commits postings and flushes on completion ──
+    let caller_uri = {
+        let mut s = TestServer::with_root_and_options(workspace.path(), opts(true)).await;
+        s.wait_for_index_ready().await;
+        assert!(
+            s.wait_for_warm_sweeps(1).await,
+            "warm sweep did not complete"
+        );
+        s.uri("caller.php")
+    };
+
+    // The LSP-path write hook: caller.php's postings are on disk, keyed by
+    // its content hash, in the mir session cache.
+    let session_dir = cache_dir.path().join("session");
+    let php_v = "8.3"
+        .parse::<mir_analyzer::PhpVersion>()
+        .expect("valid version")
+        .cache_byte();
+    let mir_cache = mir_analyzer::cache::AnalysisCache::open(&session_dir, php_v, 0);
+    let (_, ref_locs) = mir_cache
+        .get(&caller_uri, &mir_analyzer::cache::hash_content(caller))
+        .expect("warm sweep must persist an AnalysisCache entry for caller.php");
+    assert!(
+        !ref_locs.is_empty(),
+        "persisted entry must carry caller.php's reference postings"
+    );
+
+    // ── Second launch: no warm sweep — references answered from the replay ──
+    {
+        let mut s = TestServer::with_root_and_options(workspace.path(), opts(false)).await;
+        s.wait_for_index_ready().await;
+        s.open("widget.php", widget).await;
+        // Cursor on `spin` in its declaration (line 2, col 20).
+        let resp = s.references("widget.php", 2, 20, false).await;
+        let out = render_locations(&resp, &s.uri(""));
+        expect![[r#"caller.php:2:4-2:8"#]].assert_eq(&out);
+    }
+}

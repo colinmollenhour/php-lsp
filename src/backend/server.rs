@@ -218,6 +218,10 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        // Postings committed since the last warm sweep (on-demand query
+        // freshness passes, edit re-sweeps) reach disk only via a flush.
+        let docs = Arc::clone(&self.docs);
+        let _ = tokio::task::spawn_blocking(move || docs.flush_analysis_cache()).await;
         Ok(())
     }
 
