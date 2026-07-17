@@ -2,6 +2,12 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.18.1] — 2026-07-17
+
+### Fixed
+
+- **A blank line inside an indented heredoc/nowdoc in a CRLF-checked-out file could drop a reference posting**: the parser's indentation check saw the line's trailing `\r` as non-whitespace content and emitted a spurious "Invalid body indentation level" error, which silently dropped later reference postings from the file. Fixed by bumping the parser (php-rs-parser 0.18.3) and mir (0.58.0).
+
 ## [0.18.0] — 2026-07-16
 
 ### Added
