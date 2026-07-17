@@ -17,17 +17,20 @@
 mod config_index;
 mod detect;
 mod env_index;
+mod route_index;
 mod string_call;
 mod translation_index;
 mod view_index;
 
 pub use config_index::ConfigIndex;
 pub use env_index::EnvIndex;
+pub use route_index::RouteIndex;
 pub use translation_index::TranslationIndex;
 pub use view_index::ViewIndex;
 
 use config_index::config_completions;
 use env_index::env_completions;
+use route_index::route_completions;
 use string_call::{call_string_arg, call_string_prefix};
 use translation_index::translation_completions;
 use view_index::view_completions;
@@ -45,6 +48,8 @@ const VIEW_CALL_NAMES: &[&str] = &["view"];
 /// Bare function names recognized as translation string-key helper calls —
 /// `__()` and its `trans()` alias.
 const TRANS_CALL_NAMES: &[&str] = &["__", "trans"];
+/// Bare function names recognized as the `route()` string-key helper call.
+const ROUTE_CALL_NAMES: &[&str] = &["route"];
 
 #[derive(Debug, Default)]
 pub struct LaravelIndex {
@@ -53,6 +58,7 @@ pub struct LaravelIndex {
     pub config: ConfigIndex,
     pub views: ViewIndex,
     pub translations: TranslationIndex,
+    pub routes: RouteIndex,
 }
 
 impl LaravelIndex {
@@ -69,15 +75,16 @@ impl LaravelIndex {
             config: ConfigIndex::load(root),
             views: ViewIndex::load(root),
             translations: TranslationIndex::load(root),
+            routes: RouteIndex::load(root),
         }
     }
 }
 
 /// Resolve the cursor position to a Laravel string-key definition — checked
-/// in order: `env('KEY')`, `config('a.b.c')`, `view('a.b.c')`, then
-/// `__('a.b')`/`trans('a.b')`. Returns `None` immediately for non-Laravel
-/// workspaces, or when the cursor isn't inside a recognized call's string
-/// argument.
+/// in order: `env('KEY')`, `config('a.b.c')`, `view('a.b.c')`,
+/// `__('a.b')`/`trans('a.b')`, then `route('name')`. Returns `None`
+/// immediately for non-Laravel workspaces, or when the cursor isn't inside a
+/// recognized call's string argument.
 pub(crate) fn resolve_string_key(
     source: &str,
     position: Position,
@@ -97,6 +104,9 @@ pub(crate) fn resolve_string_key(
     }
     if let Some((key, _)) = call_string_arg(source, position, TRANS_CALL_NAMES) {
         return laravel.translations.get(&key).cloned();
+    }
+    if let Some((key, _)) = call_string_arg(source, position, ROUTE_CALL_NAMES) {
+        return laravel.routes.get(&key).cloned();
     }
     None
 }
@@ -124,6 +134,9 @@ pub(crate) fn completions_for_string_key(
     if let Some(prefix) = call_string_prefix(source, position, TRANS_CALL_NAMES) {
         return Some(translation_completions(&laravel.translations, &prefix));
     }
+    if let Some(prefix) = call_string_prefix(source, position, ROUTE_CALL_NAMES) {
+        return Some(route_completions(&laravel.routes, &prefix));
+    }
     None
 }
 
@@ -140,6 +153,7 @@ mod tests {
         assert_eq!(idx.config.keys().count(), 0);
         assert_eq!(idx.views.names().count(), 0);
         assert_eq!(idx.translations.keys().count(), 0);
+        assert_eq!(idx.routes.names().count(), 0);
     }
 
     #[test]
@@ -168,12 +182,19 @@ mod tests {
             "<?php\nreturn ['failed' => 'Nope'];\n",
         )
         .unwrap();
+        std::fs::create_dir_all(tmp.path().join("routes")).unwrap();
+        std::fs::write(
+            tmp.path().join("routes").join("web.php"),
+            "<?php\nRoute::get('/', Foo::class)->name('home');\n",
+        )
+        .unwrap();
         let idx = LaravelIndex::load(tmp.path());
         assert!(idx.is_laravel);
         assert!(idx.env.get("APP_NAME").is_some());
         assert!(idx.config.get("app.name").is_some());
         assert!(idx.views.get("welcome").is_some());
         assert!(idx.translations.get("auth.failed").is_some());
+        assert!(idx.routes.get("home").is_some());
     }
 
     #[test]
