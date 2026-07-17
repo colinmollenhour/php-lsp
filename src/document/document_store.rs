@@ -1623,7 +1623,10 @@ mod tests {
     // less predictable thread-spawn latency than Linux/macOS).
     fn spawn_yield_waiter(
         store: &Arc<DocumentStore>,
-    ) -> (std::sync::mpsc::Receiver<()>, std::thread::JoinHandle<std::time::Duration>) {
+    ) -> (
+        std::sync::mpsc::Receiver<()>,
+        std::thread::JoinHandle<std::time::Duration>,
+    ) {
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let store = Arc::clone(store);
         let handle = std::thread::spawn(move || {
