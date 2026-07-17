@@ -71,7 +71,7 @@ pub fn workspace_index(db: &dyn MirDatabase, ws: LspWorkspace) -> WorkspaceIndex
     let ws_files = ws.files(db);
     let mut files: Vec<(Url, Arc<FileIndex>)> = Vec::with_capacity(ws_files.len());
     for wf in ws_files.iter() {
-        let Ok(url) = Url::parse(&wf.source(db).path(db)) else {
+        let Ok(url) = Url::parse(wf.source(db).path(db)) else {
             continue;
         };
         let idx = file_index(db, *wf).0.clone();

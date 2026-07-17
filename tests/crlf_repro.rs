@@ -11,8 +11,13 @@ fn post_refs(line_ending: &str) -> Vec<String> {
     let root =
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/symfony-demo");
     let read = |p: &str| -> String {
+        // Normalize to LF first: on a checkout where git's `core.autocrlf`
+        // already converted the fixture to CRLF, replacing '\n' directly
+        // would double every '\r' into '\r\r\n' instead of producing plain
+        // CRLF, defeating the LF/CRLF comparison below.
         std::fs::read_to_string(root.join(p))
             .unwrap()
+            .replace("\r\n", "\n")
             .replace('\n', line_ending)
     };
     let session = mir_analyzer::AnalysisSession::new(mir_analyzer::PhpVersion::LATEST);
