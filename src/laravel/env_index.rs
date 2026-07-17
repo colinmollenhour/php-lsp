@@ -20,6 +20,13 @@ impl EnvIndex {
         self.vars.keys().map(String::as_str)
     }
 
+    /// The env var name whose `.env`/`.env.example` declaration contains
+    /// `position`, if any — the reverse of `get`, used to recognize a
+    /// find-references request starting from the definition site.
+    pub fn key_at(&self, uri: &Url, position: Position) -> Option<&str> {
+        crate::laravel::location_lookup::key_at(&self.vars, uri, position)
+    }
+
     /// Scan `.env` then `.env.example` at `root`. A key already found in
     /// `.env` is not overwritten by `.env.example` — the real file (when
     /// present) reflects the developer's actual configuration, and is more

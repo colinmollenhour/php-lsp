@@ -23,6 +23,8 @@ mod feature_laravel_env;
 mod feature_laravel_references;
 #[path = "frameworks/feature_laravel_route.rs"]
 mod feature_laravel_route;
+#[path = "frameworks/feature_laravel_string_key_references.rs"]
+mod feature_laravel_string_key_references;
 #[path = "frameworks/feature_laravel_translation.rs"]
 mod feature_laravel_translation;
 #[path = "frameworks/feature_laravel_view.rs"]

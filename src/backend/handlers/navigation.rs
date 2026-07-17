@@ -227,11 +227,41 @@ impl Backend {
             let uri = &params.text_document_position.text_document.uri;
             let position = params.text_document_position.position;
             let source = self.get_open_text(uri).unwrap_or_default();
+            let include_declaration = params.context.include_declaration;
+
+            // Laravel string-key definition sites (`.env` entry, config array
+            // key, view template start, translation key, route `->name(...)`)
+            // aren't `word_at_position` matches, so this must run before that
+            // check. `resolve_definition_key` checks `is_laravel` first (one
+            // atomic load + bool check) so non-Laravel workspaces never pay
+            // for the reverse-lookup scan inside it.
+            let laravel = self.laravel.load();
+            let laravel_def = crate::laravel::resolve_definition_key(uri, position, &laravel);
+            drop(laravel);
+            if let Some((names, key, def_location)) = laravel_def {
+                let mut locations = if include_declaration {
+                    vec![def_location]
+                } else {
+                    vec![]
+                };
+                for (file_uri, _) in self.docs.all_indexes() {
+                    let Some(doc) = self.docs.get_doc_salsa(&file_uri) else {
+                        continue;
+                    };
+                    for range in crate::laravel::find_call_sites(doc.source(), names, &key) {
+                        locations.push(Location {
+                            uri: file_uri.clone(),
+                            range,
+                        });
+                    }
+                }
+                return Ok(Some(locations));
+            }
+
             let word = match word_at_position(&source, position) {
                 Some(w) => w,
                 None => return Ok(None),
             };
-            let include_declaration = params.context.include_declaration;
 
             if word == "__construct"
                 && let Some(doc) = self.get_doc(uri)

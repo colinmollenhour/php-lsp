@@ -17,6 +17,7 @@
 mod config_index;
 mod detect;
 mod env_index;
+mod location_lookup;
 mod route_index;
 mod string_call;
 mod translation_index;
@@ -37,7 +38,9 @@ use view_index::view_completions;
 
 use std::path::Path;
 
-use tower_lsp::lsp_types::{CompletionItem, Location, Position};
+use tower_lsp::lsp_types::{CompletionItem, Location, Position, Url};
+
+pub(crate) use string_call::find_call_sites;
 
 /// Bare function names recognized as the `env()` string-key helper call.
 const ENV_CALL_NAMES: &[&str] = &["env"];
@@ -140,6 +143,48 @@ pub(crate) fn completions_for_string_key(
     None
 }
 
+/// If the cursor sits on a Laravel string-key *definition* site — a `.env`
+/// entry, a `config/*.php` array key, a view template's start, a
+/// translation key, or a route's `->name(...)` string — returns the call
+/// names to sweep the rest of the workspace for, the resolved key, and this
+/// definition's own `Location` (for `include_declaration`). `None` for
+/// non-Laravel workspaces or when the cursor isn't on any definition site.
+///
+/// Used by find-references: go-to-definition/completion start from a call
+/// site and look up a key; this is the reverse direction, starting from the
+/// definition and needing to know *which* key it is before a workspace
+/// sweep is possible.
+pub(crate) fn resolve_definition_key(
+    uri: &Url,
+    position: Position,
+    laravel: &LaravelIndex,
+) -> Option<(&'static [&'static str], String, Location)> {
+    if !laravel.is_laravel {
+        return None;
+    }
+    if let Some(key) = laravel.env.key_at(uri, position) {
+        let loc = laravel.env.get(key)?.clone();
+        return Some((ENV_CALL_NAMES, key.to_string(), loc));
+    }
+    if let Some(key) = laravel.config.key_at(uri, position) {
+        let loc = laravel.config.get(key)?.clone();
+        return Some((CONFIG_CALL_NAMES, key.to_string(), loc));
+    }
+    if let Some(key) = laravel.views.key_at(uri, position) {
+        let loc = laravel.views.get(key)?.clone();
+        return Some((VIEW_CALL_NAMES, key.to_string(), loc));
+    }
+    if let Some(key) = laravel.translations.key_at(uri, position) {
+        let loc = laravel.translations.get(key)?.clone();
+        return Some((TRANS_CALL_NAMES, key.to_string(), loc));
+    }
+    if let Some(key) = laravel.routes.key_at(uri, position) {
+        let loc = laravel.routes.get(key)?.clone();
+        return Some((ROUTE_CALL_NAMES, key.to_string(), loc));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,5 +260,45 @@ mod tests {
             character: 5,
         };
         assert!(completions_for_string_key("<?php\nenv('", pos, None).is_none());
+    }
+
+    #[test]
+    fn resolve_definition_key_finds_env_var_declaration() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("artisan"), "#!/usr/bin/env php").unwrap();
+        std::fs::write(tmp.path().join(".env"), "APP_NAME=Test\n").unwrap();
+        let laravel = LaravelIndex::load(tmp.path());
+        let uri = Url::from_file_path(tmp.path().join(".env")).unwrap();
+        let (names, key, _loc) = resolve_definition_key(
+            &uri,
+            Position {
+                line: 0,
+                character: 2,
+            },
+            &laravel,
+        )
+        .unwrap();
+        assert_eq!(names, ENV_CALL_NAMES);
+        assert_eq!(key, "APP_NAME");
+    }
+
+    #[test]
+    fn resolve_definition_key_none_when_not_on_a_definition() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("artisan"), "#!/usr/bin/env php").unwrap();
+        std::fs::write(tmp.path().join(".env"), "APP_NAME=Test\n").unwrap();
+        let laravel = LaravelIndex::load(tmp.path());
+        let uri = Url::from_file_path(tmp.path().join("app.php")).unwrap();
+        assert!(
+            resolve_definition_key(
+                &uri,
+                Position {
+                    line: 0,
+                    character: 0
+                },
+                &laravel
+            )
+            .is_none()
+        );
     }
 }

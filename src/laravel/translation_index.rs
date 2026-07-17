@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use php_ast::{ArrayElement, ExprKind, StmtKind};
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Location, Range, Url};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Location, Position, Range, Url};
 
 use crate::analysis::diagnostics::parse_document_no_diags;
 use crate::document::ast::{SourceView, offset_to_position};
@@ -30,6 +30,13 @@ impl TranslationIndex {
 
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.keys.keys().map(String::as_str)
+    }
+
+    /// The translation key whose declaration contains `position`, if any —
+    /// the reverse of `get`, used to recognize a find-references request
+    /// starting from the definition site.
+    pub fn key_at(&self, uri: &Url, position: Position) -> Option<&str> {
+        crate::laravel::location_lookup::key_at(&self.keys, uri, position)
     }
 
     pub(super) fn load(root: &Path) -> Self {

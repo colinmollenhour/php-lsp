@@ -15,7 +15,7 @@ use std::path::Path;
 
 use php_ast::visitor::{Visitor, walk_expr};
 use php_ast::{Block, Expr, ExprKind};
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Location, Range, Url};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Location, Position, Range, Url};
 
 use crate::analysis::diagnostics::parse_document_no_diags;
 use crate::document::ast::SourceView;
@@ -32,6 +32,13 @@ impl RouteIndex {
 
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.routes.keys().map(String::as_str)
+    }
+
+    /// The route name whose `->name(...)` declaration contains `position`,
+    /// if any — the reverse of `get`, used to recognize a find-references
+    /// request starting from the definition site.
+    pub fn key_at(&self, uri: &Url, position: Position) -> Option<&str> {
+        crate::laravel::location_lookup::key_at(&self.routes, uri, position)
     }
 
     /// Direct `.php` children of `routes/` (matches `ConfigIndex`'s and

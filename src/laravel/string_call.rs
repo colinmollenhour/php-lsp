@@ -81,6 +81,48 @@ pub(crate) fn call_string_prefix(
     Some(before[quote_pos + 1..].to_string())
 }
 
+/// Every string-literal argument to a bare call to one of `names` anywhere
+/// in `source` whose content equals `target`, with its `Range`. Used to
+/// sweep a file for Laravel string-key usages once the key is already known
+/// (find-references), as opposed to `call_string_arg`'s single
+/// cursor-position lookup.
+pub(crate) fn find_call_sites(source: &str, names: &[&str], target: &str) -> Vec<Range> {
+    let mut out = Vec::new();
+    for (line_no, line) in source.lines().enumerate() {
+        let bytes = line.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let quote = bytes[i];
+            if quote != b'\'' && quote != b'"' {
+                i += 1;
+                continue;
+            }
+            let content_start = i + 1;
+            let mut j = content_start;
+            while j < bytes.len() && bytes[j] != quote {
+                j += 1;
+            }
+            if j >= bytes.len() {
+                break;
+            }
+            if line[content_start..j] == *target && preceded_by_call(&line[..i], names) {
+                out.push(Range {
+                    start: Position {
+                        line: line_no as u32,
+                        character: byte_to_utf16(line, content_start),
+                    },
+                    end: Position {
+                        line: line_no as u32,
+                        character: byte_to_utf16(line, j),
+                    },
+                });
+            }
+            i = j + 1;
+        }
+    }
+    out
+}
+
 /// Whether `before_quote` (the line text up to, but excluding, the opening
 /// quote) ends with a bare call to one of `names` — `env(`, `config(`, etc.
 /// — at a word boundary, so `getenv(` doesn't match the `env` pattern.
@@ -191,5 +233,26 @@ mod tests {
             character: 5,
         };
         assert_eq!(call_string_prefix(src, pos, ENV).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn find_call_sites_collects_every_matching_call_across_lines() {
+        let src = "<?php\n$a = env('APP_NAME');\n$b = env('APP_NAME');\n$c = env('OTHER');\n";
+        let sites = find_call_sites(src, ENV, "APP_NAME");
+        assert_eq!(sites.len(), 2);
+        assert_eq!(sites[0].start.line, 1);
+        assert_eq!(sites[1].start.line, 2);
+    }
+
+    #[test]
+    fn find_call_sites_ignores_unrelated_calls_and_keys() {
+        let src = "<?php\n$a = getenv('APP_NAME');\n$b = env('OTHER');\n";
+        assert!(find_call_sites(src, ENV, "APP_NAME").is_empty());
+    }
+
+    #[test]
+    fn find_call_sites_empty_for_no_matches() {
+        let src = "<?php\necho 'hello';\n";
+        assert!(find_call_sites(src, ENV, "APP_NAME").is_empty());
     }
 }

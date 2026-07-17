@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Location, Url};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Location, Position, Url};
 
 use crate::text::zero_width_location;
 
@@ -27,6 +27,14 @@ impl ViewIndex {
 
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.views.keys().map(String::as_str)
+    }
+
+    /// The view name whose template's zero-width start location matches
+    /// `uri`/`position`, if any — the reverse of `get`. Since the location
+    /// is always `(0, 0)`, this only recognizes the cursor sitting at the
+    /// very start of the template file.
+    pub fn key_at(&self, uri: &Url, position: Position) -> Option<&str> {
+        crate::laravel::location_lookup::key_at(&self.views, uri, position)
     }
 
     pub(super) fn load(root: &Path) -> Self {
