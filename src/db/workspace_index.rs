@@ -300,8 +300,9 @@ impl WorkspaceIndexData {
     }
 }
 
-/// Arc wrapper with the same `Arc::ptr_eq`-based `Update` impl used throughout
-/// `src/db/`. The inner `WorkspaceIndexData` never compares structurally.
+/// Arc wrapper for `workspace_index`, which is `#[salsa::tracked(no_eq)]` —
+/// every rebuild allocates a fresh `Arc` and salsa never attempts to compare
+/// `WorkspaceIndexData` structurally.
 #[derive(Clone)]
 pub struct WorkspaceIndexArc(pub Arc<WorkspaceIndexData>);
 
@@ -311,7 +312,3 @@ impl WorkspaceIndexArc {
         &self.0
     }
 }
-
-// SAFETY: same contract as other `*Arc` newtypes — ptr_eq is sufficient because
-// every rebuild allocates a fresh `Arc`.
-crate::impl_arc_update!(WorkspaceIndexArc);

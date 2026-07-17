@@ -63,7 +63,7 @@ mod tests {
     /// deleted via `remove_stale_output` → `delete_entity` → `DidDiscard`.
     #[salsa::tracked]
     fn active_files<'db>(db: &'db dyn Database, count: ActiveFileCount) -> Vec<TrackedFile<'db>> {
-        (0..count.n(db))
+        (0..*count.n(db))
             .map(|id| TrackedFile::new(db, id))
             .collect()
     }
@@ -72,7 +72,7 @@ mod tests {
     /// deleted, its memo table is cleared and `DidDiscard` fires for this entry.
     #[salsa::tracked]
     fn file_hash<'db>(db: &'db dyn Database, file: TrackedFile<'db>) -> u64 {
-        file.file_id(db) as u64 * 0xdeadbeef
+        *file.file_id(db) as u64 * 0xdeadbeef
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ mod tests {
         let count_input = ActiveFileCount::new(&db, 3);
         {
             let files = active_files(&db, count_input);
-            for &f in &files {
+            for &f in files {
                 let _ = file_hash(&db, f);
             }
         } // `files` dropped here; &db borrow released

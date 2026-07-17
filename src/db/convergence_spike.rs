@@ -23,7 +23,7 @@ use serial_test::serial;
 static EXEC_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// A trivial php-lsp-owned tracked query over mir's db + input.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 fn spike_text_len(db: &dyn MirDatabase, file: SourceFile) -> usize {
     EXEC_COUNT.fetch_add(1, Ordering::SeqCst);
     file.text(db).len()

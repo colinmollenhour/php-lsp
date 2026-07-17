@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::types::symbol_map::SymbolMap;
 
-/// Arc wrapper for [`SymbolMap`]. Pointer equality drives salsa invalidation:
+/// Arc wrapper for [`SymbolMap`]. `symbol_map` is `#[salsa::tracked(no_eq)]`:
 /// every `build` call produces a new `Arc`, so a changed parse always propagates.
 #[derive(Clone)]
 pub struct SymbolMapArc(pub Arc<SymbolMap>);
@@ -17,5 +17,3 @@ impl SymbolMapArc {
         &self.0
     }
 }
-
-crate::impl_arc_update!(SymbolMapArc);

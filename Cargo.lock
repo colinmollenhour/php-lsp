@@ -1022,8 +1022,8 @@ dependencies = [
 
 [[package]]
 name = "mir-analyzer"
-version = "0.57.0"
-source = "git+https://github.com/jorgsowa/mir#8b212891ef3c3276c3ca428f0c40c8eaf4f6ef7b"
+version = "0.58.0"
+source = "git+https://github.com/jorgsowa/mir#d3b548378f907e66ad47e563d7b27cbe494cefd0"
 dependencies = [
  "bincode 1.3.3",
  "blake3",
@@ -1048,8 +1048,8 @@ dependencies = [
 
 [[package]]
 name = "mir-codebase"
-version = "0.57.0"
-source = "git+https://github.com/jorgsowa/mir#8b212891ef3c3276c3ca428f0c40c8eaf4f6ef7b"
+version = "0.58.0"
+source = "git+https://github.com/jorgsowa/mir#d3b548378f907e66ad47e563d7b27cbe494cefd0"
 dependencies = [
  "dashmap 6.2.1",
  "indexmap",
@@ -1060,8 +1060,8 @@ dependencies = [
 
 [[package]]
 name = "mir-issues"
-version = "0.57.0"
-source = "git+https://github.com/jorgsowa/mir#8b212891ef3c3276c3ca428f0c40c8eaf4f6ef7b"
+version = "0.58.0"
+source = "git+https://github.com/jorgsowa/mir#d3b548378f907e66ad47e563d7b27cbe494cefd0"
 dependencies = [
  "mir-types",
  "serde",
@@ -1069,8 +1069,8 @@ dependencies = [
 
 [[package]]
 name = "mir-types"
-version = "0.57.0"
-source = "git+https://github.com/jorgsowa/mir#8b212891ef3c3276c3ca428f0c40c8eaf4f6ef7b"
+version = "0.58.0"
+source = "git+https://github.com/jorgsowa/mir#d3b548378f907e66ad47e563d7b27cbe494cefd0"
 dependencies = [
  "dashmap 6.2.1",
  "indexmap",
@@ -1166,9 +1166,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "php-ast"
-version = "0.18.2"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eac0c65d2ef871f0751d929a50a5d403d5e9beebfd370dcae8383d72ab97d212"
+checksum = "939e150fa6e738ca9777cfc9ada95a53edb3e3037c5eb6307a5a0bfe1cb9542c"
 dependencies = [
  "bumpalo",
  "serde",
@@ -1176,9 +1176,9 @@ dependencies = [
 
 [[package]]
 name = "php-lexer"
-version = "0.18.2"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7a56c316c092338f0c56cdf8389a196231b8188e64e7b442b8b41c52aa2e9c9"
+checksum = "c5b3f3549bdef9fa3c3c7d0056d38809a12a181ef14596637a075538eefb240b"
 dependencies = [
  "memchr",
  "php-ast",
@@ -1222,9 +1222,9 @@ dependencies = [
 
 [[package]]
 name = "php-rs-parser"
-version = "0.18.2"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fea28e08c487585fe0ca8ed467c2acec2855dedd996d9552fd9a32fff9195718"
+checksum = "a9be654f1996793eba3244c2f4a600878a5907eadcd80ada4781db4571c9b561"
 dependencies = [
  "bumpalo",
  "memchr",
@@ -1237,9 +1237,9 @@ dependencies = [
 
 [[package]]
 name = "phpdoc-parser"
-version = "0.18.2"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4cebe14125ad0e9d588f822b82fac5f450406e7c5d12c37f029f4cfe132828a"
+checksum = "8e7f7503a2b90e9fc248ecc9ab751af285f2271a36e9170cfde335bfe3fadd01"
 dependencies = [
  "serde",
 ]
@@ -1474,9 +1474,9 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "salsa"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffbaab832e2ea754afda4a738f987dd1e8bd30c9e5d8c981ee6a3934386095e2"
+checksum = "63ad5919b18c2deaf18921fffd5c84d6e41416d1ef80b6b541d629aa30ce8556"
 dependencies = [
  "boxcar",
  "crossbeam-queue",
@@ -1500,20 +1500,19 @@ dependencies = [
 
 [[package]]
 name = "salsa-macro-rules"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de6872462ac73d39969a836273c24163e6a26a4e08f5114fcd80e25af30ea9c6"
+checksum = "d50068b1f8b1ac7567a4a70eb6cc15daa9dc997b73a6b5aa3248dd960755cddb"
 
 [[package]]
 name = "salsa-macros"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76bc78ffaf65b1a9175818592c5130aa10b1bb245a905722fd4db87cea8a8457"
+checksum = "8b26cb1c61fc424f7ff36e0606491429f58d1738bb0917cd999d680baae0c52c"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
- "synstructure",
 ]
 
 [[package]]

@@ -17,18 +17,3 @@ impl IndexArc {
         &self.0
     }
 }
-
-// SAFETY: writes through `old_pointer` only when returning `true`. Uses
-// structural equality on `FileIndex` so that body-only edits (no declaration
-// change) return `false` and don't cascade to `workspace_index`.
-unsafe impl salsa::Update for IndexArc {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_ref = unsafe { &mut *old_pointer };
-        if *old_ref.0 == *new_value.0 {
-            false
-        } else {
-            *old_ref = new_value;
-            true
-        }
-    }
-}

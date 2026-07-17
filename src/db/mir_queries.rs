@@ -40,7 +40,7 @@ pub struct LspWorkspace {
 /// mir's `SourceFile`.
 #[salsa::tracked(no_eq, lru = 2048)]
 pub fn parsed_doc(db: &dyn MirDatabase, file: SourceFile) -> ParsedArc {
-    ParsedArc(Arc::new(ParsedDoc::parse(file.text(db))))
+    ParsedArc(Arc::new(ParsedDoc::parse(file.text(db).clone())))
 }
 
 /// Build the symbol map for a file. Shares the converged-db [`parsed_doc`], so
@@ -57,9 +57,9 @@ pub fn symbol_map(db: &dyn MirDatabase, file: SourceFile) -> SymbolMapArc {
 #[salsa::tracked]
 pub fn file_index(db: &dyn MirDatabase, wf: LspWsFile) -> IndexArc {
     if let Some(cached) = wf.cached_index(db) {
-        return IndexArc(cached);
+        return IndexArc(cached.clone());
     }
-    let doc = parsed_doc(db, wf.source(db));
+    let doc = parsed_doc(db, *wf.source(db));
     IndexArc(Arc::new(FileIndex::extract(doc.get())))
 }
 

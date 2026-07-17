@@ -723,7 +723,7 @@ impl DocumentStore {
         // Symbol map runs on the shared mir db, sharing its memoized `parsed_doc`.
         let wf = self.lsp_ws_file(uri)?;
         Some(self.snapshot_mir_query(move |db| {
-            let sf = wf.source(db);
+            let sf = *wf.source(db);
             crate::db::mir_queries::symbol_map(db, sf).0.clone()
         }))
     }
@@ -762,8 +762,8 @@ impl DocumentStore {
         let wf = self.lsp_ws_file(uri)?;
         self.caches.bump_parse_count();
         let (text, doc) = self.snapshot_mir_query(move |db| {
-            let sf = wf.source(db);
-            let text = sf.text(db);
+            let sf = *wf.source(db);
+            let text = sf.text(db).clone();
             let doc = crate::db::mir_queries::parsed_doc(db, sf).0.clone();
             (text, doc)
         });
@@ -791,8 +791,8 @@ impl DocumentStore {
 
         if let Some(wf) = self.lsp_ws_file(uri)
             && let Some((text, doc)) = self.try_snapshot_mir_query(3, move |db| {
-                let sf = wf.source(db);
-                let text = sf.text(db);
+                let sf = *wf.source(db);
+                let text = sf.text(db).clone();
                 let doc = crate::db::mir_queries::parsed_doc(db, sf).0.clone();
                 (text, doc)
             })

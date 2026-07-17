@@ -3,19 +3,16 @@
 //! semantic diagnostics) depend on this one, so each file is parsed at most
 //! once per revision.
 //!
-//! `ParsedDoc` owns a self-referential bumpalo arena and cannot safely
-//! implement the structural `Update` trait — instead we wrap in a `ParsedArc`
-//! newtype whose `Update` impl uses `Arc::ptr_eq`. Every reparse produces a
-//! new `Arc`, so pointer equality is a correct (if conservative) "changed"
-//! signal: salsa never falsely backdates, and downstream queries re-run after
-//! every input text change.
+//! `ParsedDoc` owns a self-referential bumpalo arena and isn't `PartialEq`, so
+//! `parsed_doc` is `#[salsa::tracked(no_eq)]`: salsa skips backdating and
+//! downstream queries re-run after every input text change.
 
 use std::sync::Arc;
 
 use crate::document::ast::ParsedDoc;
 
 /// Opaque handle to a parsed document. Cheap to clone (refcount bump); never
-/// compared structurally. See module docs for the `Update` contract.
+/// compared structurally — see module docs for the `no_eq` contract.
 ///
 /// No `Debug` impl because `ParsedDoc` isn't `Debug` (it owns raw pointers
 /// into a bumpalo arena). Salsa doesn't require `Debug` on tracked returns
@@ -28,8 +25,3 @@ impl ParsedArc {
         &self.0
     }
 }
-
-// SAFETY: The `ptr_eq` short-circuit returns `false` without writing, matching
-// salsa's "no observable change" contract. `ParsedDoc` is already `Send + Sync`
-// (see `ast.rs:98`).
-crate::impl_arc_update!(ParsedArc);

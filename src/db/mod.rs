@@ -19,23 +19,3 @@ mod gc_gate_test;
 
 #[cfg(test)]
 mod convergence_spike;
-
-/// Implement the `salsa::Update` trait for Arc-wrapped types using pointer equality.
-/// This reduces boilerplate for types that wrap a single Arc field and should only
-/// invalidate when the pointer changes (not the contents).
-#[macro_export]
-macro_rules! impl_arc_update {
-    ($ty:ty) => {
-        unsafe impl salsa::Update for $ty {
-            unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-                let old_ref = unsafe { &mut *old_pointer };
-                if std::sync::Arc::ptr_eq(&old_ref.0, &new_value.0) {
-                    false
-                } else {
-                    *old_ref = new_value;
-                    true
-                }
-            }
-        }
-    };
-}
