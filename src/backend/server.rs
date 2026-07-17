@@ -500,6 +500,7 @@ impl LanguageServer for Backend {
             // load_full() returns Arc<PhpStormMeta> — avoids a non-'static borrow
             // that would prevent moving into spawn_blocking.
             let meta_arc = self.meta.load_full();
+            let laravel_arc = self.laravel.load_full();
             let imports = self.file_imports(uri);
             let wi = self.workspace_index_async().await;
             let wi_for_class_search = Arc::clone(&wi);
@@ -591,6 +592,7 @@ impl LanguageServer for Backend {
                     analysis: analysis.as_deref(),
                     type_map: Some(&get_type_map),
                     session: Some(session),
+                    laravel: Some(&laravel_arc),
                 };
                 filtered_completions_at(&doc, &other_docs, trigger.as_deref(), &ctx)
             })

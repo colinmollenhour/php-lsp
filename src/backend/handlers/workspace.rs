@@ -316,6 +316,8 @@ impl Backend {
                 self.psr4.store(Arc::new(merged));
             }
             self.meta.store(Arc::new(PhpStormMeta::load(&roots[0])));
+            self.laravel
+                .store(Arc::new(crate::laravel::LaravelIndex::load(&roots[0])));
 
             let token = NumberOrString::String("php-lsp/indexing".to_string());
             self.client

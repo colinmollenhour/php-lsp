@@ -29,6 +29,25 @@ impl Backend {
             let uri = &params.text_document_position_params.text_document.uri;
             let position = params.text_document_position_params.position;
             let source = self.get_open_text(uri).unwrap_or_default();
+
+            // Laravel `env('KEY')` — resolve against the workspace's .env /
+            // .env.example before falling through to symbol resolution, since
+            // a string literal is never a `word_at_position` match. Gated on
+            // `is_laravel` first (one atomic load + bool check) so non-Laravel
+            // workspaces never pay for the line scan below.
+            let laravel = self.laravel.load();
+            if laravel.is_laravel
+                && let Some((key, _)) = crate::laravel::call_string_arg(
+                    &source,
+                    position,
+                    crate::laravel::ENV_CALL_NAMES,
+                )
+                && let Some(loc) = laravel.env.get(&key)
+            {
+                return Ok(Some(GotoDefinitionResponse::Scalar(loc.clone())));
+            }
+            drop(laravel);
+
             let doc = match self.get_doc(uri) {
                 Some(d) => d,
                 None => return Ok(None),

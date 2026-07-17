@@ -242,6 +242,11 @@ pub struct CompletionCtx<'a> {
     /// mir-analyzer session for querying phpstorm-stubs member info on
     /// built-in PHP classes. `None` in unit tests that don't require stubs.
     pub session: Option<std::sync::Arc<mir_analyzer::AnalysisSession>>,
+    /// Laravel string-key index (`env`/`config`/`view`/... — see
+    /// `crate::laravel`), for completion inside those helper calls' string
+    /// arguments. `None` in unit tests that don't supply it, and inert
+    /// (empty) for non-Laravel workspaces.
+    pub laravel: Option<&'a crate::laravel::LaravelIndex>,
 }
 
 /// Whole-doc [`TypeMap`] through the ctx cache when wired, else a fresh build.
@@ -360,12 +365,24 @@ pub fn filtered_completions_at(
 
     let doc_uri = ctx.doc_uri;
 
+    // Gate every Laravel-specific check behind `is_laravel` (one bool read on
+    // an already-loaded `Arc`) so non-Laravel workspaces never pay for the
+    // `call_string_prefix` line scan below. Computed once and reused by both
+    // the string-suppression guard and Feature 10.
+    let laravel_env_prefix = ctx.laravel.filter(|l| l.is_laravel).and_then(|l| {
+        let prefix =
+            crate::laravel::call_string_prefix(source?, position?, crate::laravel::ENV_CALL_NAMES)?;
+        Some((l, prefix))
+    });
+
     // Suppress all completions when the cursor is inside a string literal or
-    // comment — except for include/require path strings, where file-path
-    // completions are legitimate inside the string argument.
+    // comment — except for include/require path strings and Laravel env()
+    // keys, where completions are legitimate inside the string argument.
     if let (Some(src), Some(pos)) = (source, position) {
         let cursor_byte = doc.view().byte_of_position(pos) as usize;
-        if cursor_in_string_or_comment(src, cursor_byte) && include_path_prefix(src, pos).is_none()
+        if cursor_in_string_or_comment(src, cursor_byte)
+            && include_path_prefix(src, pos).is_none()
+            && laravel_env_prefix.is_none()
         {
             return vec![];
         }
@@ -634,6 +651,11 @@ pub fn filtered_completions_at(
                 // instead of falling back to keywords/symbols
                 let items = include_path_completions(uri, &prefix);
                 return items;
+            }
+
+            // Feature 10: Laravel env('...') key completions
+            if let Some((laravel, prefix)) = laravel_env_prefix {
+                return crate::laravel::env_completions(&laravel.env, &prefix);
             }
 
             // Classes (label, kind, FQN) per other doc, collected lazily once
