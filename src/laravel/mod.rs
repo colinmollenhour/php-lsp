@@ -18,13 +18,16 @@ mod config_index;
 mod detect;
 mod env_index;
 mod string_call;
+mod view_index;
 
 pub use config_index::ConfigIndex;
 pub use env_index::EnvIndex;
+pub use view_index::ViewIndex;
 
 use config_index::config_completions;
 use env_index::env_completions;
 use string_call::{call_string_arg, call_string_prefix};
+use view_index::view_completions;
 
 use std::path::Path;
 
@@ -34,12 +37,15 @@ use tower_lsp::lsp_types::{CompletionItem, Location, Position};
 const ENV_CALL_NAMES: &[&str] = &["env"];
 /// Bare function names recognized as the `config()` string-key helper call.
 const CONFIG_CALL_NAMES: &[&str] = &["config"];
+/// Bare function names recognized as the `view()` string-key helper call.
+const VIEW_CALL_NAMES: &[&str] = &["view"];
 
 #[derive(Debug, Default)]
 pub struct LaravelIndex {
     pub is_laravel: bool,
     pub env: EnvIndex,
     pub config: ConfigIndex,
+    pub views: ViewIndex,
 }
 
 impl LaravelIndex {
@@ -54,14 +60,15 @@ impl LaravelIndex {
             is_laravel: true,
             env: EnvIndex::load(root),
             config: ConfigIndex::load(root),
+            views: ViewIndex::load(root),
         }
     }
 }
 
 /// Resolve the cursor position to a Laravel string-key definition — checked
-/// in order: `env('KEY')`, then `config('a.b.c')`. Returns `None`
-/// immediately for non-Laravel workspaces, or when the cursor isn't inside a
-/// recognized call's string argument.
+/// in order: `env('KEY')`, `config('a.b.c')`, then `view('a.b.c')`. Returns
+/// `None` immediately for non-Laravel workspaces, or when the cursor isn't
+/// inside a recognized call's string argument.
 pub(crate) fn resolve_string_key(
     source: &str,
     position: Position,
@@ -75,6 +82,9 @@ pub(crate) fn resolve_string_key(
     }
     if let Some((key, _)) = call_string_arg(source, position, CONFIG_CALL_NAMES) {
         return laravel.config.get(&key).cloned();
+    }
+    if let Some((key, _)) = call_string_arg(source, position, VIEW_CALL_NAMES) {
+        return laravel.views.get(&key).cloned();
     }
     None
 }
@@ -96,6 +106,9 @@ pub(crate) fn completions_for_string_key(
     if let Some(prefix) = call_string_prefix(source, position, CONFIG_CALL_NAMES) {
         return Some(config_completions(&laravel.config, &prefix));
     }
+    if let Some(prefix) = call_string_prefix(source, position, VIEW_CALL_NAMES) {
+        return Some(view_completions(&laravel.views, &prefix));
+    }
     None
 }
 
@@ -110,10 +123,11 @@ mod tests {
         assert!(!idx.is_laravel);
         assert_eq!(idx.env.names().count(), 0);
         assert_eq!(idx.config.keys().count(), 0);
+        assert_eq!(idx.views.names().count(), 0);
     }
 
     #[test]
-    fn load_laravel_root_builds_env_and_config_index() {
+    fn load_laravel_root_builds_every_domain_index() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("artisan"), "#!/usr/bin/env php").unwrap();
         std::fs::write(tmp.path().join(".env"), "APP_NAME=Test\n").unwrap();
@@ -123,10 +137,20 @@ mod tests {
             "<?php\nreturn ['name' => 'Test'];\n",
         )
         .unwrap();
+        std::fs::create_dir_all(tmp.path().join("resources").join("views")).unwrap();
+        std::fs::write(
+            tmp.path()
+                .join("resources")
+                .join("views")
+                .join("welcome.blade.php"),
+            "<h1>Hi</h1>",
+        )
+        .unwrap();
         let idx = LaravelIndex::load(tmp.path());
         assert!(idx.is_laravel);
         assert!(idx.env.get("APP_NAME").is_some());
         assert!(idx.config.get("app.name").is_some());
+        assert!(idx.views.get("welcome").is_some());
     }
 
     #[test]

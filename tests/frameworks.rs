@@ -21,5 +21,7 @@ mod feature_laravel_config;
 mod feature_laravel_env;
 #[path = "frameworks/feature_laravel_references.rs"]
 mod feature_laravel_references;
+#[path = "frameworks/feature_laravel_view.rs"]
+mod feature_laravel_view;
 #[path = "frameworks/feature_symfony.rs"]
 mod feature_symfony;
