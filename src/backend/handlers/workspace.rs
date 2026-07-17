@@ -325,16 +325,6 @@ impl Backend {
                 .await
                 .ok();
 
-            let warm_docs = Arc::clone(&self.docs);
-            tokio::task::spawn_blocking(move || {
-                let php_version = warm_docs.workspace_php_version();
-                warm_docs.analysis_session(php_version);
-            });
-
-            let docs = Arc::clone(&self.docs);
-            let open_files = self.open_files.clone();
-            let client = self.client.clone();
-            let psr4 = self.psr4.clone();
             let (exclude_paths, include_paths, max_indexed_files, debug, cache_path, warm_analysis) = {
                 let cfg = self.config.load();
                 let mut exclude = cfg.exclude_paths.clone();
@@ -350,6 +340,33 @@ impl Backend {
                     cfg.warm_analysis,
                 )
             };
+
+            // Attach the on-disk analysis cache before any task can build an
+            // `AnalysisSession`: `analysis_session()` caches its session per
+            // PHP version on first build, so a session built before the cache
+            // dir is known would permanently pin an in-memory-only session —
+            // silently dropping every warm sweep's flush for the server's
+            // lifetime. Must run before the prewarm task below is spawned.
+            let first_root_cache = if let Some(ref p) = cache_path {
+                Some(crate::index::cache::WorkspaceCache::with_dir(p.clone()))
+            } else {
+                crate::index::cache::WorkspaceCache::new(&roots[0])
+            };
+            if let Some(ref c) = first_root_cache {
+                self.docs
+                    .set_session_cache_dir(c.cache_dir().join("session"));
+            }
+
+            let warm_docs = Arc::clone(&self.docs);
+            tokio::task::spawn_blocking(move || {
+                let php_version = warm_docs.workspace_php_version();
+                warm_docs.analysis_session(php_version);
+            });
+
+            let docs = Arc::clone(&self.docs);
+            let open_files = self.open_files.clone();
+            let client = self.client.clone();
+            let psr4 = self.psr4.clone();
             tokio::spawn(async move {
                 client
                     .send_notification::<ProgressNotification>(ProgressParams {
@@ -396,18 +413,20 @@ impl Backend {
                 let scan_start = std::time::Instant::now();
                 let mut total = 0usize;
                 let mut from_cache = 0usize;
-                let mut session_cache_set = false;
+                let mut first_root_cache = first_root_cache;
                 for root in &roots {
-                    let cache = if let Some(ref p) = cache_path {
-                        Some(crate::index::cache::WorkspaceCache::with_dir(p.clone()))
-                    } else {
-                        crate::index::cache::WorkspaceCache::new(root)
-                    };
-                    if !session_cache_set && let Some(ref c) = cache {
-                        let session_dir = c.cache_dir().join("session");
-                        docs.set_session_cache_dir(session_dir);
-                        session_cache_set = true;
-                    }
+                    // The first root's cache was already opened synchronously
+                    // above (to attach the session cache dir before the
+                    // prewarm task could race it); reuse it here instead of
+                    // opening it twice. Later roots (multi-root workspaces)
+                    // still open their own.
+                    let cache = first_root_cache.take().or_else(|| {
+                        if let Some(ref p) = cache_path {
+                            Some(crate::index::cache::WorkspaceCache::with_dir(p.clone()))
+                        } else {
+                            crate::index::cache::WorkspaceCache::new(root)
+                        }
+                    });
                     let (n, c) = scan_workspace(
                         root.clone(),
                         Arc::clone(&docs),
