@@ -4,32 +4,42 @@
 //! lookups — `env('KEY')`, `config('a.b.c')`, `view('a.b')`, `route('name')`,
 //! `trans('a.b')` — that resolve against files elsewhere in the project rather
 //! than through normal symbol resolution. `LaravelIndex` builds a workspace-
-//! scan-time index for each of these domains (`env` is the first; further
-//! domains are added incrementally) and wires them into go-to-definition and
-//! completion via the string-literal detection in [`call_string_arg`] /
-//! [`call_string_prefix`].
+//! scan-time index for each of these domains (`env` and `config` so far;
+//! further domains are added incrementally) and wires them into
+//! go-to-definition ([`resolve_string_key`]) and completion
+//! ([`completions_for_string_key`]).
 //!
 //! Gated behind [`LaravelIndex::load`]'s project-detection check, so
 //! non-Laravel workspaces pay no cost beyond the one-time
-//! `artisan`/`composer.json` probe.
+//! `artisan`/`composer.json` probe: both dispatch functions bail out on the
+//! `is_laravel` flag before doing any string scanning.
 
+mod config_index;
 mod detect;
 mod env_index;
 mod string_call;
 
+pub use config_index::ConfigIndex;
 pub use env_index::EnvIndex;
-pub(crate) use env_index::env_completions;
-pub(crate) use string_call::{call_string_arg, call_string_prefix};
+
+use config_index::config_completions;
+use env_index::env_completions;
+use string_call::{call_string_arg, call_string_prefix};
 
 use std::path::Path;
 
+use tower_lsp::lsp_types::{CompletionItem, Location, Position};
+
 /// Bare function names recognized as the `env()` string-key helper call.
-pub(crate) const ENV_CALL_NAMES: &[&str] = &["env"];
+const ENV_CALL_NAMES: &[&str] = &["env"];
+/// Bare function names recognized as the `config()` string-key helper call.
+const CONFIG_CALL_NAMES: &[&str] = &["config"];
 
 #[derive(Debug, Default)]
 pub struct LaravelIndex {
     pub is_laravel: bool,
     pub env: EnvIndex,
+    pub config: ConfigIndex,
 }
 
 impl LaravelIndex {
@@ -43,8 +53,50 @@ impl LaravelIndex {
         Self {
             is_laravel: true,
             env: EnvIndex::load(root),
+            config: ConfigIndex::load(root),
         }
     }
+}
+
+/// Resolve the cursor position to a Laravel string-key definition — checked
+/// in order: `env('KEY')`, then `config('a.b.c')`. Returns `None`
+/// immediately for non-Laravel workspaces, or when the cursor isn't inside a
+/// recognized call's string argument.
+pub(crate) fn resolve_string_key(
+    source: &str,
+    position: Position,
+    laravel: &LaravelIndex,
+) -> Option<Location> {
+    if !laravel.is_laravel {
+        return None;
+    }
+    if let Some((key, _)) = call_string_arg(source, position, ENV_CALL_NAMES) {
+        return laravel.env.get(&key).cloned();
+    }
+    if let Some((key, _)) = call_string_arg(source, position, CONFIG_CALL_NAMES) {
+        return laravel.config.get(&key).cloned();
+    }
+    None
+}
+
+/// Completions for the cursor position inside a recognized Laravel string-key
+/// call. `Some(items)` (possibly empty) means the cursor is inside such a
+/// call and normal completion should be skipped in favor of these items;
+/// `None` means the cursor isn't in a recognized context at all — the caller
+/// should fall through to its normal completion logic.
+pub(crate) fn completions_for_string_key(
+    source: &str,
+    position: Position,
+    laravel: Option<&LaravelIndex>,
+) -> Option<Vec<CompletionItem>> {
+    let laravel = laravel.filter(|l| l.is_laravel)?;
+    if let Some(prefix) = call_string_prefix(source, position, ENV_CALL_NAMES) {
+        return Some(env_completions(&laravel.env, &prefix));
+    }
+    if let Some(prefix) = call_string_prefix(source, position, CONFIG_CALL_NAMES) {
+        return Some(config_completions(&laravel.config, &prefix));
+    }
+    None
 }
 
 #[cfg(test)]
@@ -57,15 +109,43 @@ mod tests {
         let idx = LaravelIndex::load(tmp.path());
         assert!(!idx.is_laravel);
         assert_eq!(idx.env.names().count(), 0);
+        assert_eq!(idx.config.keys().count(), 0);
     }
 
     #[test]
-    fn load_laravel_root_builds_env_index() {
+    fn load_laravel_root_builds_env_and_config_index() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("artisan"), "#!/usr/bin/env php").unwrap();
         std::fs::write(tmp.path().join(".env"), "APP_NAME=Test\n").unwrap();
+        std::fs::create_dir_all(tmp.path().join("config")).unwrap();
+        std::fs::write(
+            tmp.path().join("config").join("app.php"),
+            "<?php\nreturn ['name' => 'Test'];\n",
+        )
+        .unwrap();
         let idx = LaravelIndex::load(tmp.path());
         assert!(idx.is_laravel);
         assert!(idx.env.get("APP_NAME").is_some());
+        assert!(idx.config.get("app.name").is_some());
+    }
+
+    #[test]
+    fn resolve_string_key_none_for_non_laravel() {
+        let laravel = LaravelIndex::default();
+        let pos = Position {
+            line: 0,
+            character: 12,
+        };
+        let src = "<?php\nenv('APP_NAME');\n";
+        assert!(resolve_string_key(src, pos, &laravel).is_none());
+    }
+
+    #[test]
+    fn completions_for_string_key_none_when_laravel_is_none() {
+        let pos = Position {
+            line: 1,
+            character: 5,
+        };
+        assert!(completions_for_string_key("<?php\nenv('", pos, None).is_none());
     }
 }

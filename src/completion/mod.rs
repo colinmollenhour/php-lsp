@@ -365,24 +365,23 @@ pub fn filtered_completions_at(
 
     let doc_uri = ctx.doc_uri;
 
-    // Gate every Laravel-specific check behind `is_laravel` (one bool read on
-    // an already-loaded `Arc`) so non-Laravel workspaces never pay for the
-    // `call_string_prefix` line scan below. Computed once and reused by both
-    // the string-suppression guard and Feature 10.
-    let laravel_env_prefix = ctx.laravel.filter(|l| l.is_laravel).and_then(|l| {
-        let prefix =
-            crate::laravel::call_string_prefix(source?, position?, crate::laravel::ENV_CALL_NAMES)?;
-        Some((l, prefix))
-    });
+    // `completions_for_string_key` checks `is_laravel` first (one bool read
+    // on an already-loaded `Arc`) so non-Laravel workspaces never pay for the
+    // line scan inside it. Computed once and reused by both the
+    // string-suppression guard and Feature 10.
+    let laravel_completions = source
+        .zip(position)
+        .and_then(|(src, pos)| crate::laravel::completions_for_string_key(src, pos, ctx.laravel));
 
     // Suppress all completions when the cursor is inside a string literal or
-    // comment — except for include/require path strings and Laravel env()
-    // keys, where completions are legitimate inside the string argument.
+    // comment — except for include/require path strings and Laravel
+    // string-key calls, where completions are legitimate inside the string
+    // argument.
     if let (Some(src), Some(pos)) = (source, position) {
         let cursor_byte = doc.view().byte_of_position(pos) as usize;
         if cursor_in_string_or_comment(src, cursor_byte)
             && include_path_prefix(src, pos).is_none()
-            && laravel_env_prefix.is_none()
+            && laravel_completions.is_none()
         {
             return vec![];
         }
@@ -653,9 +652,9 @@ pub fn filtered_completions_at(
                 return items;
             }
 
-            // Feature 10: Laravel env('...') key completions
-            if let Some((laravel, prefix)) = laravel_env_prefix {
-                return crate::laravel::env_completions(&laravel.env, &prefix);
+            // Feature 10: Laravel string-key completions (env/config/...)
+            if let Some(items) = laravel_completions {
+                return items;
             }
 
             // Classes (label, kind, FQN) per other doc, collected lazily once

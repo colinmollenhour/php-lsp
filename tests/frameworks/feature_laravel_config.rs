@@ -1,0 +1,71 @@
+//! Protocol-wired tests for Laravel `config('a.b.c')` go-to-definition and
+//! completion, against a synthetic minimal Laravel project.
+
+use super::*;
+
+use expect_test::expect;
+
+fn write_minimal_laravel_project(root: &std::path::Path) {
+    std::fs::write(root.join("artisan"), "#!/usr/bin/env php\n").unwrap();
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    std::fs::write(
+        root.join("config").join("database.php"),
+        "<?php\nreturn [\n    'default' => 'mysql',\n    'connections' => [\n        'mysql' => [\n            'host' => '127.0.0.1',\n        ],\n    ],\n];\n",
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn config_call_goto_definition_resolves_top_level_key() {
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    write_minimal_laravel_project(workspace.path());
+    let php = "<?php\n$driver = config('database.default');\n";
+    std::fs::write(workspace.path().join("app.php"), php).unwrap();
+
+    let mut s = TestServer::with_root(workspace.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("app.php", php).await;
+
+    // Line 1 (0-based), character 26 = inside "database.default".
+    let resp = s.definition("app.php", 1, 26).await;
+    let out = render_locations(&resp, &s.uri(""));
+    expect!["config/database.php:2:5-2:12"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn config_call_goto_definition_resolves_nested_key() {
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    write_minimal_laravel_project(workspace.path());
+    let php = "<?php\n$host = config('database.connections.mysql.host');\n";
+    std::fs::write(workspace.path().join("app.php"), php).unwrap();
+
+    let mut s = TestServer::with_root(workspace.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("app.php", php).await;
+
+    // Line 1 (0-based), character 45 = inside the dotted key, on "host".
+    let resp = s.definition("app.php", 1, 45).await;
+    let out = render_locations(&resp, &s.uri(""));
+    expect!["config/database.php:5:13-5:17"].assert_eq(&out);
+}
+
+#[tokio::test]
+async fn config_call_completion_lists_dotted_keys_by_prefix() {
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    write_minimal_laravel_project(workspace.path());
+    let php = "<?php\nconfig('database.c\n";
+    std::fs::write(workspace.path().join("app.php"), php).unwrap();
+
+    let mut s = TestServer::with_root(workspace.path()).await;
+    s.wait_for_index_ready().await;
+    s.open("app.php", php).await;
+
+    // Line 1 (0-based), character 19 = right after "database.c".
+    let resp = s.completion("app.php", 1, 19).await;
+    let out = render_completion(&resp);
+    expect![[r#"
+        Property    database.connections
+        Property    database.connections.mysql
+        Property    database.connections.mysql.host"#]]
+    .assert_eq(&out);
+}
