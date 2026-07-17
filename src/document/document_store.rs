@@ -1614,6 +1614,27 @@ mod tests {
     // aggregation was deleted with the mir 0.22 migration. Equivalent
     // behaviour is now covered by mir-analyzer's own session tests.
 
+    // Spawn a thread that calls `yield_to_interactive_reads` and hands back
+    // the elapsed time it spent waiting. It signals `ready` right before
+    // entering the call, so the caller can block on that signal instead of
+    // guessing how long thread start-up takes — a fixed sleep here would
+    // race the thread scheduler, and that race is exactly what made this
+    // test flaky under load (e.g. Windows CI runners have much coarser and
+    // less predictable thread-spawn latency than Linux/macOS).
+    fn spawn_yield_waiter(
+        store: &Arc<DocumentStore>,
+    ) -> (std::sync::mpsc::Receiver<()>, std::thread::JoinHandle<std::time::Duration>) {
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let store = Arc::clone(store);
+        let handle = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let t = std::time::Instant::now();
+            store.yield_to_interactive_reads();
+            t.elapsed()
+        });
+        (ready_rx, handle)
+    }
+
     #[test]
     fn scan_writers_yield_while_interactive_reads_are_in_flight() {
         let store = Arc::new(DocumentStore::new());
@@ -1621,40 +1642,38 @@ mod tests {
         // No guard: returns immediately.
         let t = std::time::Instant::now();
         store.yield_to_interactive_reads();
-        assert!(t.elapsed() < std::time::Duration::from_millis(50));
+        assert!(t.elapsed() < std::time::Duration::from_millis(200));
 
         // Guard held on another thread: the writer waits until it drops.
+        // We only start the hold timer once the waiter has confirmed it's
+        // about to poll, so the guard can never be dropped before the
+        // writer starts waiting on it.
         let guard = store.interactive_read_guard();
-        let waiter = {
-            let store = Arc::clone(&store);
-            std::thread::spawn(move || {
-                let t = std::time::Instant::now();
-                store.yield_to_interactive_reads();
-                t.elapsed()
-            })
-        };
-        std::thread::sleep(std::time::Duration::from_millis(60));
+        let (ready_rx, waiter) = spawn_yield_waiter(&store);
+        ready_rx.recv().unwrap();
+        const HOLD: std::time::Duration = std::time::Duration::from_millis(60);
+        std::thread::sleep(HOLD);
         drop(guard);
         let waited = waiter.join().unwrap();
         assert!(
-            waited >= std::time::Duration::from_millis(40),
-            "writer should have paused while the read guard was held (waited {waited:?})"
+            waited >= HOLD,
+            "writer should have paused at least as long as the read guard was held (waited {waited:?})"
         );
+
         // Guard fully released: nested guards count correctly.
         let g1 = store.interactive_read_guard();
         let g2 = store.interactive_read_guard();
         drop(g1);
-        let waiter = {
-            let store = Arc::clone(&store);
-            std::thread::spawn(move || {
-                let t = std::time::Instant::now();
-                store.yield_to_interactive_reads();
-                t.elapsed()
-            })
-        };
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        let (ready_rx, waiter) = spawn_yield_waiter(&store);
+        ready_rx.recv().unwrap();
+        const HOLD2: std::time::Duration = std::time::Duration::from_millis(30);
+        std::thread::sleep(HOLD2);
         drop(g2);
-        assert!(waiter.join().unwrap() >= std::time::Duration::from_millis(20));
+        let waited = waiter.join().unwrap();
+        assert!(
+            waited >= HOLD2,
+            "writer should have paused while the nested read guard was held (waited {waited:?})"
+        );
         store.yield_to_interactive_reads(); // all guards dropped — no wait
     }
 
