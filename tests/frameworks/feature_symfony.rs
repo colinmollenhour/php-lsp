@@ -603,6 +603,56 @@ mod references {
             tests/Controller/DefaultControllerTest.php:64:8-64:67"#]]
         .assert_eq(&out);
     }
+
+    /// CRLF sources must produce the same reference postings as LF sources.
+    ///
+    /// Regression: on Windows CI (git autocrlf) the symfony-demo fixture is
+    /// checked out with CRLF endings, and blank lines inside AppFixtures.php's
+    /// indented nowdoc tripped a spurious "Invalid body indentation level" parse
+    /// error that silently dropped the file's `new Post()` reference posting.
+    #[test]
+    fn crlf_reference_postings_match_lf() {
+        fn post_refs(line_ending: &str) -> Vec<String> {
+            let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/symfony-demo");
+            let read = |p: &str| -> String {
+                // Normalize to LF first: on a checkout where git's `core.autocrlf`
+                // already converted the fixture to CRLF, replacing '\n' directly
+                // would double every '\r' into '\r\r\n' instead of producing plain
+                // CRLF, defeating the LF/CRLF comparison below.
+                std::fs::read_to_string(root.join(p))
+                    .unwrap()
+                    .replace("\r\n", "\n")
+                    .replace('\n', line_ending)
+            };
+            let session = mir_analyzer::AnalysisSession::new(mir_analyzer::PhpVersion::LATEST);
+            let files = ["src/Entity/Post.php", "src/DataFixtures/AppFixtures.php"];
+            for f in files {
+                session.ingest_file(
+                    std::sync::Arc::from(f),
+                    std::sync::Arc::from(read(f).as_str()),
+                );
+            }
+            let paths: Vec<std::sync::Arc<str>> =
+                files.iter().map(|f| std::sync::Arc::from(*f)).collect();
+            session
+                .indexed_references_to(
+                    &mir_analyzer::Name::class("App\\Entity\\Post"),
+                    &paths,
+                    false,
+                    &|| false,
+                )
+                .unwrap()
+                .into_iter()
+                .map(|(f, r)| format!("{f}:{}:{}-{}", r.start.line, r.start.column, r.end.column))
+                .collect()
+        }
+
+        let lf = post_refs("\n");
+        let crlf = post_refs("\r\n");
+        expect!["src/DataFixtures/AppFixtures.php:74:24-28"].assert_eq(&lf.join("\n"));
+        assert_eq!(lf, crlf, "LF vs CRLF reference postings diverge");
+    }
 }
 
 mod type_hierarchy {
