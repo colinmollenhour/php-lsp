@@ -387,7 +387,7 @@ async fn laravel_hover_on_static_call() {
     let out = render_hover(&resp);
     expect![[r#"
         ```php
-        Str::camel($value)
+        Str::camel($value): string
         ```
 
         ---

@@ -702,8 +702,14 @@ pub fn filtered_completions_at(
 
             // Feature 7: match arm completions
             if let (Some(src), Some(pos)) = (source, position)
-                && let Some(match_items) =
-                    match_arm_completions(src, doc, other_docs, pos, ctx.analysis)
+                && let Some(match_items) = match_arm_completions(
+                    src,
+                    doc,
+                    other_docs,
+                    pos,
+                    ctx.analysis,
+                    ctx.find_class_doc,
+                )
                 && !match_items.is_empty()
             {
                 let mut all = match_items;

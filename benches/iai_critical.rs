@@ -88,6 +88,7 @@ fn hover_cross_file_map((doc, other_docs, other_maps): HoverMapSetup) {
         &other_docs,
         &other_maps,
         None,
+        None,
     ));
 }
 

@@ -114,6 +114,7 @@ fn bench_hover(c: &mut Criterion) {
                 &[],
                 &[],
                 None,
+                None,
             ))
         });
     });
@@ -126,6 +127,7 @@ fn bench_hover(c: &mut Criterion) {
                 POS_MEMBER,
                 &[],
                 &[],
+                None,
                 None,
             ))
         });
@@ -142,6 +144,7 @@ fn bench_hover(c: &mut Criterion) {
                 &other_docs,
                 &other_maps,
                 None,
+                None,
             ))
         });
     });
@@ -154,6 +157,7 @@ fn bench_hover(c: &mut Criterion) {
                 POS_SERVICE_CTOR,
                 &other_docs,
                 &other_maps,
+                None,
                 None,
             ))
         });
@@ -170,6 +174,7 @@ fn bench_hover(c: &mut Criterion) {
                     POS_SERVICE_TYPE,
                     &[],
                     maps,
+                    None,
                     None,
                 ))
             });

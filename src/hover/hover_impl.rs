@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Url};
 
+use crate::completion::ClassDocLookup;
 use crate::document::ast::ParsedDoc;
 use crate::lang::docblock::find_docblock;
 use crate::lang::php_names::{is_php_builtin, php_doc_url};
@@ -29,8 +30,12 @@ fn is_hoverable(decl: &Declaration<'_>) -> bool {
 
 /// Indexed variant: uses pre-computed [`SymbolMap`]s for the cross-file
 /// declaration lookup (path 4/5), eliminating repeated AST walks on stable
-/// files. All other paths (named-arg hover, mir-member hover, static-prop
-/// hover) still use `other_docs` since they require full AST traversal.
+/// files. `find_class_doc` gives mir-member hover and static-prop hover (path
+/// 2/3) the same O(1) workspace-index fast path, falling back to a linear
+/// `other_docs` scan only when it misses (index not ready, unsaved file, …).
+/// Named-arg hover still walks `other_docs` directly — it has no single
+/// resolved class to key a fast lookup on.
+#[allow(clippy::too_many_arguments)]
 pub fn hover_info_with_maps(
     source: &str,
     doc: &ParsedDoc,
@@ -39,6 +44,7 @@ pub fn hover_info_with_maps(
     other_docs: &[(Url, Arc<ParsedDoc>)],
     other_maps: &[(Url, Arc<SymbolMap>)],
     session: Option<&mir_analyzer::AnalysisSession>,
+    find_class_doc: Option<ClassDocLookup<'_>>,
 ) -> Option<Hover> {
     hover_at_core(
         source,
@@ -47,6 +53,7 @@ pub fn hover_info_with_maps(
         other_docs,
         position,
         session,
+        find_class_doc,
         |resolved_word| {
             for (_, sym_map) in other_maps {
                 if let Some(entry) = sym_map.lookup(resolved_word, |e| is_hoverable_kind(e.kind))
@@ -112,11 +119,11 @@ fn builtin_class_hover(
     }
 }
 
-/// Shared hover implementation. Every path is identical between the two public
-/// entry points except the cross-file declaration lookup, which the caller
-/// supplies via `resolve_cross_file`: [`hover_at`] walks `other_docs` with
-/// `resolve_declaration`; [`hover_info_with_maps`] does an O(1) `SymbolMap`
-/// lookup. The closure returns the `(signature, doc_markdown)` to render.
+/// Shared hover implementation used by [`hover_info_with_maps`]. The
+/// cross-file declaration lookup (path 4/5, when `find_class_doc` and the mir
+/// paths above it miss) is supplied by the caller via `resolve_cross_file`,
+/// which returns the `(signature, doc_markdown)` to render.
+#[allow(clippy::too_many_arguments)]
 fn hover_at_core(
     source: &str,
     doc: &ParsedDoc,
@@ -124,6 +131,7 @@ fn hover_at_core(
     other_docs: &[(Url, Arc<ParsedDoc>)],
     position: Position,
     session: Option<&mir_analyzer::AnalysisSession>,
+    find_class_doc: Option<ClassDocLookup<'_>>,
     resolve_cross_file: impl Fn(&str) -> Option<(String, Option<String>)>,
 ) -> Option<Hover> {
     let hover_range = word_range_at(source, position);
@@ -269,7 +277,18 @@ fn hover_at_core(
         } else {
             class_name.clone()
         };
-        for d in std::iter::once(doc).chain(other_docs.iter().map(|(_, d)| d.as_ref())) {
+        // Fast path: workspace-index lookup finds the one doc that defines
+        // `effective_class`, even if it's never been opened in the editor.
+        // Fallback: linear scan of the currently open docs.
+        let fast_doc = find_class_doc.and_then(|f| f(&effective_class));
+        let docs_to_search: Vec<&ParsedDoc> = if let Some(fd) = &fast_doc {
+            vec![fd.as_ref()]
+        } else {
+            std::iter::once(doc)
+                .chain(other_docs.iter().map(|(_, d)| d.as_ref()))
+                .collect()
+        };
+        for d in docs_to_search {
             if let Some((modifiers, type_str, db)) =
                 find_property_info(d, &effective_class, prop_name)
             {
@@ -380,7 +399,7 @@ fn hover_at_core(
             a.symbol_at(off)
         })
     {
-        let mir_hover = mir_member_hover(sym, &word, doc, other_docs);
+        let mir_hover = mir_member_hover(sym, &word, doc, other_docs, find_class_doc);
         if mir_hover.is_some() {
             return mir_hover.map(|value| Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -468,6 +487,24 @@ fn hover_at_core(
     None
 }
 
+/// Docs to search for `class`'s declaration, given `fast` (the workspace-index
+/// fast-path result — O(1), finds the defining doc even if it's never been
+/// opened): just that doc when it hits, otherwise the linear `other_docs`
+/// fallback (open docs only).
+fn candidates_for<'a>(
+    fast: &'a Option<Arc<ParsedDoc>>,
+    doc: &'a ParsedDoc,
+    other_docs: &'a [(Url, Arc<ParsedDoc>)],
+) -> Vec<&'a ParsedDoc> {
+    if let Some(fd) = fast {
+        vec![fd.as_ref()]
+    } else {
+        std::iter::once(doc)
+            .chain(other_docs.iter().map(|(_, d)| d.as_ref()))
+            .collect()
+    }
+}
+
 /// Produce hover markdown for a member access resolved by mir. Returns the
 /// hover value string (not the full `Hover` struct — the caller wraps it).
 /// `None` means mir has no symbol here; the caller falls through to `resolve_declaration`.
@@ -476,20 +513,28 @@ fn mir_member_hover(
     word: &str,
     doc: &ParsedDoc,
     other_docs: &[(tower_lsp::lsp_types::Url, std::sync::Arc<ParsedDoc>)],
+    find_class_doc: Option<ClassDocLookup<'_>>,
 ) -> Option<String> {
-    let docs = || std::iter::once(doc).chain(other_docs.iter().map(|(_, d)| d.as_ref()));
     match &sym.kind {
         mir_analyzer::ReferenceKind::MethodCall { class, .. }
         | mir_analyzer::ReferenceKind::StaticCall { class, .. } => {
             let class_short = fqn_short_name(class);
-            for d in docs() {
+            let fast = find_class_doc.and_then(|f| f(class));
+            let candidates = candidates_for(&fast, doc, other_docs);
+            for d in &candidates {
                 if let Some(sig) = scan_method_of_class(&d.program().stmts, class_short, word) {
                     // Augment declared return type with mir's inferred type when richer.
                     let sig = augment_return_type(sig, &sym.resolved_type);
                     let mut value = wrap_php(&sig);
-                    let all =
-                        std::iter::once(doc).chain(other_docs.iter().map(|(_, d)| d.as_ref()));
-                    if let Some(db) = resolve_method_docblock(all, class_short, word) {
+                    // @inheritDoc may need to walk up to a parent class in a
+                    // different file, so always give it the full open-docs set
+                    // in addition to whatever `candidates` narrowed to.
+                    let docblock_docs = fast
+                        .iter()
+                        .map(|d| d.as_ref())
+                        .chain(std::iter::once(doc))
+                        .chain(other_docs.iter().map(|(_, d)| d.as_ref()));
+                    if let Some(db) = resolve_method_docblock(docblock_docs, class_short, word) {
                         let md = db.to_markdown();
                         if !md.is_empty() {
                             value.push_str("\n\n---\n\n");
@@ -503,7 +548,9 @@ fn mir_member_hover(
         }
         mir_analyzer::ReferenceKind::PropertyAccess { class, property } => {
             let class_short = fqn_short_name(class);
-            for d in docs() {
+            let fast = find_class_doc.and_then(|f| f(class));
+            let candidates = candidates_for(&fast, doc, other_docs);
+            for d in candidates {
                 if let Some((modifiers, declared_type, db)) =
                     find_property_info(d, class_short, property)
                 {
@@ -542,7 +589,9 @@ fn mir_member_hover(
         }
         mir_analyzer::ReferenceKind::ConstantAccess { class, constant } => {
             let class_short = fqn_short_name(class);
-            for d in docs() {
+            let fast = find_class_doc.and_then(|f| f(class));
+            let candidates = candidates_for(&fast, doc, other_docs);
+            for d in candidates {
                 if let Some(sig) =
                     scan_enum_case_of_class(&d.program().stmts, class_short, constant)
                 {
@@ -618,7 +667,7 @@ mod tests {
         // the integration tests that use TestServer with a real session.
         let src = "<?php\n$pdo = new PDO('sqlite::memory:');\n$pdo->query('SELECT 1');";
         let doc = ParsedDoc::parse(src.to_string());
-        let h = hover_info_with_maps(src, &doc, None, pos(1, 12), &[], &[], None);
+        let h = hover_info_with_maps(src, &doc, None, pos(1, 12), &[], &[], None, None);
         assert!(h.is_none(), "built-in class hover requires a session");
     }
 }

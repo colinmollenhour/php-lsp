@@ -757,6 +757,16 @@ impl LanguageServer for Backend {
             let source_clone = source.clone();
             let doc_clone = Arc::clone(&doc);
             let uri_str = uri.to_string();
+            // Lets mir-member/static-prop hover resolve a class's declaring doc
+            // via the workspace index even when that file isn't open in the
+            // editor, instead of only searching `other_docs` (open files).
+            let wi = self.workspace_index_async().await;
+            let docs_for_lookup = Arc::clone(&self.docs);
+            let find_class_doc_fn = move |name: &str| -> Option<Arc<ParsedDoc>> {
+                let cr = wi.resolve_class_ref(name)?;
+                let (uri, _) = wi.at(cr)?;
+                docs_for_lookup.get_doc_salsa(uri)
+            };
             let result = match tokio::task::spawn_blocking(move || {
                 hover_info_with_maps(
                     &source_clone,
@@ -766,6 +776,7 @@ impl LanguageServer for Backend {
                     &other_docs,
                     &other_maps,
                     Some(&hover_session),
+                    Some(&find_class_doc_fn),
                 )
             })
             .await

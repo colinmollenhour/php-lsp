@@ -12,6 +12,7 @@ pub(super) fn match_arm_completions(
     other_docs: &[Arc<ParsedDoc>],
     position: Position,
     analysis: Option<&mir_analyzer::FileAnalysis>,
+    find_class_doc: Option<super::ClassDocLookup<'_>>,
 ) -> Option<Vec<CompletionItem>> {
     let start_line = position.line as usize;
     let end_line = start_line.saturating_sub(5);
@@ -28,24 +29,35 @@ pub(super) fn match_arm_completions(
                 let var_offset = line_byte_offset(doc, line_idx as u32, subject_byte + 1);
                 analysis.and_then(|a| receiver_class_at(a, var_offset))?
             };
-            let all_docs: Vec<&ParsedDoc> = std::iter::once(doc)
-                .chain(other_docs.iter().map(|d| d.as_ref()))
-                .collect();
-            for d in &all_docs {
-                let members = members_of_class(d, &class_name);
-                if !members.constants.is_empty() {
-                    return Some(
-                        members
-                            .constants
-                            .iter()
-                            .map(|c| CompletionItem {
-                                label: format!("{class_name}::{c}"),
-                                kind: Some(CompletionItemKind::CONSTANT),
-                                ..Default::default()
-                            })
-                            .collect(),
-                    );
-                }
+            // Fast path: workspace-index lookup gives O(1) access to the one doc
+            // that defines `class_name`. Fallback: scan all docs linearly (used
+            // when the index is unavailable or the class isn't indexed yet).
+            let fast_doc = find_class_doc.and_then(|f| f(&class_name));
+            let members = if let Some(fd) = &fast_doc {
+                Some(members_of_class(fd, &class_name))
+            } else {
+                let all_docs: Vec<&ParsedDoc> = std::iter::once(doc)
+                    .chain(other_docs.iter().map(|d| d.as_ref()))
+                    .collect();
+                all_docs.iter().find_map(|d| {
+                    let m = members_of_class(d, &class_name);
+                    (!m.constants.is_empty()).then_some(m)
+                })
+            };
+            if let Some(members) = members
+                && !members.constants.is_empty()
+            {
+                return Some(
+                    members
+                        .constants
+                        .iter()
+                        .map(|c| CompletionItem {
+                            label: format!("{class_name}::{c}"),
+                            kind: Some(CompletionItemKind::CONSTANT),
+                            ..Default::default()
+                        })
+                        .collect(),
+                );
             }
         }
     }
