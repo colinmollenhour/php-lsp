@@ -729,7 +729,21 @@ impl LanguageServer for Backend {
                 None => return Ok(None),
             };
             let all_indexes = self.docs.all_indexes();
-            Ok(signature_help(&source, &doc, position, &all_indexes))
+            let analysis = self.cached_analysis_async(uri).await;
+            let uri_str = uri.to_string();
+            let doc_clone = Arc::clone(&doc);
+            let result = match tokio::task::spawn_blocking(move || {
+                signature_help(&source, &doc_clone, position, &all_indexes, analysis.as_deref())
+            })
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!("signature_help panicked for {uri_str}: {e}");
+                    None
+                }
+            };
+            Ok(result)
         })
         .await
     }

@@ -10,19 +10,23 @@ use crate::document::ast::ParsedDoc;
 use crate::hover::format_params_str;
 use crate::index::file_index::{DocMethodParam, FileIndex, ParamDef};
 use crate::lang::docblock::find_docblock;
-use crate::text::{fqn_short_name, split_params};
+use crate::text::{fqn_short_name, split_params, utf16_offset_to_byte};
 
 /// Returns signature help for the function call the cursor is inside of.
 ///
 /// Falls back to `ws_indexes` for cross-file function lookup when the function
 /// is not defined in the current file. For method calls (`$obj->method()`),
 /// the receiver type is resolved so the correct class's method signature is
-/// returned even when multiple classes define a method with the same name.
+/// returned even when multiple classes define a method with the same name —
+/// mir is tried first, with the pre-mir `TypeMap` walk as fallback for
+/// patterns mir doesn't yet resolve (matching the tiering already
+/// established in `completion/member.rs`/`hover/named_args.rs`).
 pub fn signature_help(
     source: &str,
     doc: &ParsedDoc,
     position: Position,
     ws_indexes: &[(Url, Arc<FileIndex>)],
+    analysis: Option<&mir_analyzer::FileAnalysis>,
 ) -> Option<SignatureHelp> {
     let (func_name, active_param, receiver) = call_context(source, position)?;
 
@@ -59,13 +63,31 @@ pub fn signature_help(
                     // Receiver-typed method call ($this / $var): resolve the
                     // receiver class then walk the inheritance chain.
                     let class_name = if recv == "$this" || recv == "self" || recv == "static" {
-                        crate::types::type_map::enclosing_class_at(source, doc, position)
+                        crate::types::type_map::enclosing_class_at(source, doc, position).or_else(
+                            || {
+                                analysis.and_then(|a| {
+                                    receiver_var_offset(source, doc, position, "$this")
+                                        .and_then(|off| {
+                                            crate::types::type_query::type_at_offset(a, off)
+                                        })
+                                        .and_then(crate::types::type_query::primary_class_name)
+                                })
+                            },
+                        )
                     } else {
-                        // $var: resolve via TypeMap
-                        let tm = crate::types::type_map::TypeMap::from_doc_at_position(
-                            doc, None, position,
-                        );
-                        tm.get(recv).map(|s| s.to_string())
+                        // mir first; TypeMap fallback for patterns mir doesn't yet resolve.
+                        analysis
+                            .and_then(|a| {
+                                receiver_var_offset(source, doc, position, recv)
+                                    .and_then(|off| crate::types::type_query::type_at_offset(a, off))
+                                    .and_then(crate::types::type_query::primary_class_name)
+                            })
+                            .or_else(|| {
+                                let tm = crate::types::type_map::TypeMap::from_doc_at_position(
+                                    doc, None, position,
+                                );
+                                tm.get(recv).map(|s| s.to_string())
+                            })
                     }?;
                     find_method_params_in_hierarchy(&class_name, &func_name, ws_indexes)
                 } else {
@@ -187,6 +209,30 @@ fn call_context(source: &str, position: Position) -> Option<(String, usize, Opti
         }
     }
     None
+}
+
+/// Byte offset of the last char of `receiver_var` in the nearest
+/// `receiver_var->` / `receiver_var?->` / `receiver_var::` occurrence before
+/// the cursor — a position inside mir's end-exclusive variable span. Mirrors
+/// `hover/named_args.rs::receiver_var_offset`.
+fn receiver_var_offset(
+    source: &str,
+    doc: &ParsedDoc,
+    position: Position,
+    receiver_var: &str,
+) -> Option<u32> {
+    let line = source.lines().nth(position.line as usize)?;
+    let cursor_byte = utf16_offset_to_byte(line, position.character as usize).min(line.len());
+    let before = &line[..cursor_byte];
+    let p = before
+        .rfind(&format!("{receiver_var}?->"))
+        .or_else(|| before.rfind(&format!("{receiver_var}->")))
+        .or_else(|| before.rfind(&format!("{receiver_var}::")))?;
+    let line_start = doc.view().byte_of_position(Position {
+        line: position.line,
+        character: 0,
+    });
+    Some(line_start + (p + receiver_var.len()) as u32 - 1)
 }
 
 /// Extract the receiver token that precedes `->` or `::` just before the

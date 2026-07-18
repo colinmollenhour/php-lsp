@@ -651,3 +651,29 @@ greet($0);
           param string $name: The user's name"#]]
     .assert_eq(&out);
 }
+
+/// Receiver-class resolution after `instanceof` narrowing is a case the old
+/// pre-mir `TypeMap` walk never handled (it is a plain AST scan with no
+/// flow-sensitive narrowing) — this only resolves via mir's `symbol_at`,
+/// proving the mir-first tier in `signature_help.rs` is actually wired up.
+#[tokio::test]
+async fn signature_help_resolves_receiver_narrowed_by_instanceof() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_signature_help(
+            r#"<?php
+class Base {}
+class Foo extends Base {
+    public function bar(int $a, string $b): void {}
+}
+function test(Base $x): void {
+    if ($x instanceof Foo) {
+        $x->bar($0);
+    }
+}
+"#,
+        )
+        .await;
+    expect!["▶ bar(int $a, string $b)  @param0"].assert_eq(&out);
+}
