@@ -2066,10 +2066,15 @@ foreach ($items as $w) {
 
 /// `$x->getName()` where `$x`'s type comes from a bare `@var Alias $x` and
 /// `Alias` is a `@psalm-type` declared on a *free function's own* docblock
-/// (not a class) — mir's alias expansion is intentionally class-scoped only
-/// (unlike a bare variable hover on `$x`, which shows the unexpanded `Alias`
-/// name). Resolves via mir's `MethodCall` reference kind regardless, so this
-/// one is unaffected by removing `TypeMap` from the navigation fallback.
+/// (not a class) — mir's alias expansion is intentionally class-scoped only,
+/// so mir's `MethodCall` reference kind carries the unexpanded name `Alias`
+/// (confirmed via debug instrumentation), which resolves against nothing.
+/// This passes only because it falls all the way through to
+/// `navigation::definition::goto_definition`'s plain by-name AST scan, which
+/// finds the only method named `getName` in the fixture regardless of
+/// class. That's a coincidence of this fixture having a single candidate —
+/// see `definition_receiver_free_function_psalm_type_alias_ambiguous` for
+/// the case where it silently resolves to the wrong class.
 #[tokio::test]
 async fn definition_receiver_free_function_psalm_type_alias() {
     let mut s = TestServer::new().await;
@@ -2092,4 +2097,47 @@ function test() {
         )
         .await;
     expect!["main.php:2:20-2:27"].assert_eq(&out);
+}
+
+/// KNOWN REGRESSION — see `definition_receiver_free_function_psalm_type_alias`.
+/// That test's receiver is resolved by pure luck: mir's `MethodCall` leaves
+/// `Alias` unexpanded (confirmed via debug instrumentation, not just the
+/// hover probe), so `find_method_in_class_hierarchy("Alias", ...)` and
+/// `psr4_method_goto` both fail, and it actually falls all the way through
+/// to `navigation::definition::goto_definition`'s plain by-name AST scan —
+/// which finds *some* method named `getName` with zero regard for which
+/// class `$x` actually is. With only one candidate that "worked"; with two,
+/// it silently picks whichever is declared first, as this test shows: swap
+/// Gadget/Widget's declaration order and the resolved location swaps with
+/// it. Before TypeMap was removed from `navigation.rs`'s fallback, its own
+/// (class-unscoped-alias-aware) expansion resolved this correctly regardless
+/// of order. Fix requires either mir expanding `@psalm-type` aliases scoped
+/// to a free function's own docblock (today intentionally class-scoped
+/// only), or restoring a narrower alias-aware fallback in php-lsp.
+#[ignore = "known regression: free-function @psalm-type alias receiver goto-definition is order-dependent, see doc comment"]
+#[tokio::test]
+async fn definition_receiver_free_function_psalm_type_alias_ambiguous() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_definition(
+            r#"<?php
+class Gadget {
+    public function getName(): string { return 'gadget'; }
+}
+class Widget {
+    public function getName(): string { return 'widget'; }
+}
+/**
+ * @psalm-type Alias = Widget
+ */
+function test() {
+    /** @var Alias $x */
+    $x = get();
+    $x->get$0Name();
+}
+"#,
+        )
+        .await;
+    expect!["main.php:5:20-5:27"].assert_eq(&out);
 }
