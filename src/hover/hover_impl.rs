@@ -336,8 +336,6 @@ fn hover_at_core(
                 range: hover_range,
             });
         }
-        // mir's -> / :: receiver-gap fix (mir 0.59) and alias-expansion fix
-        // cover what the old TypeMap fallback used to catch here.
     }
 
     // Property declaration hover: cursor on `$prop` inside a class body.

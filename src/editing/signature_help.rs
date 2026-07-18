@@ -75,8 +75,6 @@ pub fn signature_help(
                             },
                         )
                     } else {
-                        // mir's -> / :: receiver-gap fix (mir 0.59) resolves this
-                        // directly now; the old TypeMap fallback is no longer needed.
                         analysis.and_then(|a| {
                             receiver_var_offset(source, doc, position, recv)
                                 .and_then(|off| crate::types::type_query::type_at_offset(a, off))

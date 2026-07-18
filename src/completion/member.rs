@@ -395,9 +395,6 @@ pub(super) fn resolve_receiver_class(
         return enclosing_class_at(source, doc, position)
             .or_else(|| analysis.and_then(|a| receiver_class_at(a, var_offset)));
     }
-    // mir's -> / :: receiver-gap fix (mir 0.59) resolves this directly now;
-    // the old TypeMap fallback for @var/@param/list<T>/first-class-callable
-    // receivers is no longer needed here.
     analysis.and_then(|a| receiver_class_at(a, var_offset))
 }
 
