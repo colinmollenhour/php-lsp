@@ -2,6 +2,25 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.19.0] — 2026-07-18
+
+### Added
+
+- **Laravel string-key index**: go-to-definition, completion, and find-references for `env()`, `config()`, `view()`, `__()`/`trans()`, and named routes (`route()`, including `Route::group(['as' => ...])` prefix accumulation and the fluent `Route::name(...)->group(...)` equivalent). Gated behind a one-time Laravel-project detection (`artisan`/`composer.json`) so non-Laravel workspaces pay no per-request cost. `Route::resource()`/`apiResource()` implicit CRUD route names are a known, documented gap.
+- **`signatureHelp` now resolves method-call receiver classes via mir** (`$var->method()`), matching hover/completion/goto-definition — previously the only feature with no mir integration, falling back to the pre-mir `TypeMap` walk unconditionally.
+
+### Fixed
+
+- **Hover on a first-class callable** (`strlen(...)`, `$obj->method(...)`) now shows mir's fully-typed closure signature instead of falling back to a bare `Closure`.
+
+### Changed
+
+- **Removed three now-redundant `TypeMap` fallback tiers** (`completion/member.rs`, `hover/hover_impl.rs`, `hover/named_args.rs`) — mir resolves a receiver's type directly at the `->`/`?->`/`::` operator gap as of the dependency bump below, which was the one case these existed for. Internal cleanup; no user-visible behavior change.
+
+### Dependencies
+
+- **mir updated to 0.59.2** (from 0.58.0): adds `symbol_at` resolution at the `->`/`?->`/`::` operator gap, bare `@var` `@psalm-type`/`@phpstan-type` alias expansion, and `array_map`/`array_reduce` return-type inference through an opaque `callable` parameter via caller unioning.
+
 ## [0.18.1] — 2026-07-17
 
 ### Fixed
