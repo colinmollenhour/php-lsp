@@ -2013,3 +2013,83 @@ function test(Base$0 $x): void {}
         .await;
     expect!["Child.php:1:6-1:11"].assert_eq(&out);
 }
+
+/// `$x->bar()` after `if ($x instanceof Foo)` — resolved via mir's
+/// `MethodCall` reference kind (`resolved_method_target` in
+/// `backend/handlers/navigation.rs`), which already reflects flow-sensitive
+/// narrowing. Pinned here as a currently-untested protocol path.
+#[tokio::test]
+async fn definition_receiver_narrowed_by_instanceof() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_definition(
+            r#"<?php
+class Base {}
+class Foo extends Base {
+    public function bar(): void {}
+}
+function test(Base $x): void {
+    if ($x instanceof Foo) {
+        $x->b$0ar();
+    }
+}
+"#,
+        )
+        .await;
+    expect!["main.php:3:20-3:23"].assert_eq(&out);
+}
+
+/// `$w->getName()` inside `foreach ($items as $w)` where `$items` is typed via
+/// `@var list<Widget> $items`. Resolved the same way as the instanceof case
+/// above — via mir's `MethodCall` reference kind, not `TypeMap`.
+#[tokio::test]
+async fn definition_receiver_foreach_element_type() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_definition(
+            r#"<?php
+class Widget {
+    public function getName(): string { return ''; }
+}
+/** @var list<Widget> $items */
+$items = get();
+foreach ($items as $w) {
+    $w->get$0Name();
+}
+"#,
+        )
+        .await;
+    expect!["main.php:2:20-2:27"].assert_eq(&out);
+}
+
+/// `$x->getName()` where `$x`'s type comes from a bare `@var Alias $x` and
+/// `Alias` is a `@psalm-type` declared on a *free function's own* docblock
+/// (not a class). mir's `MethodCall` resolution leaves the alias unexpanded
+/// here (mir's alias expansion is intentionally class-scoped only), so this
+/// currently resolves through `backend/handlers/navigation.rs`'s `TypeMap`
+/// fallback instead — the one remaining production caller of `TypeMap`.
+#[tokio::test]
+async fn definition_receiver_free_function_psalm_type_alias() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    let out = s
+        .check_definition(
+            r#"<?php
+class Widget {
+    public function getName(): string { return ''; }
+}
+/**
+ * @psalm-type Alias = Widget
+ */
+function test() {
+    /** @var Alias $x */
+    $x = get();
+    $x->get$0Name();
+}
+"#,
+        )
+        .await;
+    expect!["main.php:2:20-2:27"].assert_eq(&out);
+}
