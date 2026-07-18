@@ -1373,12 +1373,12 @@ if ($x instanceof Foo) { $x->$0 }
     .assert_eq(&out);
 }
 
-// --- Zone 1 redundancy probes: scenarios TypeMap inference handles as a
-// fallback. These assert the feature-level behavior so we can tell whether mir
-// covers them when the TypeMap branch is disabled. ---
-
+/// `array_map` with a closure typed to return `Widget` — mir's opaque-callback
+/// inference (mir 0.59) resolves the returned array's element type, so the
+/// foreach value variable's members complete without any php-lsp-side
+/// array_map handling.
 #[tokio::test]
-async fn probe_array_map_foreach_element_type() {
+async fn completion_array_map_foreach_element_type() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
@@ -1393,8 +1393,10 @@ foreach ($items as $item) { $item->$0 }
     expect!["Method      render"].assert_eq(&out);
 }
 
+/// `clone($obj, [...])` (PHP 8.5 clone-with) preserves the object's type —
+/// mir resolves this directly, no php-lsp-side handling needed.
 #[tokio::test]
-async fn probe_clone_with_member() {
+async fn completion_clone_with_member() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
@@ -1410,8 +1412,10 @@ $c->$0
     expect!["Method      open"].assert_eq(&out);
 }
 
+/// A `use`-captured variable inside a closure body keeps the outer scope's
+/// mir-resolved type.
 #[tokio::test]
-async fn probe_closure_use_var_member() {
+async fn completion_closure_use_var_member() {
     let mut s = TestServer::new().await;
     s.validate_syntax(false);
     let out = s
@@ -4851,8 +4855,9 @@ class Processor {
     .assert_eq(&out);
 }
 
-/// `@var list<Widget>` — element type extracted and propagated to the foreach
-/// value variable so members are available inside the loop body.
+/// `@var list<Widget>` on the iterable — mir types the foreach value variable
+/// from the iterable's own resolved element type natively, so members are
+/// available inside the loop body with no php-lsp-side propagation step.
 #[tokio::test]
 async fn completion_list_element_type_in_foreach() {
     let mut s = TestServer::new().await;
