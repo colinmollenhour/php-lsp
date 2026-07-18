@@ -568,7 +568,8 @@ $x$0;
     .await;
 }
 
-/// `$fn = strlen(...)` — first-class callable expression typed as `Closure`.
+/// `$fn = strlen(...)` — first-class callable, typed by mir with the target's
+/// full signature.
 #[tokio::test]
 async fn hover_first_class_callable_typed_as_closure() {
     let mut s = TestServer::new().await;
@@ -578,7 +579,27 @@ async fn hover_first_class_callable_typed_as_closure() {
 $fn = strlen(...);
 $fn$0;
 "#,
-        expect!["`$fn` `Closure`"],
+        expect!["`$fn` `Closure(string): int<0, max>`"],
+    )
+    .await;
+}
+
+/// `$fn = $obj->handle(...)` — method first-class callable; mir resolves the
+/// closure to the target method's full signature.
+#[tokio::test]
+async fn hover_method_first_class_callable_typed_as_closure() {
+    let mut s = TestServer::new().await;
+    s.validate_syntax(false);
+    s.check_hover_annotated(
+        r#"<?php
+class Svc {
+    public function handle(string $name, int $count): bool { return true; }
+}
+$obj = new Svc();
+$fn = $obj->handle(...);
+$fn$0;
+"#,
+        expect!["`$fn` `Closure(string, int): bool`"],
     )
     .await;
 }

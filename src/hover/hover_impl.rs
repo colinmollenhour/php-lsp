@@ -337,25 +337,27 @@ fn hover_at_core(
                 range: hover_range,
             });
         }
-        // 2. TypeMap has a class type — fallback for when mir has no class info
-        //    (e.g. Closure for first-class callables, or when analysis is None).
-        if let Some(class_name) = type_map().get(&word) {
-            return Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: format!("`{word}` `{class_name}`"),
-                }),
-                range: hover_range,
-            });
-        }
-        // 3. mir has a specific non-class type (e.g. callable, int, string).
-        //    Use it rather than showing nothing — respects "use mir if available".
-        //    Suppress `mixed` since it means "unknown" and adds no information.
+        // 2. mir has a specific non-class type (e.g. a typed `Closure(string): int`
+        //    for a first-class callable, or a scalar). Prefer it over TypeMap,
+        //    whose inference for these is narrower (a bare `Closure`). Suppress
+        //    `mixed` since it means "unknown" and adds no information.
         if let Some(ty) = mir_ty.filter(|ty| ty.to_string() != "mixed") {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
                     value: format!("`{word}` `{ty}`"),
+                }),
+                range: hover_range,
+            });
+        }
+        // 3. TypeMap fallback — only when mir has nothing (analysis absent or
+        //    `mixed`): `@var`/`@param` class hints, first-class callables when
+        //    analysis is unavailable.
+        if let Some(class_name) = type_map().get(&word) {
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!("`{word}` `{class_name}`"),
                 }),
                 range: hover_range,
             });
