@@ -353,7 +353,6 @@ pub(super) fn resolve_receiver_class(
     doc: &ParsedDoc,
     position: Position,
     analysis: Option<&mir_analyzer::FileAnalysis>,
-    type_map: &crate::types::type_map::TypeMap,
 ) -> Option<String> {
     let line = source.lines().nth(position.line as usize)?;
     let col = utf16_offset_to_byte(line, position.character as usize);
@@ -396,13 +395,10 @@ pub(super) fn resolve_receiver_class(
         return enclosing_class_at(source, doc, position)
             .or_else(|| analysis.and_then(|a| receiver_class_at(a, var_offset)));
     }
-    // mir is always queried first. TypeMap is the fallback for when mir has no
-    // class-typed symbol at the position: it covers `@var`-annotated variables,
-    // `@param` hints (including `@psalm-type` aliases), `@var list<T>` foreach
-    // element propagation, and first-class callables (`strlen(...)` → Closure).
-    analysis
-        .and_then(|a| receiver_class_at(a, var_offset))
-        .or_else(|| type_map.get(&var_name).map(str::to_owned))
+    // mir's -> / :: receiver-gap fix (mir 0.59) resolves this directly now;
+    // the old TypeMap fallback for @var/@param/list<T>/first-class-callable
+    // receivers is no longer needed here.
+    analysis.and_then(|a| receiver_class_at(a, var_offset))
 }
 
 /// Resolve the class(es) of a receiver variable from mir's recorded symbol at

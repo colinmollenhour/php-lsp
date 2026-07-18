@@ -402,31 +402,28 @@ pub fn filtered_completions_at(
         }
         Some(">") => {
             // Arrow: $obj->  or  $this->
-            if let (Some(src), Some(pos)) = (source, position) {
-                let type_map = whole_doc_type_map(ctx, doc, meta);
-                if let Some(class_names) =
-                    resolve_receiver_class(src, doc, pos, ctx.analysis, &type_map)
-                {
-                    // Feature 5: support union types (Foo|Bar)
-                    let mut items = Vec::new();
-                    let mut seen = std::collections::HashSet::new();
-                    for class_name in class_names.split('|') {
-                        let class_name = class_name.trim();
-                        for item in all_instance_members(
-                            class_name,
-                            doc,
-                            other_docs,
-                            ctx.find_class_doc,
-                            ctx.session.as_deref(),
-                        ) {
-                            if seen.insert(item.label.clone()) {
-                                items.push(item);
-                            }
+            if let (Some(src), Some(pos)) = (source, position)
+                && let Some(class_names) = resolve_receiver_class(src, doc, pos, ctx.analysis)
+            {
+                // Feature 5: support union types (Foo|Bar)
+                let mut items = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for class_name in class_names.split('|') {
+                    let class_name = class_name.trim();
+                    for item in all_instance_members(
+                        class_name,
+                        doc,
+                        other_docs,
+                        ctx.find_class_doc,
+                        ctx.session.as_deref(),
+                    ) {
+                        if seen.insert(item.label.clone()) {
+                            items.push(item);
                         }
                     }
-                    if !items.is_empty() {
-                        return items;
-                    }
+                }
+                if !items.is_empty() {
+                    return items;
                 }
             }
             // Fallback: all methods from current doc
@@ -558,10 +555,7 @@ pub fn filtered_completions_at(
                         line: pos.line,
                         character: arrow_end_char,
                     };
-                    let type_map = whole_doc_type_map(ctx, doc, meta);
-                    if let Some(cls) =
-                        resolve_receiver_class(src, doc, arrow_pos, ctx.analysis, &type_map)
-                    {
+                    if let Some(cls) = resolve_receiver_class(src, doc, arrow_pos, ctx.analysis) {
                         let mut items = Vec::new();
                         let mut seen = std::collections::HashSet::new();
                         for class_name in cls.split('|') {

@@ -1,24 +1,19 @@
-use std::cell::OnceCell;
-
 use php_ast::{ClassMemberKind, NamespaceBody, Param, Stmt, StmtKind};
 use tower_lsp::lsp_types::Position;
 
 use crate::document::ast::{ParsedDoc, format_type_hint};
 use crate::text::{fqn_short_name, utf16_offset_to_byte};
-use crate::types::type_map::TypeMap;
 
 /// Resolve the class(es) of a named-argument call's receiver variable, for
-/// looking up the method's parameter signature. mir-primary: locate the
-/// receiver occurrence (`$recv->method(`) before the cursor and read mir's
-/// recorded type there; fall back to TypeMap for patterns mir does not yet
-/// resolve. Returns short class names, `|`-joined for unions.
+/// looking up the method's parameter signature. Locates the receiver
+/// occurrence (`$recv->method(`) before the cursor and reads mir's recorded
+/// type there. Returns short class names, `|`-joined for unions.
 fn resolve_method_receiver_class(
     source: &str,
     doc: &ParsedDoc,
     position: Position,
     receiver_var: &str,
     analysis: Option<&mir_analyzer::FileAnalysis>,
-    type_map_cell: &OnceCell<TypeMap>,
 ) -> Option<String> {
     if let Some(a) = analysis
         && let Some(offset) = receiver_var_offset(source, doc, position, receiver_var)
@@ -32,13 +27,10 @@ fn resolve_method_receiver_class(
             return Some(names.join("|"));
         }
     }
-    // TypeMap fallback — reuse the caller's OnceCell to avoid a second build.
-    let type_map = type_map_cell.get_or_init(|| TypeMap::from_doc_at_position(doc, None, position));
     if receiver_var == "$this" {
-        crate::types::type_map::enclosing_class_at(source, doc, position)
-    } else {
-        type_map.get(receiver_var).map(str::to_owned)
+        return crate::types::type_map::enclosing_class_at(source, doc, position);
     }
+    None
 }
 
 /// Byte offset of the last char of the `receiver_var` token in the nearest
@@ -237,7 +229,6 @@ pub(crate) fn named_arg_hover_value(
     callee: &NamedArgCallee,
     label: &str,
     analysis: Option<&mir_analyzer::FileAnalysis>,
-    type_map_cell: &OnceCell<TypeMap>,
 ) -> Option<String> {
     let all_docs = || std::iter::once(doc).chain(other_docs.iter().map(|(_, d)| d.as_ref()));
 
@@ -253,14 +244,8 @@ pub(crate) fn named_arg_hover_value(
             None
         }
         NamedArgCallee::Method(receiver_var, method_name) => {
-            let class_name = resolve_method_receiver_class(
-                source,
-                doc,
-                position,
-                receiver_var,
-                analysis,
-                type_map_cell,
-            )?;
+            let class_name =
+                resolve_method_receiver_class(source, doc, position, receiver_var, analysis)?;
             let first_class = class_name
                 .split('|')
                 .next()

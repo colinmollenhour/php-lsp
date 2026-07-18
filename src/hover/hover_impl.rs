@@ -1,4 +1,3 @@
-use std::cell::OnceCell;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Url};
@@ -9,7 +8,6 @@ use crate::lang::php_names::{is_php_builtin, php_doc_url};
 use crate::text::{fqn_short_name, word_at_position, word_range_at};
 use crate::types::resolve::{Declaration, resolve_declaration};
 use crate::types::symbol_map::{SymbolMap, is_hoverable_kind};
-use crate::types::type_map::TypeMap;
 
 use super::closures::closure_hover;
 use super::formatting::{declaration_signature, wrap_php};
@@ -240,24 +238,12 @@ fn hover_at_core(
         }
     }
 
-    let type_map_cell: OnceCell<TypeMap> = OnceCell::new();
-    let type_map =
-        || type_map_cell.get_or_init(|| TypeMap::from_doc_at_position(doc, None, position));
-
     if let Some(line_text) = source.lines().nth(position.line as usize)
         && !word.starts_with('$')
         && is_named_arg_at(line_text, position.character as usize, &word)
         && let Some(callee) = extract_named_arg_callee(line_text, position.character as usize)
-        && let Some(value) = named_arg_hover_value(
-            source,
-            doc,
-            other_docs,
-            position,
-            &callee,
-            &word,
-            analysis,
-            &type_map_cell,
-        )
+        && let Some(value) =
+            named_arg_hover_value(source, doc, other_docs, position, &callee, &word, analysis)
     {
         return Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
@@ -350,18 +336,8 @@ fn hover_at_core(
                 range: hover_range,
             });
         }
-        // 3. TypeMap fallback — only when mir has nothing (analysis absent or
-        //    `mixed`): `@var`/`@param` class hints, first-class callables when
-        //    analysis is unavailable.
-        if let Some(class_name) = type_map().get(&word) {
-            return Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: format!("`{word}` `{class_name}`"),
-                }),
-                range: hover_range,
-            });
-        }
+        // mir's -> / :: receiver-gap fix (mir 0.59) and alias-expansion fix
+        // cover what the old TypeMap fallback used to catch here.
     }
 
     // Property declaration hover: cursor on `$prop` inside a class body.
