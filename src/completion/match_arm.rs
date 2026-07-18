@@ -4,21 +4,18 @@ use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Position};
 
 use super::member::{line_byte_offset, receiver_class_at};
 use crate::document::ast::ParsedDoc;
-use crate::types::type_map::{TypeMap, enclosing_class_at, members_of_class};
+use crate::types::type_map::{enclosing_class_at, members_of_class};
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn match_arm_completions(
     source: &str,
     doc: &ParsedDoc,
     other_docs: &[Arc<ParsedDoc>],
     position: Position,
-    get_type_map: &dyn Fn() -> Arc<TypeMap>,
     analysis: Option<&mir_analyzer::FileAnalysis>,
 ) -> Option<Vec<CompletionItem>> {
     let start_line = position.line as usize;
     let end_line = start_line.saturating_sub(5);
     let all_lines: Vec<&str> = source.lines().collect();
-    let type_map_cell: std::cell::OnceCell<Arc<TypeMap>> = std::cell::OnceCell::new();
     for line_idx in (end_line..=start_line).rev() {
         let line = all_lines.get(line_idx).copied()?;
         if let Some(cap) = extract_match_subject(line) {
@@ -26,16 +23,10 @@ pub(super) fn match_arm_completions(
                 enclosing_class_at(source, doc, position)?
             } else {
                 // Resolve the match subject `$cap` via mir at its position on
-                // this line (`$cap` always appears on the matched line); fall
-                // back to TypeMap for types mir resolves to `mixed`.
+                // this line (`$cap` always appears on the matched line).
                 let subject_byte = line.find(&format!("${cap}"))?;
                 let var_offset = line_byte_offset(doc, line_idx as u32, subject_byte + 1);
-                analysis
-                    .and_then(|a| receiver_class_at(a, var_offset))
-                    .or_else(|| {
-                        let type_map = type_map_cell.get_or_init(get_type_map);
-                        type_map.get(&format!("${cap}")).map(str::to_owned)
-                    })?
+                analysis.and_then(|a| receiver_class_at(a, var_offset))?
             };
             let all_docs: Vec<&ParsedDoc> = std::iter::once(doc)
                 .chain(other_docs.iter().map(|d| d.as_ref()))

@@ -552,21 +552,6 @@ impl LanguageServer for Backend {
                     out
                 };
             let analysis = self.cached_analysis_async(uri).await;
-            // Cross-request TypeMap cache: rebuilt only when the document text
-            // (or PHPStorm meta) changes, instead of one full AST walk per
-            // completion request.
-            let docs_for_tm = Arc::clone(&self.docs);
-            let doc_for_tm = Arc::clone(&doc);
-            let uri_for_tm = uri.clone();
-            let meta_arc_for_tm = Arc::clone(&meta_arc);
-            let get_type_map = move || {
-                let meta = if meta_arc_for_tm.is_empty() {
-                    None
-                } else {
-                    Some(&*meta_arc_for_tm)
-                };
-                docs_for_tm.cached_type_map(&uri_for_tm, &doc_for_tm, meta)
-            };
             let session = self
                 .docs
                 .analysis_session(self.docs.workspace_php_version());
@@ -590,7 +575,6 @@ impl LanguageServer for Backend {
                     find_class_doc: Some(&find_class_doc_fn),
                     workspace_class_search: Some(&workspace_class_search_fn),
                     analysis: analysis.as_deref(),
-                    type_map: Some(&get_type_map),
                     session: Some(session),
                     laravel: Some(&laravel_arc),
                 };
@@ -733,7 +717,13 @@ impl LanguageServer for Backend {
             let uri_str = uri.to_string();
             let doc_clone = Arc::clone(&doc);
             let result = match tokio::task::spawn_blocking(move || {
-                signature_help(&source, &doc_clone, position, &all_indexes, analysis.as_deref())
+                signature_help(
+                    &source,
+                    &doc_clone,
+                    position,
+                    &all_indexes,
+                    analysis.as_deref(),
+                )
             })
             .await
             {

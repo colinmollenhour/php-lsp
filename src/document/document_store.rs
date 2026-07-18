@@ -1233,43 +1233,6 @@ impl DocumentStore {
     /// Cache hit when the entry's captured source `Arc` is pointer-equal to the
     /// file's current `doc.source_arc()`. A miss recomputes and overwrites, so
     /// the entry self-evicts on any content edit.
-    /// Build (or reuse) the whole-doc completion [`crate::types::type_map::TypeMap`]
-    /// for `uri`. Cache hit when the entry's captured source `Arc` is
-    /// pointer-equal to `doc.source_arc()` and the PHPStorm-meta pointer is
-    /// unchanged (meta lives behind `ArcSwap`, so its address is stable until
-    /// `.phpstorm.meta.php` is reloaded). A miss rebuilds and overwrites, so
-    /// the entry self-evicts on any content edit.
-    pub fn cached_type_map(
-        &self,
-        uri: &Url,
-        doc: &crate::document::ast::ParsedDoc,
-        meta: Option<&crate::lang::phpstorm_meta::PhpStormMeta>,
-    ) -> Arc<crate::types::type_map::TypeMap> {
-        let source = doc.source_arc();
-        let meta_key = meta.map_or(0usize, |m| std::ptr::from_ref(m) as usize);
-        if let Some(entry) = self.caches.type_map_cache.get(uri)
-            && Arc::ptr_eq(&entry.0, &source)
-            && entry.1 == meta_key
-        {
-            let map = Arc::clone(&entry.2);
-            drop(entry);
-            self.caches.touch(uri);
-            return map;
-        }
-        let map = Arc::new(crate::types::type_map::TypeMap::from_doc_with_meta(
-            doc, meta,
-        ));
-        self.caches.shed_stale(
-            &self.caches.type_map_cache,
-            crate::document::cache_registry::TYPE_MAP_CACHE_CAP,
-        );
-        self.caches.touch(uri);
-        self.caches
-            .type_map_cache
-            .insert(uri.clone(), (source, meta_key, Arc::clone(&map)));
-        map
-    }
-
     /// Cache-hit-only variant of [`Self::cached_analysis`]: returns the cached
     /// analysis when the entry is current for the file's text, never computes.
     /// Lets async handlers take the warm path synchronously and reserve

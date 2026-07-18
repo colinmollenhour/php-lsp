@@ -14,12 +14,10 @@ pub(crate) const PARSED_CACHE_CAP: usize = 2048;
 
 /// Upper bounds for the heavy per-file caches that otherwise grow with every
 /// distinct file touched across a session (`FileAnalysis` ~50 KiB, owned
-/// `Program` ~100 KiB, `TypeMap` varies). Entries self-evict on edit but
-/// never on file count, so multi-hour sessions accumulate them unboundedly
-/// without these caps.
+/// `Program` ~100 KiB). Entries self-evict on edit but never on file count,
+/// so multi-hour sessions accumulate them unboundedly without these caps.
 pub(crate) const ANALYSIS_CACHE_CAP: usize = 512;
 pub(crate) const OWNED_PROGRAM_CACHE_CAP: usize = 256;
-pub(crate) const TYPE_MAP_CACHE_CAP: usize = 512;
 
 /// All per-file caches owned by `DocumentStore`, grouped so eviction logic
 /// lives in one place. Adding a new cache only requires: add the field here,
@@ -41,9 +39,6 @@ pub(crate) struct CacheRegistry {
     pub(crate) parse_count: AtomicU64,
     /// Last-seen FileIndex per URI, used to detect declaration changes.
     pub(crate) decl_fingerprints: DashMap<Url, Arc<FileIndex>>,
-    /// Cross-request cache for the whole-doc TypeMap (completion).
-    pub(crate) type_map_cache:
-        DashMap<Url, (Arc<str>, usize, Arc<crate::types::type_map::TypeMap>)>,
     /// Owned-program cache: (source_arc, owned_program). Avoids repeating the
     /// deep arena clone in `cached_analysis` when `decl_version` bumps due to
     /// a sibling file's declaration change — the file's own source is unchanged,
@@ -74,7 +69,6 @@ impl CacheRegistry {
             decl_version: AtomicU64::new(0),
             parse_count: AtomicU64::new(0),
             decl_fingerprints: DashMap::new(),
-            type_map_cache: DashMap::new(),
             owned_program_cache: DashMap::new(),
             vendor_index_cache: DashMap::new(),
             access_tick: AtomicU64::new(0),
@@ -115,7 +109,6 @@ impl CacheRegistry {
         self.parsed_cache.remove(uri);
         self.analysis_cache.remove(uri);
         self.decl_fingerprints.remove(uri);
-        self.type_map_cache.remove(uri);
         self.owned_program_cache.remove(uri);
         self.vendor_index_cache.remove(uri);
         self.last_access.remove(uri);

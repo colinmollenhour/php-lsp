@@ -18,9 +18,9 @@ use crate::text::{fqn_short_name, split_params, utf16_offset_to_byte};
 /// is not defined in the current file. For method calls (`$obj->method()`),
 /// the receiver type is resolved so the correct class's method signature is
 /// returned even when multiple classes define a method with the same name —
-/// mir is tried first, with the pre-mir `TypeMap` walk as fallback for
-/// patterns mir doesn't yet resolve (matching the tiering already
-/// established in `completion/member.rs`/`hover/named_args.rs`).
+/// mir resolves the receiver directly, matching `completion/member.rs`/
+/// `hover/named_args.rs`. The `$this`/`self`/`static` branch still falls
+/// back to the AST-based `enclosing_class_at` when mir has no answer.
 pub fn signature_help(
     source: &str,
     doc: &ParsedDoc,
@@ -75,19 +75,13 @@ pub fn signature_help(
                             },
                         )
                     } else {
-                        // mir first; TypeMap fallback for patterns mir doesn't yet resolve.
-                        analysis
-                            .and_then(|a| {
-                                receiver_var_offset(source, doc, position, recv)
-                                    .and_then(|off| crate::types::type_query::type_at_offset(a, off))
-                                    .and_then(crate::types::type_query::primary_class_name)
-                            })
-                            .or_else(|| {
-                                let tm = crate::types::type_map::TypeMap::from_doc_at_position(
-                                    doc, None, position,
-                                );
-                                tm.get(recv).map(|s| s.to_string())
-                            })
+                        // mir's -> / :: receiver-gap fix (mir 0.59) resolves this
+                        // directly now; the old TypeMap fallback is no longer needed.
+                        analysis.and_then(|a| {
+                            receiver_var_offset(source, doc, position, recv)
+                                .and_then(|off| crate::types::type_query::type_at_offset(a, off))
+                                .and_then(crate::types::type_query::primary_class_name)
+                        })
                     }?;
                     find_method_params_in_hierarchy(&class_name, &func_name, ws_indexes)
                 } else {

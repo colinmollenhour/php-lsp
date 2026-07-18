@@ -44,7 +44,7 @@ use crate::hover::format_params_str;
 use crate::lang::docblock::find_docblock;
 use crate::lang::phpstorm_meta::PhpStormMeta;
 use crate::text::{camel_sort_key, utf16_offset_to_byte};
-use crate::types::type_map::{TypeMap, enclosing_class_at, params_of_function, params_of_method};
+use crate::types::type_map::{enclosing_class_at, params_of_function, params_of_method};
 use std::collections::HashMap;
 
 /// Build a `CompletionItem` for a callable (function or method).
@@ -233,12 +233,6 @@ pub struct CompletionCtx<'a> {
     /// (`$obj->`, match subjects) are read from its `symbol_at`; `None` in unit
     /// tests that don't supply it.
     pub analysis: Option<&'a mir_analyzer::FileAnalysis>,
-    /// Optional cross-request cache for the whole-doc [`TypeMap`]. The backend
-    /// wires this to `DocumentStore::cached_type_map` so the receiver-type
-    /// paths (`->`, `::`, match arms) reuse one map per document revision
-    /// instead of walking the full AST on every completion request. `None`
-    /// (unit tests) builds the map fresh.
-    pub type_map: Option<&'a dyn Fn() -> Arc<TypeMap>>,
     /// mir-analyzer session for querying phpstorm-stubs member info on
     /// built-in PHP classes. `None` in unit tests that don't require stubs.
     pub session: Option<std::sync::Arc<mir_analyzer::AnalysisSession>>,
@@ -247,18 +241,6 @@ pub struct CompletionCtx<'a> {
     /// arguments. `None` in unit tests that don't supply it, and inert
     /// (empty) for non-Laravel workspaces.
     pub laravel: Option<&'a crate::laravel::LaravelIndex>,
-}
-
-/// Whole-doc [`TypeMap`] through the ctx cache when wired, else a fresh build.
-fn whole_doc_type_map(
-    ctx: &CompletionCtx<'_>,
-    doc: &ParsedDoc,
-    meta: Option<&PhpStormMeta>,
-) -> Arc<TypeMap> {
-    match ctx.type_map {
-        Some(get) => get(),
-        None => Arc::new(TypeMap::from_doc_with_meta(doc, meta)),
-    }
 }
 
 /// Returns `true` when `cursor_byte` falls inside a PHP string literal or
@@ -386,7 +368,6 @@ pub fn filtered_completions_at(
             return vec![];
         }
     }
-    let meta = ctx.meta;
     let empty_imports = HashMap::new();
     let imports = ctx.file_imports.unwrap_or(&empty_imports);
 
@@ -721,14 +702,8 @@ pub fn filtered_completions_at(
 
             // Feature 7: match arm completions
             if let (Some(src), Some(pos)) = (source, position)
-                && let Some(match_items) = match_arm_completions(
-                    src,
-                    doc,
-                    other_docs,
-                    pos,
-                    &|| whole_doc_type_map(ctx, doc, meta),
-                    ctx.analysis,
-                )
+                && let Some(match_items) =
+                    match_arm_completions(src, doc, other_docs, pos, ctx.analysis)
                 && !match_items.is_empty()
             {
                 let mut all = match_items;
