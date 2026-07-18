@@ -324,9 +324,8 @@ fn hover_at_core(
             });
         }
         // 2. mir has a specific non-class type (e.g. a typed `Closure(string): int`
-        //    for a first-class callable, or a scalar). Prefer it over TypeMap,
-        //    whose inference for these is narrower (a bare `Closure`). Suppress
-        //    `mixed` since it means "unknown" and adds no information.
+        //    for a first-class callable, or a scalar). Suppress `mixed` since it
+        //    means "unknown" and adds no information.
         if let Some(ty) = mir_ty.filter(|ty| ty.to_string() != "mixed") {
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {

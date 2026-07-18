@@ -11,7 +11,6 @@ pub(crate) fn closure_hover(
     position: Position,
     word: &str,
 ) -> Option<String> {
-    // Compute cursor byte offset the same way TypeMap does.
     let line_starts = doc.line_starts();
     let line = position.line as usize;
     let line_start = *line_starts.get(line)? as usize;

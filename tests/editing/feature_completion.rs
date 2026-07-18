@@ -946,8 +946,7 @@ async fn completion_resolve_partial_docs_populates_detail() {
 }
 
 /// mir resolves the caught exception type for the catch variable so that
-/// member completion works on `$e->`. Guards that TypeMap catch handling
-/// is not load-bearing for this pattern.
+/// member completion works on `$e->`.
 #[tokio::test]
 async fn completion_catch_variable_type_resolved_by_mir() {
     let mut s = TestServer::new().await;

@@ -885,8 +885,8 @@ $u = new User('Alice', 30);
 }
 
 /// foreach with key => value: the implementation emits a type hint after the key
-/// variable when TypeMap knows its type. This test pins current behavior — if
-/// TypeMap cannot infer array key types the result is `<no hints>`.
+/// variable when mir knows its type. This test pins current behavior — if mir
+/// cannot infer array key types the result is `<no hints>`.
 #[tokio::test]
 async fn inlay_hints_foreach_key_value_type_hint() {
     let mut s = TestServer::new().await;
@@ -901,7 +901,7 @@ foreach ($users as $k => $user) {
 "#,
         )
         .await;
-    // TypeMap knows the value type from array_map but not the key type (int),
+    // mir knows the value type from array_map but not the key type (int),
     // so only the value variable gets a hint — not the key variable.
     expect!["3:30 : User [type]"].assert_eq(&out);
 }

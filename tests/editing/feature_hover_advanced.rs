@@ -550,7 +550,7 @@ greet(coun$0t: 3);
 }
 
 /// Named-arg hover where the receiver is `$this`. Resolves the enclosing class
-/// via `enclosing_class_at` (no TypeMap `$this` fallback needed).
+/// via `enclosing_class_at`, an AST-based lookup.
 #[tokio::test]
 async fn hover_named_arg_this_method_call() {
     let mut s = TestServer::new().await;

@@ -1210,7 +1210,7 @@ $p->stage('init')$0->run();
     .await;
 }
 
-/// Function call return type is now resolved and tracked in TypeMap.
+/// Function call return type is resolved via mir's recorded symbol type.
 #[tokio::test]
 async fn type_definition_function_call_return_type() {
     let mut s = TestServer::new().await;
