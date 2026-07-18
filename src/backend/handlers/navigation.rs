@@ -12,7 +12,7 @@ use crate::navigation::references::{
 };
 use crate::navigation::walk::collect_var_refs_in_scope;
 use crate::text::{fqn_short_name, utf16_code_units, word_at_position};
-use crate::types::type_map::{TypeMap, enclosing_class_at, enclosing_class_fqn_at};
+use crate::types::type_map::{enclosing_class_at, enclosing_class_fqn_at};
 
 use super::super::helpers::{
     class_name_at_construct_decl, promoted_property_at_cursor, range_within,
@@ -126,8 +126,12 @@ impl Backend {
                 let class_name = if receiver == "$this" {
                     enclosing_class_at(&source, &doc, position)
                 } else {
-                    let tm = TypeMap::from_doc_at_position(&doc, None, position);
-                    tm.get(&receiver).map(|s| s.to_string())
+                    let analysis = self.cached_analysis_async(uri).await;
+                    analysis.as_deref().and_then(|a| {
+                        let off = receiver_var_offset(&doc, line_text, position, &receiver)?;
+                        crate::types::type_query::type_at_offset(a, off)
+                            .and_then(crate::types::type_query::primary_class_name)
+                    })
                 };
                 if let Some(cls) = class_name {
                     let first_cls = cls.split('|').next().unwrap_or(&cls).to_owned();
@@ -812,4 +816,28 @@ fn resolve_parent_construct_class(
             })
             .map(|cls| cls.fqn.trim_start_matches('\\').to_owned())
     })
+}
+
+/// Byte offset of the last char of `receiver_var` in the nearest
+/// `receiver_var->` / `receiver_var?->` / `receiver_var::` occurrence before
+/// the cursor — a position inside mir's end-exclusive variable span. Mirrors
+/// `editing/signature_help.rs::receiver_var_offset`.
+fn receiver_var_offset(
+    doc: &crate::document::ast::ParsedDoc,
+    line_text: &str,
+    position: Position,
+    receiver_var: &str,
+) -> Option<u32> {
+    let cursor_byte = crate::text::utf16_offset_to_byte(line_text, position.character as usize)
+        .min(line_text.len());
+    let before = &line_text[..cursor_byte];
+    let p = before
+        .rfind(&format!("{receiver_var}?->"))
+        .or_else(|| before.rfind(&format!("{receiver_var}->")))
+        .or_else(|| before.rfind(&format!("{receiver_var}::")))?;
+    let line_start = doc.view().byte_of_position(Position {
+        line: position.line,
+        character: 0,
+    });
+    Some(line_start + (p + receiver_var.len()) as u32 - 1)
 }

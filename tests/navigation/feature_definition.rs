@@ -2066,10 +2066,10 @@ foreach ($items as $w) {
 
 /// `$x->getName()` where `$x`'s type comes from a bare `@var Alias $x` and
 /// `Alias` is a `@psalm-type` declared on a *free function's own* docblock
-/// (not a class). mir's `MethodCall` resolution leaves the alias unexpanded
-/// here (mir's alias expansion is intentionally class-scoped only), so this
-/// currently resolves through `backend/handlers/navigation.rs`'s `TypeMap`
-/// fallback instead — the one remaining production caller of `TypeMap`.
+/// (not a class) — mir's alias expansion is intentionally class-scoped only
+/// (unlike a bare variable hover on `$x`, which shows the unexpanded `Alias`
+/// name). Resolves via mir's `MethodCall` reference kind regardless, so this
+/// one is unaffected by removing `TypeMap` from the navigation fallback.
 #[tokio::test]
 async fn definition_receiver_free_function_psalm_type_alias() {
     let mut s = TestServer::new().await;
