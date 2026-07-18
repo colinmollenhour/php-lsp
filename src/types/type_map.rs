@@ -179,9 +179,8 @@ fn type_hint_to_class_string(
 ///
 /// PHP built-in iterable types whose sole purpose is to carry an element type
 /// (`list<T>`, `array<K,V>`, `iterable<K,V>`, `non-empty-list<T>`,
-/// `non-empty-array<K,V>`) are unwrapped and their element-type class names are
-/// returned instead — this enables the TypeMap fallback to propagate element
-/// types through `foreach` loops when the mir-primary path is unavailable.
+/// `non-empty-array<K,V>`) are unwrapped and their element-type class names
+/// are returned instead.
 fn docblock_class_parts(type_hint: &str) -> Vec<String> {
     type_hint
         .split('|')
@@ -452,19 +451,6 @@ fn collect_types_stmts(
             }
 
             StmtKind::Foreach(f) => {
-                // Propagate element type: if the iterable is a variable with a
-                // known TypeMap type (e.g. from `@var list<Widget> $items`), map
-                // the foreach value variable to that same type so completions
-                // work inside the loop body in the TypeMap fallback path.
-                if let ExprKind::Variable(arr_name) = &f.expr.kind
-                    && let ExprKind::Variable(val_name) = &f.value.kind
-                {
-                    let arr_key = format!("${}", arr_name.as_str());
-                    if let Some(elem_type) = map.get(&arr_key).cloned() {
-                        map.entry(format!("${}", val_name.as_str()))
-                            .or_insert(elem_type);
-                    }
-                }
                 collect_types_stmts(
                     source,
                     std::slice::from_ref(f.body),
@@ -1684,12 +1670,11 @@ mod tests {
         );
     }
 
-    // ── Gap 4: list<T> element type propagated through foreach ────────────────
+    // ── Gap 4: list<T>/array<K,V> element type extracted from @var ────────────
 
     #[test]
     fn list_var_annotation_maps_to_element_type() {
-        // `@var list<Widget> $items` — TypeMap should store "Widget" for $items
-        // so the foreach propagation step has a type to forward.
+        // `@var list<Widget> $items` — TypeMap should store "Widget" for $items.
         let src = "<?php\n/** @var list<Widget> $items */\n$items = get();";
         let doc = ParsedDoc::parse(src.to_string());
         let tm = TypeMap::from_doc(&doc);
@@ -1713,20 +1698,6 @@ mod tests {
             tm.get("$map"),
             Some("Widget"),
             "element type Widget should be extracted from array<Widget>"
-        );
-    }
-
-    #[test]
-    fn foreach_value_var_inherits_element_type() {
-        // `@var list<Widget> $items` followed by `foreach ($items as $w)` —
-        // TypeMap should map `$w` to "Widget" in the fallback path.
-        let src = "<?php\n/** @var list<Widget> $items */\n$items = get();\nforeach ($items as $w) { $w; }";
-        let doc = ParsedDoc::parse(src.to_string());
-        let tm = TypeMap::from_doc(&doc);
-        assert_eq!(
-            tm.get("$w"),
-            Some("Widget"),
-            "$w should inherit Widget element type inside foreach"
         );
     }
 
