@@ -258,8 +258,8 @@ fn bench_completion(c: &mut Criterion) {
         find_class_doc: None,
         workspace_class_search: None,
         analysis: None,
-        type_map: None,
         session: None,
+        laravel: None,
     };
 
     c.bench_function("completion/cross_file_arrow", |b| {
@@ -340,8 +340,8 @@ fn bench_completion_laravel(c: &mut Criterion) {
         find_class_doc: None,
         workspace_class_search: None,
         analysis: None,
-        type_map: None,
         session: None,
+        laravel: None,
     };
     group.bench_function("laravel_framework", |b| {
         b.iter(|| {
@@ -365,8 +365,8 @@ fn bench_completion_laravel(c: &mut Criterion) {
         find_class_doc: Some(&find_fn),
         workspace_class_search: None,
         analysis: None,
-        type_map: None,
         session: None,
+        laravel: None,
     };
     group.bench_function("laravel_framework_indexed", |b| {
         b.iter(|| {
@@ -375,36 +375,6 @@ fn bench_completion_laravel(c: &mut Criterion) {
                 &other_parsed,
                 Some(">"),
                 &ctx_indexed,
-            ))
-        });
-    });
-
-    // Warm TypeMap cache: models the server path, where the backend wires
-    // `DocumentStore::cached_type_map` so repeated completions on an unchanged
-    // document reuse one map instead of re-walking the full AST each request.
-    let warm_tm = Arc::new(php_lsp::type_map::TypeMap::from_doc_with_meta(
-        &ctrl_doc, None,
-    ));
-    let get_warm_tm = move || Arc::clone(&warm_tm);
-    let ctx_indexed_cached_tm = CompletionCtx {
-        source: Some(CONTROLLER),
-        position: Some(POS_ARROW),
-        meta: None,
-        doc_uri: None,
-        file_imports: None,
-        find_class_doc: Some(&find_fn),
-        workspace_class_search: None,
-        analysis: None,
-        type_map: Some(&get_warm_tm),
-        session: None,
-    };
-    group.bench_function("laravel_framework_indexed_cached_typemap", |b| {
-        b.iter(|| {
-            black_box(filtered_completions_at(
-                &ctrl_doc,
-                &other_parsed,
-                Some(">"),
-                &ctx_indexed_cached_tm,
             ))
         });
     });
@@ -427,8 +397,8 @@ fn bench_completion_laravel(c: &mut Criterion) {
         find_class_doc: None,
         workspace_class_search: None,
         analysis: None,
-        type_map: None,
         session: None,
+        laravel: None,
     };
     group.bench_function("laravel_builder_linear", |b| {
         b.iter(|| {
@@ -450,8 +420,8 @@ fn bench_completion_laravel(c: &mut Criterion) {
         find_class_doc: Some(&find_fn),
         workspace_class_search: None,
         analysis: None,
-        type_map: None,
         session: None,
+        laravel: None,
     };
     group.bench_function("laravel_builder_indexed", |b| {
         b.iter(|| {
