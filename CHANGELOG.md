@@ -2,6 +2,20 @@
 
 All notable changes to php-lsp are documented here.
 
+## [0.20.0] — 2026-07-19
+
+### Fixed
+
+- **Hover and match-arm completion now resolve members declared in unopened files (including `vendor/`)** via an O(1) workspace-index lookup, matching completion's existing fast path — previously only currently-open editor buffers were searched, so hover on an unopened class's method/property/constant silently fell back to a lower-fidelity path.
+
+### Changed
+
+- **The pre-mir `TypeMap` type-inference engine has been deleted entirely**: mir now resolves every `$var->`/`::` receiver that goto-definition needs (the last remaining caller), so the whole fallback — alias expansion, docblock element-type propagation, and its ~26 unit tests — is gone. One narrow edge case moves from silently-correct-by-luck to a known, documented gap: goto-definition through a free-function-scoped `@psalm-type` alias can pick the wrong same-named method when more than one class declares it, since mir's alias expansion is intentionally class-scoped only.
+
+### Dependencies
+
+- **mir updated to 0.60.0** (from 0.59.2): adds property-receiver narrowing for the `is_string`/`is_array`/`gettype`/`get_debug_type`/`get_class` family, `array_key_exists`/`in_array` narrowing, `class_implements`/`class_parents`/`get_parent_class` narrowing, `filter_var`/`is_countable`/`is_iterable` inference, and opaque-callback `array_map`/`array_reduce` return-type inference.
+
 ## [0.19.0] — 2026-07-18
 
 ### Added
